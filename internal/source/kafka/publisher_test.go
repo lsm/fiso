@@ -36,7 +36,7 @@ func TestNewPublisher_ValidConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer pub.Close()
+	defer func() { _ = pub.Close() }()
 }
 
 func TestPublisher_Close(t *testing.T) {

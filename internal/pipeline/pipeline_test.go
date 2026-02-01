@@ -316,7 +316,7 @@ func TestPipeline_DefaultEventType(t *testing.T) {
 		t.Fatal("expected 1 event")
 	}
 	var ce map[string]interface{}
-	json.Unmarshal(sk.received[0].event, &ce)
+	_ = json.Unmarshal(sk.received[0].event, &ce)
 	if ce["type"] != "fiso.event" {
 		t.Errorf("expected default type 'fiso.event', got %v", ce["type"])
 	}

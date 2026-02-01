@@ -67,7 +67,7 @@ func TestWASMInterceptor_SendsCorrectInput(t *testing.T) {
 		Headers:   map[string]string{"X-Test": "1"},
 		Direction: interceptor.Outbound,
 	}
-	ic.Process(context.Background(), req)
+	_, _ = ic.Process(context.Background(), req)
 
 	var input wasmInput
 	if err := json.Unmarshal(mr.lastInput, &input); err != nil {
@@ -115,7 +115,7 @@ func TestWASMInterceptor_InvalidOutput(t *testing.T) {
 func TestWASMInterceptor_Close(t *testing.T) {
 	mr := &mockRuntime{}
 	ic := New(mr, "test")
-	ic.Close()
+	_ = ic.Close()
 	if !mr.closed {
 		t.Error("expected runtime to be closed")
 	}

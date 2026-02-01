@@ -115,7 +115,7 @@ func TestFlowReconciler_MissingSourceType(t *testing.T) {
 	}
 
 	r := NewFlowReconciler(mc, nil)
-	r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "empty"})
+	_ = r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "empty"})
 	if mc.lastFlowStatus.Phase != "Error" {
 		t.Errorf("expected phase 'Error', got %q", mc.lastFlowStatus.Phase)
 	}
@@ -203,7 +203,7 @@ func TestLinkReconciler_MissingHost(t *testing.T) {
 	}
 
 	r := NewLinkReconciler(mc, nil)
-	r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "bad"})
+	_ = r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "bad"})
 	if mc.lastLinkStatus.Phase != "Error" {
 		t.Errorf("expected phase 'Error', got %q", mc.lastLinkStatus.Phase)
 	}
@@ -220,7 +220,7 @@ func TestLinkReconciler_InvalidProtocol(t *testing.T) {
 	}
 
 	r := NewLinkReconciler(mc, nil)
-	r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "bad"})
+	_ = r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "bad"})
 	if mc.lastLinkStatus.Phase != "Error" {
 		t.Errorf("expected phase 'Error', got %q", mc.lastLinkStatus.Phase)
 	}
@@ -266,7 +266,7 @@ func TestFlowReconciler_InvalidSinkType(t *testing.T) {
 	}
 
 	r := NewFlowReconciler(mc, nil)
-	r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "bad-sink"})
+	_ = r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "bad-sink"})
 	if mc.lastFlowStatus.Phase != "Error" {
 		t.Errorf("expected phase 'Error', got %q", mc.lastFlowStatus.Phase)
 	}
@@ -286,7 +286,7 @@ func TestFlowReconciler_MissingSinkType(t *testing.T) {
 	}
 
 	r := NewFlowReconciler(mc, nil)
-	r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "no-sink"})
+	_ = r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "no-sink"})
 	if mc.lastFlowStatus.Phase != "Error" {
 		t.Errorf("expected phase 'Error', got %q", mc.lastFlowStatus.Phase)
 	}
@@ -305,7 +305,7 @@ func TestLinkReconciler_MissingProtocol(t *testing.T) {
 	}
 
 	r := NewLinkReconciler(mc, nil)
-	r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "no-proto"})
+	_ = r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "no-proto"})
 	if mc.lastLinkStatus.Phase != "Error" {
 		t.Errorf("expected phase 'Error', got %q", mc.lastLinkStatus.Phase)
 	}

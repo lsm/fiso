@@ -126,7 +126,7 @@ func TestSource_StartCancelledContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately

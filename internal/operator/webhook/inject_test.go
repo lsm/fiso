@@ -44,7 +44,7 @@ func TestWebhook_InjectsWhenAnnotated(t *testing.T) {
 	}
 
 	var resp AdmissionReview
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 
 	if resp.Response == nil {
 		t.Fatal("expected response")
@@ -83,7 +83,7 @@ func TestWebhook_SkipsWithoutAnnotation(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	var resp AdmissionReview
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 
 	if resp.Response.PatchType != "" {
 		t.Error("expected no patch when annotation not present")
@@ -105,7 +105,7 @@ func TestWebhook_SkipsAlreadyInjected(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	var resp AdmissionReview
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 
 	if resp.Response.PatchType != "" {
 		t.Error("expected no patch when already injected")
@@ -185,7 +185,7 @@ func TestWebhook_PatchContainsSidecarConfig(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	var resp AdmissionReview
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 
 	if !strings.Contains(resp.Response.Patch, "custom/fiso-link:v2") {
 		t.Error("expected custom image in patch")
@@ -210,7 +210,7 @@ func TestWebhook_ResponseUID(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	var resp AdmissionReview
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 
 	if resp.Response.UID != "test-uid" {
 		t.Errorf("expected UID 'test-uid', got %q", resp.Response.UID)
@@ -232,7 +232,7 @@ func TestWebhook_EmptyContainersList(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	var resp AdmissionReview
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 
 	if resp.Response.Patch == "" {
 		t.Fatal("expected patch even with empty containers")
@@ -264,7 +264,7 @@ func TestWebhook_UnparseableObject(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	var resp AdmissionReview
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 
 	// Should allow but not patch
 	if !resp.Response.Allowed {
@@ -299,7 +299,7 @@ func TestWebhook_NilAnnotations(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	var resp AdmissionReview
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 
 	// No injection annotation means no patch
 	if resp.Response.PatchType != "" {

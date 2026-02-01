@@ -190,7 +190,7 @@ func TestNewSink_ValidConfig(t *testing.T) {
 	if s == nil {
 		t.Fatal("expected non-nil sink")
 	}
-	s.Close()
+	_ = s.Close()
 }
 
 func TestNewSink_TLSRequiresCredentials(t *testing.T) {
@@ -206,7 +206,7 @@ func TestNewSink_DefaultTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if s.timeout != 30e9 {
 		t.Errorf("expected default timeout 30s, got %v", s.timeout)
 	}
@@ -217,7 +217,7 @@ func TestNewSink_CustomTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if s.timeout != 5e9 {
 		t.Errorf("expected timeout 5s, got %v", s.timeout)
 	}

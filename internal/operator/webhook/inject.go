@@ -120,7 +120,10 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	review.Request = nil
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(review)
+	if err := json.NewEncoder(w).Encode(review); err != nil {
+		http.Error(w, fmt.Sprintf("encode error: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (h *WebhookHandler) handleAdmission(req *AdmissionRequest) *AdmissionResponse {

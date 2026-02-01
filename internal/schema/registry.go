@@ -123,7 +123,7 @@ func (r *ConfluentRegistry) fetch(ctx context.Context, url string) (*Schema, err
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

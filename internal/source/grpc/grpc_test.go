@@ -119,7 +119,7 @@ func TestSource_CloseAfterStart(t *testing.T) {
 	<-src.ready
 
 	// Close stops the server
-	src.Close()
+	_ = src.Close()
 	cancel()
 	<-errCh
 }

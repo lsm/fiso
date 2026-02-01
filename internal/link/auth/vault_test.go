@@ -77,13 +77,13 @@ func TestVaultProvider_CachesResults(t *testing.T) {
 		{TargetName: "svc", SecretPath: "secret/data/svc", Type: "Bearer"},
 	}, WithVaultClock(func() time.Time { return now }))
 
-	p.GetCredentials(context.Background(), "svc")
+	_, _ = p.GetCredentials(context.Background(), "svc")
 	if mc.calls != 1 {
 		t.Fatalf("expected 1 call, got %d", mc.calls)
 	}
 
 	// Second call should use cache
-	p.GetCredentials(context.Background(), "svc")
+	_, _ = p.GetCredentials(context.Background(), "svc")
 	if mc.calls != 1 {
 		t.Errorf("expected still 1 call (cached), got %d", mc.calls)
 	}
@@ -101,21 +101,21 @@ func TestVaultProvider_RefreshesAt80PercentTTL(t *testing.T) {
 		{TargetName: "svc", SecretPath: "secret/data/svc", Type: "Bearer"},
 	}, WithVaultClock(func() time.Time { return now }))
 
-	p.GetCredentials(context.Background(), "svc")
+	_, _ = p.GetCredentials(context.Background(), "svc")
 	if mc.calls != 1 {
 		t.Fatalf("expected 1 call, got %d", mc.calls)
 	}
 
 	// Advance to 79% TTL — still cached
 	now = now.Add(7*time.Minute + 54*time.Second) // 7.9min = 79% of 10min
-	p.GetCredentials(context.Background(), "svc")
+	_, _ = p.GetCredentials(context.Background(), "svc")
 	if mc.calls != 1 {
 		t.Errorf("expected still 1 call at 79%% TTL, got %d", mc.calls)
 	}
 
 	// Advance past 80% TTL — should refresh
 	now = now.Add(10 * time.Second) // now at ~8.07min = 80.7% of 10min
-	p.GetCredentials(context.Background(), "svc")
+	_, _ = p.GetCredentials(context.Background(), "svc")
 	if mc.calls != 2 {
 		t.Errorf("expected 2 calls after 80%% TTL, got %d", mc.calls)
 	}
@@ -222,18 +222,18 @@ func TestVaultProvider_DefaultTTL(t *testing.T) {
 		{TargetName: "svc", SecretPath: "secret/data/svc", Type: "Bearer"},
 	}, WithVaultClock(func() time.Time { return now }))
 
-	p.GetCredentials(context.Background(), "svc")
+	_, _ = p.GetCredentials(context.Background(), "svc")
 
 	// At 3 minutes (60% of 5min) — still cached
 	now = now.Add(3 * time.Minute)
-	p.GetCredentials(context.Background(), "svc")
+	_, _ = p.GetCredentials(context.Background(), "svc")
 	if mc.calls != 1 {
 		t.Errorf("expected 1 call at 60%% of default TTL, got %d", mc.calls)
 	}
 
 	// At 4.5 minutes (90% of 5min) — should refresh
 	now = now.Add(90 * time.Second)
-	p.GetCredentials(context.Background(), "svc")
+	_, _ = p.GetCredentials(context.Background(), "svc")
 	if mc.calls != 2 {
 		t.Errorf("expected 2 calls past 80%% of default TTL, got %d", mc.calls)
 	}

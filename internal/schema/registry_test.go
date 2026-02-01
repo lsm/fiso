@@ -16,7 +16,7 @@ func TestConfluentRegistry_GetByID(t *testing.T) {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(schema)
+		_ = json.NewEncoder(w).Encode(schema)
 	}))
 	defer srv.Close()
 
@@ -44,7 +44,7 @@ func TestConfluentRegistry_GetLatest(t *testing.T) {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(schema)
+		_ = json.NewEncoder(w).Encode(schema)
 	}))
 	defer srv.Close()
 
@@ -69,20 +69,20 @@ func TestConfluentRegistry_CachesResults(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
-		json.NewEncoder(w).Encode(Schema{ID: 1, Schema: `{}`})
+		_ = json.NewEncoder(w).Encode(Schema{ID: 1, Schema: `{}`})
 	}))
 	defer srv.Close()
 
 	reg, _ := NewConfluentRegistry(srv.URL)
 
 	// First call hits server
-	reg.GetByID(context.Background(), 1)
+	_, _ = reg.GetByID(context.Background(), 1)
 	if calls != 1 {
 		t.Fatalf("expected 1 server call, got %d", calls)
 	}
 
 	// Second call uses cache
-	reg.GetByID(context.Background(), 1)
+	_, _ = reg.GetByID(context.Background(), 1)
 	if calls != 1 {
 		t.Errorf("expected still 1 server call (cached), got %d", calls)
 	}
@@ -93,7 +93,7 @@ func TestConfluentRegistry_CacheExpires(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
-		json.NewEncoder(w).Encode(Schema{ID: 1, Schema: `{}`})
+		_ = json.NewEncoder(w).Encode(Schema{ID: 1, Schema: `{}`})
 	}))
 	defer srv.Close()
 
@@ -102,14 +102,14 @@ func TestConfluentRegistry_CacheExpires(t *testing.T) {
 		WithRegistryClock(func() time.Time { return now }),
 	)
 
-	reg.GetByID(context.Background(), 1)
+	_, _ = reg.GetByID(context.Background(), 1)
 	if calls != 1 {
 		t.Fatalf("expected 1 call, got %d", calls)
 	}
 
 	// Advance clock past TTL
 	now = now.Add(2 * time.Minute)
-	reg.GetByID(context.Background(), 1)
+	_, _ = reg.GetByID(context.Background(), 1)
 	if calls != 2 {
 		t.Errorf("expected 2 calls after TTL expiry, got %d", calls)
 	}
@@ -118,7 +118,7 @@ func TestConfluentRegistry_CacheExpires(t *testing.T) {
 func TestConfluentRegistry_ServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error"))
+		_, _ = w.Write([]byte("internal error"))
 	}))
 	defer srv.Close()
 
@@ -150,7 +150,7 @@ func TestWithHTTPClient(t *testing.T) {
 func TestConfluentRegistry_GetLatest_ServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	}))
 	defer srv.Close()
 
@@ -164,7 +164,7 @@ func TestConfluentRegistry_GetLatest_ServerError(t *testing.T) {
 func TestConfluentRegistry_InvalidJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("not json"))
+		_, _ = w.Write([]byte("not json"))
 	}))
 	defer srv.Close()
 
@@ -181,10 +181,10 @@ func TestConfluentRegistry_AcceptHeader(t *testing.T) {
 		if accept != "application/vnd.schemaregistry.v1+json" {
 			t.Errorf("unexpected Accept header: %s", accept)
 		}
-		json.NewEncoder(w).Encode(Schema{ID: 1})
+		_ = json.NewEncoder(w).Encode(Schema{ID: 1})
 	}))
 	defer srv.Close()
 
 	reg, _ := NewConfluentRegistry(srv.URL)
-	reg.GetByID(context.Background(), 1)
+	_, _ = reg.GetByID(context.Background(), 1)
 }
