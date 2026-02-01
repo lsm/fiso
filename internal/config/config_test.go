@@ -174,7 +174,9 @@ sink:
 `)
 
 	loader := NewLoader(dir, nil)
-	loader.Load()
+	if _, err := loader.Load(); err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
 
 	flows := loader.GetFlows()
 	if len(flows) != 1 {
@@ -201,7 +203,9 @@ sink:
 `)
 
 	loader := NewLoader(dir, nil)
-	loader.Load()
+	if _, err := loader.Load(); err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
 
 	changed := make(chan map[string]*FlowDefinition, 1)
 	loader.OnChange(func(flows map[string]*FlowDefinition) {
@@ -209,7 +213,11 @@ sink:
 	})
 
 	done := make(chan struct{})
-	go loader.Watch(done)
+	go func() {
+		if err := loader.Watch(done); err != nil {
+			t.Errorf("watch error: %v", err)
+		}
+	}()
 
 	// Give watcher time to start
 	time.Sleep(100 * time.Millisecond)

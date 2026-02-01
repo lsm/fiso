@@ -109,7 +109,9 @@ func (l *Loader) Watch(done <-chan struct{}) error {
 	if err != nil {
 		return fmt.Errorf("create watcher: %w", err)
 	}
-	defer watcher.Close()
+	defer func() {
+		_ = watcher.Close() // intentionally ignoring close error during cleanup
+	}()
 
 	if err := watcher.Add(l.dir); err != nil {
 		return fmt.Errorf("watch dir %s: %w", l.dir, err)

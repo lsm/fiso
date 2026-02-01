@@ -20,7 +20,9 @@ func TestHealthz_AlwaysOK(t *testing.T) {
 	}
 
 	var body map[string]string
-	json.NewDecoder(rec.Body).Decode(&body)
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
 	if body["status"] != "ok" {
 		t.Errorf("expected status ok, got %s", body["status"])
 	}
@@ -53,7 +55,9 @@ func TestReadyz_ReadyAfterSet(t *testing.T) {
 	}
 
 	var body map[string]string
-	json.NewDecoder(rec.Body).Decode(&body)
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
 	if body["status"] != "ready" {
 		t.Errorf("expected status ready, got %s", body["status"])
 	}
