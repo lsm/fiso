@@ -257,7 +257,7 @@ sink:
   config: {}
 `)
 	loader := NewLoader(dir, nil)
-	loader.Load()
+	_, _ = loader.Load()
 
 	done := make(chan struct{})
 	errCh := make(chan error, 1)
@@ -288,7 +288,7 @@ sink:
   config: {}
 `)
 	loader := NewLoader(dir, nil)
-	loader.Load()
+	_, _ = loader.Load()
 
 	changed := make(chan map[string]*FlowDefinition, 1)
 	loader.OnChange(func(flows map[string]*FlowDefinition) {
@@ -296,10 +296,10 @@ sink:
 	})
 
 	done := make(chan struct{})
-	go func() { loader.Watch(done) }()
+	go func() { _ = loader.Watch(done) }()
 	time.Sleep(100 * time.Millisecond)
 
-	os.Remove(filepath.Join(dir, "flow.yaml"))
+	_ = os.Remove(filepath.Join(dir, "flow.yaml"))
 
 	select {
 	case flows := <-changed:
@@ -323,7 +323,7 @@ func TestWatch_InvalidDir(t *testing.T) {
 func TestWatch_CreateEvent(t *testing.T) {
 	dir := t.TempDir()
 	loader := NewLoader(dir, nil)
-	loader.Load()
+	_, _ = loader.Load()
 
 	changed := make(chan map[string]*FlowDefinition, 1)
 	loader.OnChange(func(flows map[string]*FlowDefinition) {
@@ -331,7 +331,7 @@ func TestWatch_CreateEvent(t *testing.T) {
 	})
 
 	done := make(chan struct{})
-	go func() { loader.Watch(done) }()
+	go func() { _ = loader.Watch(done) }()
 	time.Sleep(100 * time.Millisecond)
 
 	// Create a new file

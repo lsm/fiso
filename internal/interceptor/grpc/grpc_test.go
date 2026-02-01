@@ -72,7 +72,7 @@ func TestInterceptor_SendsCorrectPayload(t *testing.T) {
 		Headers:   map[string]string{"X-Flow": "test"},
 		Direction: interceptor.Inbound,
 	}
-	ic.Process(context.Background(), req)
+	_, _ = ic.Process(context.Background(), req)
 
 	var sent requestPayload
 	if err := json.Unmarshal(mc.lastData, &sent); err != nil {
@@ -114,7 +114,7 @@ func TestInterceptor_InvalidResponse(t *testing.T) {
 func TestInterceptor_Close(t *testing.T) {
 	mc := &mockClient{}
 	ic := New(mc, 0) // test default timeout
-	ic.Close()
+	_ = ic.Close()
 	if !mc.closed {
 		t.Error("expected client to be closed")
 	}

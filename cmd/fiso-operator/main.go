@@ -85,8 +85,8 @@ func run() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	whServer.Shutdown(shutdownCtx)
-	healthServer.Shutdown(shutdownCtx)
+	_ = whServer.Shutdown(shutdownCtx)
+	_ = healthServer.Shutdown(shutdownCtx)
 
 	logger.Info("shutdown complete")
 	return nil
