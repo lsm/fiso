@@ -14,28 +14,31 @@ import (
 	"github.com/lsm/fiso/internal/link/auth"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	"github.com/lsm/fiso/internal/link/discovery"
+	"github.com/lsm/fiso/internal/link/ratelimit"
 	"github.com/lsm/fiso/internal/link/retry"
 )
 
 // Handler is the HTTP forward proxy for Fiso-Link.
 type Handler struct {
-	targets  *link.TargetStore
-	breakers map[string]*circuitbreaker.Breaker
-	auth     auth.Provider
-	resolver discovery.Resolver
-	metrics  *link.Metrics
-	client   *http.Client
-	logger   *slog.Logger
+	targets     *link.TargetStore
+	breakers    map[string]*circuitbreaker.Breaker
+	rateLimiter *ratelimit.Limiter
+	auth        auth.Provider
+	resolver    discovery.Resolver
+	metrics     *link.Metrics
+	client      *http.Client
+	logger      *slog.Logger
 }
 
 // Config configures the proxy handler.
 type Config struct {
-	Targets  *link.TargetStore
-	Breakers map[string]*circuitbreaker.Breaker
-	Auth     auth.Provider
-	Resolver discovery.Resolver
-	Metrics  *link.Metrics
-	Logger   *slog.Logger
+	Targets     *link.TargetStore
+	Breakers    map[string]*circuitbreaker.Breaker
+	RateLimiter *ratelimit.Limiter
+	Auth        auth.Provider
+	Resolver    discovery.Resolver
+	Metrics     *link.Metrics
+	Logger      *slog.Logger
 }
 
 // NewHandler creates a new HTTP proxy handler.
@@ -50,11 +53,12 @@ func NewHandler(cfg Config) *Handler {
 		cfg.Auth = &auth.NoopProvider{}
 	}
 	return &Handler{
-		targets:  cfg.Targets,
-		breakers: cfg.Breakers,
-		auth:     cfg.Auth,
-		resolver: cfg.Resolver,
-		metrics:  cfg.Metrics,
+		targets:     cfg.Targets,
+		breakers:    cfg.Breakers,
+		rateLimiter: cfg.RateLimiter,
+		auth:        cfg.Auth,
+		resolver:    cfg.Resolver,
+		metrics:     cfg.Metrics,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -103,6 +107,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "service unavailable (circuit open)", http.StatusServiceUnavailable)
 			return
 		}
+	}
+
+	// Check rate limit
+	if h.rateLimiter != nil && !h.rateLimiter.Allow(targetName) {
+		if h.metrics != nil {
+			h.metrics.RateLimitedTotal.WithLabelValues(targetName).Inc()
+		}
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
 	}
 
 	// Resolve host

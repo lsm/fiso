@@ -15,6 +15,7 @@ import (
 	"github.com/lsm/fiso/internal/link/auth"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	"github.com/lsm/fiso/internal/link/discovery"
+	"github.com/lsm/fiso/internal/link/ratelimit"
 )
 
 func setupProxy(t *testing.T, upstream *httptest.Server, targets []link.LinkTarget, breakers map[string]*circuitbreaker.Breaker, authProvider auth.Provider) *Handler {
@@ -421,6 +422,49 @@ func TestProxy_PathAllowExactMatch(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestProxy_RateLimited(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host},
+	})
+	reg := prometheus.NewRegistry()
+	rl := ratelimit.New()
+	rl.Set("svc", 1, 1) // 1 req/sec, burst 1
+
+	handler := NewHandler(Config{
+		Targets:     store,
+		Breakers:    make(map[string]*circuitbreaker.Breaker),
+		Auth:        &auth.NoopProvider{},
+		Resolver:    &discovery.StaticResolver{},
+		Metrics:     link.NewMetrics(reg),
+		RateLimiter: rl,
+	})
+
+	// First request — allowed
+	req := httptest.NewRequest("GET", "/link/svc/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	// Second request — rate limited
+	req = httptest.NewRequest("GET", "/link/svc/test", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", w.Code)
+	}
+	if w.Header().Get("Retry-After") != "1" {
+		t.Errorf("expected Retry-After: 1, got %s", w.Header().Get("Retry-After"))
 	}
 }
 

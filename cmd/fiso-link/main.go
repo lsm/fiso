@@ -19,6 +19,7 @@ import (
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	"github.com/lsm/fiso/internal/link/discovery"
 	"github.com/lsm/fiso/internal/link/proxy"
+	"github.com/lsm/fiso/internal/link/ratelimit"
 	"github.com/lsm/fiso/internal/observability"
 )
 
@@ -88,17 +89,26 @@ func run() error {
 		authProvider = &auth.NoopProvider{}
 	}
 
+	// Build rate limiter
+	rateLimiter := ratelimit.New()
+	for _, t := range cfg.Targets {
+		if t.RateLimit.RequestsPerSecond > 0 {
+			rateLimiter.Set(t.Name, t.RateLimit.RequestsPerSecond, t.RateLimit.Burst)
+		}
+	}
+
 	// Build target store
 	store := link.NewTargetStore(cfg.Targets)
 
 	// Build proxy handler
 	handler := proxy.NewHandler(proxy.Config{
-		Targets:  store,
-		Breakers: breakers,
-		Auth:     authProvider,
-		Resolver: discovery.NewDNSResolver(),
-		Metrics:  metrics,
-		Logger:   logger,
+		Targets:     store,
+		Breakers:    breakers,
+		RateLimiter: rateLimiter,
+		Auth:        authProvider,
+		Resolver:    discovery.NewDNSResolver(),
+		Metrics:     metrics,
+		Logger:      logger,
 	})
 
 	// Health server

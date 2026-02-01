@@ -78,13 +78,13 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 
 	for {
 		fetches := s.client.PollFetches(ctx)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
 
 		if errs := fetches.Errors(); len(errs) > 0 {
 			for _, err := range errs {
 				s.logger.Error("fetch error", "topic", err.Topic, "partition", err.Partition, "error", err.Err)
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
 			continue
 		}
@@ -112,6 +112,13 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 				s.logger.Error("commit error", "topic", record.Topic, "offset", record.Offset, "error", err)
 			}
 		})
+
+		// Check for cancellation after processing the batch, ensuring
+		// all records from the last fetch are fully drained before exit.
+		if ctx.Err() != nil {
+			s.logger.Info("kafka source draining complete", "topic", s.topic)
+			return ctx.Err()
+		}
 	}
 }
 

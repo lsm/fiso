@@ -1,13 +1,17 @@
 package link
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+var validProtocols = map[string]bool{"http": true, "https": true, "grpc": true}
 
 // LinkTarget defines an outbound target endpoint.
 type LinkTarget struct {
@@ -17,6 +21,7 @@ type LinkTarget struct {
 	Auth           AuthConfig           `yaml:"auth"`
 	CircuitBreaker CircuitBreakerConfig `yaml:"circuitBreaker"`
 	Retry          RetryConfig          `yaml:"retry"`
+	RateLimit      RateLimitConfig      `yaml:"rateLimit"`
 	AllowedPaths   []string             `yaml:"allowedPaths"`
 }
 
@@ -56,6 +61,12 @@ type RetryConfig struct {
 	Jitter          float64 `yaml:"jitter"`
 }
 
+// RateLimitConfig holds rate limiting settings.
+type RateLimitConfig struct {
+	RequestsPerSecond float64 `yaml:"requestsPerSecond"`
+	Burst             int     `yaml:"burst"`
+}
+
 // Config is the top-level Fiso-Link configuration.
 type Config struct {
 	ListenAddr   string       `yaml:"listenAddr"`
@@ -84,18 +95,67 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	for i, t := range cfg.Targets {
-		if t.Name == "" {
-			return nil, fmt.Errorf("target %d: name is required", i)
-		}
-		if t.Host == "" {
-			return nil, fmt.Errorf("target %q: host is required", t.Name)
-		}
 		if t.Protocol == "" {
 			cfg.Targets[i].Protocol = "https"
 		}
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validation: %w", err)
+	}
+
 	return &cfg, nil
+}
+
+// Validate checks the link Config for configuration errors.
+// Returns all errors found, not just the first.
+func (c *Config) Validate() error {
+	var errs []error
+
+	for i, t := range c.Targets {
+		prefix := fmt.Sprintf("target[%d] %q", i, t.Name)
+
+		if t.Name == "" {
+			errs = append(errs, fmt.Errorf("target[%d]: name is required", i))
+			continue
+		}
+		if t.Host == "" {
+			errs = append(errs, fmt.Errorf("%s: host is required", prefix))
+		}
+
+		if t.Protocol != "" && !validProtocols[t.Protocol] {
+			errs = append(errs, fmt.Errorf("%s: protocol %q is not valid (must be one of: http, https, grpc)", prefix, t.Protocol))
+		}
+
+		if t.CircuitBreaker.ResetTimeout != "" {
+			if _, err := time.ParseDuration(t.CircuitBreaker.ResetTimeout); err != nil {
+				errs = append(errs, fmt.Errorf("%s: circuitBreaker.resetTimeout %q is not a valid duration", prefix, t.CircuitBreaker.ResetTimeout))
+			}
+		}
+		if t.Retry.InitialInterval != "" {
+			if _, err := time.ParseDuration(t.Retry.InitialInterval); err != nil {
+				errs = append(errs, fmt.Errorf("%s: retry.initialInterval %q is not a valid duration", prefix, t.Retry.InitialInterval))
+			}
+		}
+		if t.Retry.MaxInterval != "" {
+			if _, err := time.ParseDuration(t.Retry.MaxInterval); err != nil {
+				errs = append(errs, fmt.Errorf("%s: retry.maxInterval %q is not a valid duration", prefix, t.Retry.MaxInterval))
+			}
+		}
+
+		if t.Retry.Jitter < 0 || t.Retry.Jitter > 1.0 {
+			errs = append(errs, fmt.Errorf("%s: retry.jitter must be between 0.0 and 1.0, got %f", prefix, t.Retry.Jitter))
+		}
+
+		if t.RateLimit.RequestsPerSecond < 0 {
+			errs = append(errs, fmt.Errorf("%s: rateLimit.requestsPerSecond must be >= 0", prefix))
+		}
+		if t.RateLimit.Burst < 0 {
+			errs = append(errs, fmt.Errorf("%s: rateLimit.burst must be >= 0", prefix))
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // TargetStore provides thread-safe access to link targets by name.

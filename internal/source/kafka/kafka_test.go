@@ -331,6 +331,52 @@ func TestSource_Close_Mock(t *testing.T) {
 	}
 }
 
+func TestSource_Start_DrainsAfterCancel(t *testing.T) {
+	mc := &mockConsumer{
+		fetches: kgo.Fetches{{
+			Topics: []kgo.FetchTopic{{
+				Topic: "test-topic",
+				Partitions: []kgo.FetchPartition{{
+					Partition: 0,
+					Records: []*kgo.Record{
+						{Key: []byte("k1"), Value: []byte("v1"), Topic: "test-topic", Offset: 0},
+						{Key: []byte("k2"), Value: []byte("v2"), Topic: "test-topic", Offset: 1},
+						{Key: []byte("k3"), Value: []byte("v3"), Topic: "test-topic", Offset: 2},
+					},
+				}},
+			}},
+		}},
+	}
+
+	s := &Source{client: mc, topic: "test-topic", logger: slog.Default()}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var count atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		_ = s.Start(ctx, func(_ context.Context, _ source.Event) error {
+			n := count.Add(1)
+			// Cancel after first record — remaining records in the batch should still be processed
+			if n == 1 {
+				cancel()
+			}
+			return nil
+		})
+		close(done)
+	}()
+	<-done
+
+	// All 3 records from the batch should be processed despite cancellation after the first
+	if count.Load() != 3 {
+		t.Errorf("expected all 3 records to be drained, got %d", count.Load())
+	}
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	if len(mc.committed) != 3 {
+		t.Errorf("expected 3 commits after drain, got %d", len(mc.committed))
+	}
+}
+
 func TestSource_Start_MultipleRecords(t *testing.T) {
 	mc := &mockConsumer{
 		fetches: kgo.Fetches{{

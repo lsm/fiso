@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,6 +11,39 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"gopkg.in/yaml.v3"
 )
+
+var (
+	validSourceTypes = map[string]bool{"kafka": true, "grpc": true}
+	validSinkTypes   = map[string]bool{"http": true, "grpc": true, "temporal": true}
+)
+
+// Validate checks the FlowDefinition for configuration errors.
+// Returns all errors found, not just the first.
+func (f *FlowDefinition) Validate() error {
+	var errs []error
+
+	if f.Name == "" {
+		errs = append(errs, fmt.Errorf("name is required"))
+	}
+
+	if f.Source.Type == "" {
+		errs = append(errs, fmt.Errorf("source.type is required"))
+	} else if !validSourceTypes[f.Source.Type] {
+		errs = append(errs, fmt.Errorf("source.type %q is not valid (must be one of: kafka, grpc)", f.Source.Type))
+	}
+
+	if f.Sink.Type == "" {
+		errs = append(errs, fmt.Errorf("sink.type is required"))
+	} else if !validSinkTypes[f.Sink.Type] {
+		errs = append(errs, fmt.Errorf("sink.type %q is not valid (must be one of: http, grpc, temporal)", f.Sink.Type))
+	}
+
+	if f.ErrorHandling.MaxRetries < 0 {
+		errs = append(errs, fmt.Errorf("errorHandling.maxRetries must be >= 0, got %d", f.ErrorHandling.MaxRetries))
+	}
+
+	return errors.Join(errs...)
+}
 
 // FlowDefinition represents a complete inbound pipeline configuration.
 type FlowDefinition struct {
@@ -170,8 +204,8 @@ func (l *Loader) loadFile(path string) (*FlowDefinition, error) {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 
-	if flow.Name == "" {
-		return nil, fmt.Errorf("flow definition missing 'name' field in %s", path)
+	if err := flow.Validate(); err != nil {
+		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
 
 	return &flow, nil

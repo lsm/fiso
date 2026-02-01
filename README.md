@@ -234,6 +234,8 @@ asyncBrokers:
 | `FISO_WEBHOOK_ADDR` | `:8443` | Mutating webhook server address |
 | `FISO_HEALTH_ADDR` | `:9090` | Health check server address |
 | `FISO_LINK_IMAGE` | `ghcr.io/lsm/fiso-link:latest` | Sidecar container image |
+| `FISO_TLS_CERT_FILE` | `/etc/fiso/tls/tls.crt` | TLS certificate for webhook server |
+| `FISO_TLS_KEY_FILE` | `/etc/fiso/tls/tls.key` | TLS private key for webhook server |
 
 ## Observability
 

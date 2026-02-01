@@ -1,4 +1,4 @@
-.PHONY: build build-link build-operator build-all test lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all compose-up compose-down
+.PHONY: build build-link build-operator build-all test test-integration lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all compose-up compose-down
 
 MODULE := github.com/lsm/fiso
 IMAGE_REPO ?= ghcr.io/lsm
@@ -17,6 +17,9 @@ build-all: build build-link build-operator
 
 test:
 	go test -race -coverprofile=coverage.out ./...
+
+test-integration:
+	go test -tags integration -race -timeout 120s ./test/integration/...
 
 coverage-check: test
 	@COVERAGE=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | tr -d '%'); \

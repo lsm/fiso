@@ -12,6 +12,7 @@ type Metrics struct {
 	CircuitState     *prometheus.GaugeVec
 	RetriesTotal     *prometheus.CounterVec
 	AuthRefreshTotal *prometheus.CounterVec
+	RateLimitedTotal *prometheus.CounterVec
 }
 
 // NewMetrics registers and returns Fiso-Link metrics.
@@ -39,5 +40,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "fiso_link_auth_refresh_total",
 			Help: "Total auth credential refreshes.",
 		}, []string{"target", "status"}),
+		RateLimitedTotal: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "fiso_link_rate_limited_total",
+			Help: "Total requests rejected by rate limiting.",
+		}, []string{"target"}),
 	}
 }

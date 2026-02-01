@@ -117,6 +117,10 @@ func run() error {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
+
+	if err := p.Shutdown(shutdownCtx); err != nil {
+		logger.Error("pipeline shutdown error", "error", err)
+	}
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("http server shutdown error", "error", err)
 	}

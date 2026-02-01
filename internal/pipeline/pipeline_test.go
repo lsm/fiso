@@ -3,7 +3,9 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,7 +17,8 @@ import (
 // --- Mocks ---
 
 type mockSource struct {
-	events []source.Event
+	events   []source.Event
+	closeErr error
 }
 
 func (m *mockSource) Start(ctx context.Context, handler func(context.Context, source.Event) error) error {
@@ -33,7 +36,7 @@ func (m *mockSource) Start(ctx context.Context, handler func(context.Context, so
 	return ctx.Err()
 }
 
-func (m *mockSource) Close() error { return nil }
+func (m *mockSource) Close() error { return m.closeErr }
 
 type mockTransformer struct {
 	fn func(ctx context.Context, input []byte) ([]byte, error)
@@ -47,6 +50,7 @@ type mockSink struct {
 	mu       sync.Mutex
 	received []sinkMessage
 	err      error
+	closeErr error
 }
 
 type sinkMessage struct {
@@ -64,7 +68,7 @@ func (m *mockSink) Deliver(_ context.Context, event []byte, headers map[string]s
 	return nil
 }
 
-func (m *mockSink) Close() error { return nil }
+func (m *mockSink) Close() error { return m.closeErr }
 
 func (m *mockSink) count() int {
 	m.mu.Lock()
@@ -76,6 +80,7 @@ type mockPublisher struct {
 	mu        sync.Mutex
 	published []dlqMessage
 	err       error
+	closeErr  error
 }
 
 type dlqMessage struct {
@@ -95,7 +100,9 @@ func (m *mockPublisher) Publish(_ context.Context, topic string, key, value []by
 	return nil
 }
 
-func (m *mockPublisher) Close() error { return nil }
+func (m *mockPublisher) Close() error { return m.closeErr }
+
+var _ dlq.Publisher = (*mockPublisher)(nil)
 
 func (m *mockPublisher) count() int {
 	m.mu.Lock()
@@ -351,5 +358,44 @@ func TestPipeline_MultipleEvents(t *testing.T) {
 
 	if sk.count() != 10 {
 		t.Fatalf("expected 10 delivered events, got %d", sk.count())
+	}
+}
+
+func TestPipeline_Shutdown_ClosesAll(t *testing.T) {
+	src := &mockSource{}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler)
+
+	err := p.Shutdown(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPipeline_Shutdown_PropagatesErrors(t *testing.T) {
+	src := &mockSource{closeErr: errors.New("source close failed")}
+	sk := &mockSink{closeErr: errors.New("sink close failed")}
+	pub := &mockPublisher{closeErr: errors.New("dlq close failed")}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler)
+
+	err := p.Shutdown(context.Background())
+	if err == nil {
+		t.Fatal("expected error from shutdown")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "source close failed") {
+		t.Errorf("expected source close error, got %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "sink close failed") {
+		t.Errorf("expected sink close error, got %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "dlq close failed") {
+		t.Errorf("expected dlq close error, got %s", errMsg)
 	}
 }

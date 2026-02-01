@@ -3,6 +3,7 @@ package link
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -141,6 +142,116 @@ func TestLoadConfig_NonexistentFile(t *testing.T) {
 	_, err := LoadConfig("/nonexistent/config.yaml")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantErr string
+	}{
+		{
+			name: "valid config",
+			cfg:  Config{Targets: []LinkTarget{{Name: "svc", Host: "api.example.com", Protocol: "https"}}},
+		},
+		{
+			name:    "missing name",
+			cfg:     Config{Targets: []LinkTarget{{Host: "api.example.com"}}},
+			wantErr: "name is required",
+		},
+		{
+			name:    "missing host",
+			cfg:     Config{Targets: []LinkTarget{{Name: "svc", Protocol: "https"}}},
+			wantErr: "host is required",
+		},
+		{
+			name:    "invalid protocol",
+			cfg:     Config{Targets: []LinkTarget{{Name: "svc", Host: "api.example.com", Protocol: "ftp"}}},
+			wantErr: "protocol \"ftp\" is not valid",
+		},
+		{
+			name: "invalid reset timeout",
+			cfg: Config{Targets: []LinkTarget{{
+				Name: "svc", Host: "api.example.com",
+				CircuitBreaker: CircuitBreakerConfig{ResetTimeout: "not-a-duration"},
+			}}},
+			wantErr: "resetTimeout",
+		},
+		{
+			name: "invalid initial interval",
+			cfg: Config{Targets: []LinkTarget{{
+				Name: "svc", Host: "api.example.com",
+				Retry: RetryConfig{InitialInterval: "bad"},
+			}}},
+			wantErr: "initialInterval",
+		},
+		{
+			name: "invalid max interval",
+			cfg: Config{Targets: []LinkTarget{{
+				Name: "svc", Host: "api.example.com",
+				Retry: RetryConfig{MaxInterval: "bad"},
+			}}},
+			wantErr: "maxInterval",
+		},
+		{
+			name: "jitter too high",
+			cfg: Config{Targets: []LinkTarget{{
+				Name: "svc", Host: "api.example.com",
+				Retry: RetryConfig{Jitter: 1.5},
+			}}},
+			wantErr: "jitter must be between",
+		},
+		{
+			name: "negative jitter",
+			cfg: Config{Targets: []LinkTarget{{
+				Name: "svc", Host: "api.example.com",
+				Retry: RetryConfig{Jitter: -0.1},
+			}}},
+			wantErr: "jitter must be between",
+		},
+		{
+			name: "negative rate limit",
+			cfg: Config{Targets: []LinkTarget{{
+				Name: "svc", Host: "api.example.com",
+				RateLimit: RateLimitConfig{RequestsPerSecond: -1},
+			}}},
+			wantErr: "requestsPerSecond must be >= 0",
+		},
+		{
+			name: "negative burst",
+			cfg: Config{Targets: []LinkTarget{{
+				Name: "svc", Host: "api.example.com",
+				RateLimit: RateLimitConfig{Burst: -1},
+			}}},
+			wantErr: "burst must be >= 0",
+		},
+		{
+			name: "valid durations",
+			cfg: Config{Targets: []LinkTarget{{
+				Name: "svc", Host: "api.example.com",
+				CircuitBreaker: CircuitBreakerConfig{ResetTimeout: "30s"},
+				Retry:          RetryConfig{InitialInterval: "200ms", MaxInterval: "30s", Jitter: 0.2},
+			}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }
 

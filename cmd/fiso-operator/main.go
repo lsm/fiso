@@ -35,6 +35,15 @@ func run() error {
 		healthAddr = ":9090"
 	}
 
+	tlsCertFile := os.Getenv("FISO_TLS_CERT_FILE")
+	if tlsCertFile == "" {
+		tlsCertFile = "/etc/fiso/tls/tls.crt"
+	}
+	tlsKeyFile := os.Getenv("FISO_TLS_KEY_FILE")
+	if tlsKeyFile == "" {
+		tlsKeyFile = "/etc/fiso/tls/tls.key"
+	}
+
 	// Setup sidecar injection webhook
 	sidecarCfg := webhook.DefaultSidecarConfig()
 	if img := os.Getenv("FISO_LINK_IMAGE"); img != "" {
@@ -59,9 +68,16 @@ func run() error {
 
 	// Start servers
 	go func() {
-		logger.Info("webhook server starting", "addr", webhookAddr)
-		if err := whServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("webhook server error", "error", err)
+		if _, err := os.Stat(tlsCertFile); err == nil {
+			logger.Info("webhook server starting with TLS", "addr", webhookAddr, "cert", tlsCertFile)
+			if err := whServer.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil && err != http.ErrServerClosed {
+				logger.Error("webhook server error", "error", err)
+			}
+		} else {
+			logger.Warn("TLS cert not found, starting webhook without TLS (local dev only)", "cert", tlsCertFile)
+			if err := whServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("webhook server error", "error", err)
+			}
 		}
 	}()
 

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -368,6 +369,92 @@ func TestOnChange_Callback(t *testing.T) {
 	// OnChange just registers the callback; verify it's set
 	if called {
 		t.Error("callback should not be called yet")
+	}
+}
+
+func TestFlowDefinition_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		flow    FlowDefinition
+		wantErr string
+	}{
+		{
+			name: "valid flow",
+			flow: FlowDefinition{
+				Name:   "test",
+				Source: SourceConfig{Type: "kafka"},
+				Sink:   SinkConfig{Type: "http"},
+			},
+		},
+		{
+			name:    "missing name",
+			flow:    FlowDefinition{Source: SourceConfig{Type: "kafka"}, Sink: SinkConfig{Type: "http"}},
+			wantErr: "name is required",
+		},
+		{
+			name:    "missing source type",
+			flow:    FlowDefinition{Name: "t", Sink: SinkConfig{Type: "http"}},
+			wantErr: "source.type is required",
+		},
+		{
+			name:    "invalid source type",
+			flow:    FlowDefinition{Name: "t", Source: SourceConfig{Type: "redis"}, Sink: SinkConfig{Type: "http"}},
+			wantErr: "source.type \"redis\" is not valid",
+		},
+		{
+			name:    "missing sink type",
+			flow:    FlowDefinition{Name: "t", Source: SourceConfig{Type: "kafka"}},
+			wantErr: "sink.type is required",
+		},
+		{
+			name:    "invalid sink type",
+			flow:    FlowDefinition{Name: "t", Source: SourceConfig{Type: "kafka"}, Sink: SinkConfig{Type: "redis"}},
+			wantErr: "sink.type \"redis\" is not valid",
+		},
+		{
+			name: "valid grpc source with temporal sink",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "grpc"},
+				Sink:   SinkConfig{Type: "temporal"},
+			},
+		},
+		{
+			name: "negative maxRetries",
+			flow: FlowDefinition{
+				Name:          "t",
+				Source:        SourceConfig{Type: "kafka"},
+				Sink:          SinkConfig{Type: "http"},
+				ErrorHandling: ErrorHandlingConfig{MaxRetries: -1},
+			},
+			wantErr: "maxRetries must be >= 0",
+		},
+		{
+			name: "multiple errors",
+			flow: FlowDefinition{
+				Source: SourceConfig{Type: "invalid"},
+				Sink:   SinkConfig{Type: "invalid"},
+			},
+			wantErr: "name is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.flow.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }
 

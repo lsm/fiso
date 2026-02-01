@@ -2,7 +2,9 @@ package pipeline
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -11,8 +13,6 @@ import (
 	"github.com/lsm/fiso/internal/sink"
 	"github.com/lsm/fiso/internal/source"
 	"github.com/lsm/fiso/internal/transform"
-
-	"crypto/rand"
 )
 
 // Config holds pipeline configuration.
@@ -124,6 +124,30 @@ func (p *Pipeline) sendToDLQ(ctx context.Context, evt source.Event, code, messag
 			"error", err,
 		)
 	}
+}
+
+// Shutdown performs graceful shutdown of the pipeline components.
+// Closes source, sink, and DLQ in order. Returns all errors joined.
+func (p *Pipeline) Shutdown(ctx context.Context) error {
+	p.logger.Info("shutting down pipeline", "flow", p.config.FlowName)
+
+	var errs []error
+
+	if err := p.source.Close(); err != nil {
+		p.logger.Error("source close error", "flow", p.config.FlowName, "error", err)
+		errs = append(errs, fmt.Errorf("source close: %w", err))
+	}
+	if err := p.sink.Close(); err != nil {
+		p.logger.Error("sink close error", "flow", p.config.FlowName, "error", err)
+		errs = append(errs, fmt.Errorf("sink close: %w", err))
+	}
+	if err := p.dlq.Close(); err != nil {
+		p.logger.Error("dlq close error", "flow", p.config.FlowName, "error", err)
+		errs = append(errs, fmt.Errorf("dlq close: %w", err))
+	}
+
+	p.logger.Info("pipeline shutdown complete", "flow", p.config.FlowName)
+	return errors.Join(errs...)
 }
 
 func generateID() string {
