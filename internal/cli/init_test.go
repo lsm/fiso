@@ -13,8 +13,10 @@ func TestRunInit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(orig)
-	os.Chdir(dir)
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := RunInit(nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -24,8 +26,8 @@ func TestRunInit(t *testing.T) {
 	assertFileExists(t, filepath.Join(dir, "fiso", "docker-compose.yml"))
 	assertFileExists(t, filepath.Join(dir, "fiso", "prometheus.yml"))
 
-	// Flows at project root
-	assertFileExists(t, filepath.Join(dir, "flows", "example-flow.yaml"))
+	// Flows under fiso/
+	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "example-flow.yaml"))
 
 	// Gitignore at project root
 	assertFileExists(t, filepath.Join(dir, ".gitignore"))
@@ -41,8 +43,8 @@ func TestRunInit(t *testing.T) {
 	if !strings.Contains(content, "fiso-flow") {
 		t.Error("docker-compose.yml should reference fiso-flow")
 	}
-	if !strings.Contains(content, "../flows") {
-		t.Error("docker-compose.yml should mount ../flows (relative to fiso/ dir)")
+	if !strings.Contains(content, "./flows") {
+		t.Error("docker-compose.yml should mount ./flows (relative to fiso/ dir)")
 	}
 }
 
@@ -58,14 +60,16 @@ func TestRunInit_SampleFlowContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(orig)
-	os.Chdir(dir)
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := RunInit(nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "flows", "example-flow.yaml"))
+	data, err := os.ReadFile(filepath.Join(dir, "fiso", "flows", "example-flow.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,11 +88,15 @@ func TestRunInit_SkipsExistingGitignore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(orig)
-	os.Chdir(dir)
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
 
 	// Pre-create a .gitignore
-	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("custom\n"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("custom\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := RunInit(nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)

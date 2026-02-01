@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ func RunInit(args []string) error {
 	}
 
 	fisoDir := "fiso"
-	flowsDir := "flows"
+	flowsDir := filepath.Join(fisoDir, "flows")
 
 	if err := os.MkdirAll(fisoDir, 0755); err != nil {
 		return fmt.Errorf("create fiso directory: %w", err)
@@ -51,8 +52,8 @@ func RunInit(args []string) error {
 
 	fmt.Println("Fiso initialized.")
 	fmt.Println("")
-	fmt.Println("  fiso/                 Fiso runtime (docker-compose, prometheus)")
-	fmt.Println("  flows/                Your pipeline definitions")
+	fmt.Println("  fiso/                 Fiso environment (docker-compose, prometheus)")
+	fmt.Println("  fiso/flows/           Your pipeline definitions")
 	fmt.Println("")
 	fmt.Println("Next steps:")
 	fmt.Println("  fiso dev              Start local development environment")
@@ -72,15 +73,14 @@ func writeTemplate(dir, filename, tmplPath string, data interface{}) error {
 		return fmt.Errorf("parse template %s: %w", tmplPath, err)
 	}
 
-	outPath := filepath.Join(dir, filename)
-	f, err := os.Create(outPath)
-	if err != nil {
-		return fmt.Errorf("create %s: %w", outPath, err)
-	}
-	defer f.Close()
-
-	if err := tmpl.Execute(f, data); err != nil {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
 		return fmt.Errorf("execute template %s: %w", tmplPath, err)
+	}
+
+	outPath := filepath.Join(dir, filename)
+	if err := os.WriteFile(outPath, buf.Bytes(), 0644); err != nil {
+		return fmt.Errorf("write %s: %w", outPath, err)
 	}
 
 	return nil

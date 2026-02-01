@@ -20,7 +20,9 @@ jobs:
           go-version: "1.25"
 
       - name: Run tests
-        run: go test -race -coverprofile=coverage.out $(go list ./... | grep -v /cmd/)
+        run: |
+          go test -race ./internal/cli/...
+          go test -race -coverprofile=coverage.out $(go list ./... | grep -v /cmd/ | grep -v /internal/cli)
 
       - name: Check coverage
         run: |
@@ -100,6 +102,7 @@ jobs:
           go build -o bin/fiso-flow ./cmd/fiso-flow
           go build -o bin/fiso-link ./cmd/fiso-link
           go build -o bin/fiso-operator ./cmd/fiso-operator
+          go build -o bin/fiso ./cmd/fiso
 
   integration:
     runs-on: ubuntu-latest

@@ -20,7 +20,7 @@ func RunValidate(args []string) error {
 		return nil
 	}
 
-	dir := "./flows"
+	dir := "./fiso/flows"
 	if len(args) > 0 && args[0] != "" {
 		dir = args[0]
 	}

@@ -94,11 +94,15 @@ func TestRunValidate_DefaultPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(orig)
-	os.Chdir(dir)
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
 
-	os.MkdirAll(filepath.Join(dir, "flows"), 0755)
-	writeTestFile(t, filepath.Join(dir, "flows"), "good.yaml", `
+	if err := os.MkdirAll(filepath.Join(dir, "fiso", "flows"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "fiso", "flows"), "good.yaml", `
 name: test
 source:
   type: kafka
