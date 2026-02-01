@@ -1,0 +1,46 @@
+# Example: application Pod with fiso-link sidecar injection.
+# The fiso-operator's mutating webhook automatically injects the
+# fiso-link sidecar container when the annotation is present.
+#
+# Usage:
+#   1. Install CRDs:  kubectl apply -f deploy/crds/
+#   2. Deploy operator: (see fiso-operator deployment)
+#   3. Apply this Pod: kubectl apply -f deploy/examples/link-sidecar.yaml
+#
+# The application can then call external services through the local proxy:
+#   curl http://localhost:3500/link/crm/api/v2/contacts
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-app
+  annotations:
+    fiso.io/inject: "true"
+  labels:
+    app: my-app
+spec:
+  containers:
+    - name: app
+      image: curlimages/curl:latest
+      command: ["sh", "-c", "while true; do sleep 3600; done"]
+      # Example: call an external API through fiso-link sidecar
+      # curl http://localhost:3500/link/crm/api/v2/contacts
+---
+# LinkTarget CR that the injected sidecar will use for routing.
+apiVersion: fiso.io/v1alpha1
+kind: LinkTarget
+metadata:
+  name: crm
+spec:
+  protocol: https
+  host: api.salesforce.com
+  auth:
+    type: Bearer
+    secretName: crm-token
+  circuitBreaker:
+    failureThreshold: 5
+    resetTimeout: "30s"
+  retry:
+    maxAttempts: 3
+    backoff: exponential
+  allowedPaths:
+    - /api/v2/**

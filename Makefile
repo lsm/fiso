@@ -1,6 +1,8 @@
-.PHONY: build build-link build-operator build-all test lint clean docker coverage-check fmt-check mod-check vulncheck checks
+.PHONY: build build-link build-operator build-all test lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all compose-up compose-down
 
 MODULE := github.com/lsm/fiso
+IMAGE_REPO ?= ghcr.io/lsm
+IMAGE_TAG  ?= latest
 
 build:
 	go build -o bin/fiso-flow ./cmd/fiso-flow
@@ -48,10 +50,26 @@ vulncheck:
 
 checks: fmt-check mod-check vulncheck
 
-clean:
-	rm -rf bin/ coverage.out
+docker: docker-flow
 
-docker:
-	docker build -t fiso-flow:latest .
+docker-flow:
+	docker build -f Dockerfile.flow -t $(IMAGE_REPO)/fiso-flow:$(IMAGE_TAG) .
+
+docker-link:
+	docker build -f Dockerfile.link -t $(IMAGE_REPO)/fiso-link:$(IMAGE_TAG) .
+
+docker-operator:
+	docker build -f Dockerfile.operator -t $(IMAGE_REPO)/fiso-operator:$(IMAGE_TAG) .
+
+docker-all: docker-flow docker-link docker-operator
+
+compose-up:
+	docker compose up -d
+
+compose-down:
+	docker compose down
+
+clean:
+	rm -rf bin/ dist/ coverage.out
 
 .DEFAULT_GOAL := build

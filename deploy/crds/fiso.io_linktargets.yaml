@@ -1,0 +1,94 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: linktargets.fiso.io
+spec:
+  group: fiso.io
+  names:
+    kind: LinkTarget
+    listKind: LinkTargetList
+    plural: linktargets
+    singular: linktarget
+    shortNames:
+      - lt
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Protocol
+          type: string
+          jsonPath: .spec.protocol
+        - name: Host
+          type: string
+          jsonPath: .spec.host
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - protocol
+                - host
+              properties:
+                protocol:
+                  type: string
+                  enum:
+                    - http
+                    - https
+                    - grpc
+                host:
+                  type: string
+                auth:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      enum:
+                        - Bearer
+                        - APIKey
+                        - Basic
+                        - Vault
+                    secretName:
+                      type: string
+                    vaultPath:
+                      type: string
+                circuitBreaker:
+                  type: object
+                  properties:
+                    failureThreshold:
+                      type: integer
+                      minimum: 1
+                    resetTimeout:
+                      type: string
+                retry:
+                  type: object
+                  properties:
+                    maxAttempts:
+                      type: integer
+                      minimum: 1
+                    backoff:
+                      type: string
+                allowedPaths:
+                  type: array
+                  items:
+                    type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                message:
+                  type: string

@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fiso-flow-config
+data:
+  order-events.yaml: |
+    name: order-events
+    source:
+      type: kafka
+      config:
+        brokers:
+          - kafka.infra.svc:9092
+        topic: orders
+        consumerGroup: fiso-order-flow
+        startOffset: latest
+    transform:
+      cel: '{"order_id": data.legacy_id, "timestamp": time, "status": data.order_status}'
+    sink:
+      type: http
+      config:
+        url: http://order-service:8080/callbacks/order-result
+        method: POST
+    errorHandling:
+      deadLetterTopic: fiso-dlq-order-events
+      maxRetries: 5
+      backoff: exponential
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fiso-flow
+  labels:
+    app: fiso-flow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fiso-flow
+  template:
+    metadata:
+      labels:
+        app: fiso-flow
+    spec:
+      containers:
+        - name: fiso-flow
+          image: ghcr.io/lsm/fiso-flow:latest
+          env:
+            - name: FISO_CONFIG_DIR
+              value: /etc/fiso/flows
+            - name: FISO_METRICS_ADDR
+              value: ":9090"
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: flow-config
+              mountPath: /etc/fiso/flows
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: flow-config
+          configMap:
+            name: fiso-flow-config

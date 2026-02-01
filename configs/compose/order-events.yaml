@@ -1,0 +1,20 @@
+name: order-events
+source:
+  type: kafka
+  config:
+    brokers:
+      - kafka:9092
+    topic: orders
+    consumerGroup: fiso-order-flow
+    startOffset: earliest
+transform:
+  cel: '{"order_id": data.legacy_id, "timestamp": time, "status": data.order_status}'
+sink:
+  type: http
+  config:
+    url: http://echo-server:8080/callbacks/order-result
+    method: POST
+errorHandling:
+  deadLetterTopic: fiso-dlq-order-events
+  maxRetries: 3
+  backoff: exponential

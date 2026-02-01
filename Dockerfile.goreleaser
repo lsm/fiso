@@ -1,0 +1,7 @@
+FROM alpine:3.20
+ARG BINARY=fiso-flow
+RUN apk add --no-cache ca-certificates tzdata
+COPY ${BINARY} /usr/local/bin/${BINARY}
+RUN adduser -D -u 1000 fiso && ln -s /usr/local/bin/${BINARY} /usr/local/bin/entrypoint
+USER fiso
+ENTRYPOINT ["entrypoint"]
