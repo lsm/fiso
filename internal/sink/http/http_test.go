@@ -243,3 +243,122 @@ func TestNewSink_MissingURL(t *testing.T) {
 		t.Fatal("expected error for missing URL")
 	}
 }
+
+func TestDeliver_BackoffCapped(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{
+		URL: server.URL,
+		Retry: RetryConfig{
+			MaxAttempts:     3,
+			InitialInterval: 1 * time.Millisecond,
+			MaxInterval:     5 * time.Millisecond,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	err = s.Deliver(context.Background(), []byte(`{}`), nil)
+	if err == nil {
+		t.Fatal("expected error after retries exhausted")
+	}
+	if atomic.LoadInt32(&attempts) != 3 {
+		t.Errorf("expected 3 attempts, got %d", atomic.LoadInt32(&attempts))
+	}
+}
+
+func TestDeliver_429Retries(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		count := atomic.AddInt32(&attempts, 1)
+		if count < 2 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{
+		URL: server.URL,
+		Retry: RetryConfig{
+			MaxAttempts:     3,
+			InitialInterval: 1 * time.Millisecond,
+			MaxInterval:     5 * time.Millisecond,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	err = s.Deliver(context.Background(), []byte(`{}`), nil)
+	if err != nil {
+		t.Fatalf("expected success after retry on 429, got: %v", err)
+	}
+}
+
+func TestDeliver_RetryContextCancelled(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{
+		URL: server.URL,
+		Retry: RetryConfig{
+			MaxAttempts:     10,
+			InitialInterval: 1 * time.Second,
+			MaxInterval:     5 * time.Second,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err = s.Deliver(ctx, []byte(`{}`), nil)
+	if err == nil {
+		t.Fatal("expected error for cancelled context during retry")
+	}
+}
+
+func TestIsPermanent(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"400", &StatusError{Code: 400}, true},
+		{"404", &StatusError{Code: 404}, true},
+		{"429", &StatusError{Code: 429}, false},
+		{"500", &StatusError{Code: 500}, false},
+		{"non-status", io.EOF, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isPermanent(tt.err); got != tt.expected {
+				t.Errorf("isPermanent(%v) = %v, want %v", tt.err, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestStatusError_Error(t *testing.T) {
+	se := &StatusError{Code: 503}
+	if se.Error() != "http status 503" {
+		t.Errorf("expected 'http status 503', got %q", se.Error())
+	}
+}

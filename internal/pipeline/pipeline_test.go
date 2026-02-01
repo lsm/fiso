@@ -273,6 +273,55 @@ func TestPipeline_NilTransformer_Passthrough(t *testing.T) {
 	}
 }
 
+func TestPipeline_DLQPublishError(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"data":"ok"}`), Topic: "orders"},
+		},
+	}
+	transformer := &mockTransformer{
+		fn: func(_ context.Context, _ []byte) ([]byte, error) {
+			return nil, fmt.Errorf("transform error")
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{err: fmt.Errorf("dlq unavailable")}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{FlowName: "test-flow"}, src, transformer, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	// Should not panic even when DLQ publish fails
+	_ = p.Run(ctx)
+}
+
+func TestPipeline_DefaultEventType(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"data":"x"}`), Topic: "test"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{FlowName: "test"}, src, nil, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 event")
+	}
+	var ce map[string]interface{}
+	json.Unmarshal(sk.received[0].event, &ce)
+	if ce["type"] != "fiso.event" {
+		t.Errorf("expected default type 'fiso.event', got %v", ce["type"])
+	}
+}
+
 func TestPipeline_MultipleEvents(t *testing.T) {
 	events := make([]source.Event, 10)
 	for i := range events {

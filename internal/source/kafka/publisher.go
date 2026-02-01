@@ -7,9 +7,15 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
+// producer abstracts the kafka client methods used by Publisher for testing.
+type producer interface {
+	ProduceSync(ctx context.Context, rs ...*kgo.Record) kgo.ProduceResults
+	Close()
+}
+
 // Publisher publishes messages to Kafka topics. Implements dlq.Publisher.
 type Publisher struct {
-	client *kgo.Client
+	client producer
 }
 
 // NewPublisher creates a new Kafka publisher.

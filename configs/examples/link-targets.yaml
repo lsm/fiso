@@ -1,0 +1,42 @@
+listenAddr: "127.0.0.1:3500"
+metricsAddr: ":9091"
+
+targets:
+  - name: crm
+    protocol: https
+    host: api.salesforce.com
+    auth:
+      type: bearer
+      secretRef:
+        filePath: /secrets/crm-token
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 3
+      resetTimeout: "30s"
+    retry:
+      maxAttempts: 3
+      backoff: exponential
+      initialInterval: "200ms"
+      maxInterval: "30s"
+      jitter: 0.2
+    allowedPaths:
+      - /api/v2/**
+
+  - name: payment-gateway
+    protocol: https
+    host: api.stripe.com
+    auth:
+      type: bearer
+      secretRef:
+        envVar: STRIPE_API_KEY
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 3
+      resetTimeout: "60s"
+    retry:
+      maxAttempts: 2
+      initialInterval: "500ms"
+
+asyncBrokers:
+  - kafka.infra.svc:9092

@@ -17,9 +17,17 @@ type Config struct {
 	StartOffset   string // "earliest" or "latest" (default: "latest")
 }
 
+// consumer abstracts the kafka client methods used by Source for testing.
+type consumer interface {
+	PollFetches(ctx context.Context) kgo.Fetches
+	MarkCommitRecords(rs ...*kgo.Record)
+	CommitMarkedOffsets(ctx context.Context) error
+	Close()
+}
+
 // Source consumes events from a Kafka topic.
 type Source struct {
-	client *kgo.Client
+	client consumer
 	topic  string
 	logger *slog.Logger
 }

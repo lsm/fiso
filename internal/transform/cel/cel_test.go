@@ -190,3 +190,145 @@ func TestTransform_NumericComputation(t *testing.T) {
 		t.Errorf("expected total=31.5, got %v", total)
 	}
 }
+
+func TestTransform_ListOutput(t *testing.T) {
+	tr, err := NewTransformer(`[data.a, data.b, data.c]`)
+	if err != nil {
+		t.Fatalf("failed to create transformer: %v", err)
+	}
+	input := `{"data": {"a": 1, "b": 2, "c": 3}}`
+	result, err := tr.Transform(context.Background(), []byte(input))
+	if err != nil {
+		t.Fatalf("transform failed: %v", err)
+	}
+	var out []interface{}
+	if err := json.Unmarshal(result, &out); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(out) != 3 {
+		t.Errorf("expected 3 elements, got %d", len(out))
+	}
+}
+
+func TestTransform_BooleanOutput(t *testing.T) {
+	tr, err := NewTransformer(`data.count > 0`)
+	if err != nil {
+		t.Fatalf("failed to create transformer: %v", err)
+	}
+	result, err := tr.Transform(context.Background(), []byte(`{"data": {"count": 5}}`))
+	if err != nil {
+		t.Fatalf("transform failed: %v", err)
+	}
+	var out bool
+	if err := json.Unmarshal(result, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !out {
+		t.Error("expected true")
+	}
+}
+
+func TestTransform_IntegerOutput(t *testing.T) {
+	tr, err := NewTransformer(`data.a + data.b`)
+	if err != nil {
+		t.Fatalf("failed to create transformer: %v", err)
+	}
+	result, err := tr.Transform(context.Background(), []byte(`{"data": {"a": 3, "b": 7}}`))
+	if err != nil {
+		t.Fatalf("transform failed: %v", err)
+	}
+	var out float64
+	if err := json.Unmarshal(result, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out != 10 {
+		t.Errorf("expected 10, got %v", out)
+	}
+}
+
+func TestTransform_DoubleOutput(t *testing.T) {
+	tr, err := NewTransformer(`data.price * 1.1`)
+	if err != nil {
+		t.Fatalf("failed to create transformer: %v", err)
+	}
+	result, err := tr.Transform(context.Background(), []byte(`{"data": {"price": 100.0}}`))
+	if err != nil {
+		t.Fatalf("transform failed: %v", err)
+	}
+	var out float64
+	if err := json.Unmarshal(result, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out < 109 || out > 111 {
+		t.Errorf("expected ~110, got %v", out)
+	}
+}
+
+func TestTransform_NestedMapOutput(t *testing.T) {
+	tr, err := NewTransformer(`{"nested": {"id": data.id, "active": true}}`)
+	if err != nil {
+		t.Fatalf("failed to create transformer: %v", err)
+	}
+	result, err := tr.Transform(context.Background(), []byte(`{"data": {"id": "abc"}}`))
+	if err != nil {
+		t.Fatalf("transform failed: %v", err)
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(result, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	nested, ok := out["nested"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected nested map")
+	}
+	if nested["id"] != "abc" {
+		t.Errorf("expected 'abc', got %v", nested["id"])
+	}
+}
+
+func TestTransform_NullOutput(t *testing.T) {
+	tr, err := NewTransformer(`data.missing`)
+	if err != nil {
+		t.Fatalf("failed to create transformer: %v", err)
+	}
+	// data.missing will be null since we set it to nil in activation
+	_, err = tr.Transform(context.Background(), []byte(`{"data": null}`))
+	// CEL will error on null access
+	if err == nil {
+		t.Fatal("expected error for null field access")
+	}
+}
+
+func TestNewTransformer_WithOptions(t *testing.T) {
+	tr, err := NewTransformer("data",
+		WithTimeout(10*time.Second),
+		WithMaxOutputBytes(512),
+	)
+	if err != nil {
+		t.Fatalf("failed to create transformer: %v", err)
+	}
+	if tr.timeout != 10*time.Second {
+		t.Errorf("expected 10s timeout, got %v", tr.timeout)
+	}
+	if tr.maxOutputBytes != 512 {
+		t.Errorf("expected 512 max bytes, got %d", tr.maxOutputBytes)
+	}
+}
+
+func TestTransform_StringOutput(t *testing.T) {
+	tr, err := NewTransformer(`"hello " + data.name`)
+	if err != nil {
+		t.Fatalf("failed to create transformer: %v", err)
+	}
+	result, err := tr.Transform(context.Background(), []byte(`{"data": {"name": "world"}}`))
+	if err != nil {
+		t.Fatalf("transform failed: %v", err)
+	}
+	var out string
+	if err := json.Unmarshal(result, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out != "hello world" {
+		t.Errorf("expected 'hello world', got %q", out)
+	}
+}

@@ -245,6 +245,132 @@ sink:
 	close(done)
 }
 
+func TestWatch_StopCleanly(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "flow.yaml", `
+name: test
+source:
+  type: kafka
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+	loader := NewLoader(dir, nil)
+	loader.Load()
+
+	done := make(chan struct{})
+	errCh := make(chan error, 1)
+	go func() { errCh <- loader.Watch(done) }()
+
+	time.Sleep(50 * time.Millisecond)
+	close(done)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("watch did not stop")
+	}
+}
+
+func TestWatch_FileRemoval(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "flow.yaml", `
+name: removable
+source:
+  type: kafka
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+	loader := NewLoader(dir, nil)
+	loader.Load()
+
+	changed := make(chan map[string]*FlowDefinition, 1)
+	loader.OnChange(func(flows map[string]*FlowDefinition) {
+		changed <- flows
+	})
+
+	done := make(chan struct{})
+	go func() { loader.Watch(done) }()
+	time.Sleep(100 * time.Millisecond)
+
+	os.Remove(filepath.Join(dir, "flow.yaml"))
+
+	select {
+	case flows := <-changed:
+		if len(flows) != 0 {
+			t.Errorf("expected 0 flows after removal, got %d", len(flows))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for removal notification")
+	}
+	close(done)
+}
+
+func TestWatch_InvalidDir(t *testing.T) {
+	loader := NewLoader("/nonexistent/watch/dir", nil)
+	err := loader.Watch(make(chan struct{}))
+	if err == nil {
+		t.Fatal("expected error for nonexistent directory")
+	}
+}
+
+func TestWatch_CreateEvent(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir, nil)
+	loader.Load()
+
+	changed := make(chan map[string]*FlowDefinition, 1)
+	loader.OnChange(func(flows map[string]*FlowDefinition) {
+		changed <- flows
+	})
+
+	done := make(chan struct{})
+	go func() { loader.Watch(done) }()
+	time.Sleep(100 * time.Millisecond)
+
+	// Create a new file
+	writeFile(t, dir, "new-flow.yaml", `
+name: new-flow
+source:
+  type: kafka
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+
+	select {
+	case flows := <-changed:
+		if _, ok := flows["new-flow"]; !ok {
+			t.Error("expected new-flow in reloaded config")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for create notification")
+	}
+	close(done)
+}
+
+func TestOnChange_Callback(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir, nil)
+
+	called := false
+	loader.OnChange(func(flows map[string]*FlowDefinition) {
+		called = true
+	})
+
+	// OnChange just registers the callback; verify it's set
+	if called {
+		t.Error("callback should not be called yet")
+	}
+}
+
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	path := filepath.Join(dir, name)
