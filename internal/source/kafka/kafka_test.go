@@ -44,7 +44,7 @@ func TestNewSource_ValidConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	if s.topic != "test-topic" {
 		t.Errorf("expected topic test-topic, got %s", s.topic)
@@ -60,5 +60,5 @@ func TestNewSource_DefaultOffset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 }
