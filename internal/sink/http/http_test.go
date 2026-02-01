@@ -29,8 +29,8 @@ func TestDeliver_Success(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	headers := map[string]string{
-		"Content-Type":  "application/cloudevents+json",
-		"X-Custom":      "test-value",
+		"Content-Type": "application/cloudevents+json",
+		"X-Custom":     "test-value",
 	}
 	payload := []byte(`{"id":"evt-1","data":"hello"}`)
 

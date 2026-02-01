@@ -17,9 +17,9 @@ import (
 // rawCodecForClient is the same codec used in the sink package.
 type rawCodecForClient struct{}
 
-func (rawCodecForClient) Marshal(v interface{}) ([]byte, error)     { return v.([]byte), nil }
+func (rawCodecForClient) Marshal(v interface{}) ([]byte, error)      { return v.([]byte), nil }
 func (rawCodecForClient) Unmarshal(data []byte, v interface{}) error { *v.(*[]byte) = data; return nil }
-func (rawCodecForClient) Name() string                              { return "raw" }
+func (rawCodecForClient) Name() string                               { return "raw" }
 
 func TestSource_ReceivesEvents(t *testing.T) {
 	src, err := NewSource(Config{ListenAddr: "127.0.0.1:0"}, nil)

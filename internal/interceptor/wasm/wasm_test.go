@@ -11,9 +11,9 @@ import (
 )
 
 type mockRuntime struct {
-	response []byte
-	err      error
-	closed   bool
+	response  []byte
+	err       error
+	closed    bool
 	lastInput []byte
 }
 

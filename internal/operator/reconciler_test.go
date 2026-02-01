@@ -10,12 +10,12 @@ import (
 )
 
 type mockClient struct {
-	flows       map[string]*v1alpha1.FlowDefinition
-	links       map[string]*v1alpha1.LinkTarget
-	getFlowErr  error
-	getLinkErr  error
-	updateFlowErr error
-	updateLinkErr error
+	flows          map[string]*v1alpha1.FlowDefinition
+	links          map[string]*v1alpha1.LinkTarget
+	getFlowErr     error
+	getLinkErr     error
+	updateFlowErr  error
+	updateLinkErr  error
 	lastFlowStatus *v1alpha1.FlowDefinitionStatus
 	lastLinkStatus *v1alpha1.LinkTargetStatus
 }

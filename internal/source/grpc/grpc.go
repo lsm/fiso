@@ -19,9 +19,9 @@ type Config struct {
 
 // Source receives events via gRPC and dispatches them to the handler.
 type Source struct {
-	server   *grpc.Server
-	logger   *slog.Logger
-	addr     string
+	server *grpc.Server
+	logger *slog.Logger
+	addr   string
 	// ListenAddr is set after Start creates the listener, safe to read
 	// once the source is running.
 	ListenAddr string

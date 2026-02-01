@@ -11,20 +11,20 @@ import (
 
 // LinkTarget defines an outbound target endpoint.
 type LinkTarget struct {
-	Name           string              `yaml:"name"`
-	Protocol       string              `yaml:"protocol"` // http, https, grpc
-	Host           string              `yaml:"host"`
-	Auth           AuthConfig          `yaml:"auth"`
+	Name           string               `yaml:"name"`
+	Protocol       string               `yaml:"protocol"` // http, https, grpc
+	Host           string               `yaml:"host"`
+	Auth           AuthConfig           `yaml:"auth"`
 	CircuitBreaker CircuitBreakerConfig `yaml:"circuitBreaker"`
-	Retry          RetryConfig         `yaml:"retry"`
-	AllowedPaths   []string            `yaml:"allowedPaths"`
+	Retry          RetryConfig          `yaml:"retry"`
+	AllowedPaths   []string             `yaml:"allowedPaths"`
 }
 
 // AuthConfig defines authentication settings for a target.
 type AuthConfig struct {
-	Type       string     `yaml:"type"` // bearer, apikey, basic, none
-	SecretRef  *SecretRef `yaml:"secretRef,omitempty"`
-	VaultRef   *VaultRef  `yaml:"vaultRef,omitempty"`
+	Type      string     `yaml:"type"` // bearer, apikey, basic, none
+	SecretRef *SecretRef `yaml:"secretRef,omitempty"`
+	VaultRef  *VaultRef  `yaml:"vaultRef,omitempty"`
 }
 
 // SecretRef references a K8s Secret mounted as a file.
@@ -49,10 +49,10 @@ type CircuitBreakerConfig struct {
 
 // RetryConfig holds retry settings.
 type RetryConfig struct {
-	MaxAttempts     int    `yaml:"maxAttempts"`
-	Backoff         string `yaml:"backoff"`         // "exponential", "constant", "linear"
-	InitialInterval string `yaml:"initialInterval"` // e.g., "200ms"
-	MaxInterval     string `yaml:"maxInterval"`     // e.g., "30s"
+	MaxAttempts     int     `yaml:"maxAttempts"`
+	Backoff         string  `yaml:"backoff"`         // "exponential", "constant", "linear"
+	InitialInterval string  `yaml:"initialInterval"` // e.g., "200ms"
+	MaxInterval     string  `yaml:"maxInterval"`     // e.g., "30s"
 	Jitter          float64 `yaml:"jitter"`
 }
 

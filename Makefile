@@ -1,4 +1,4 @@
-.PHONY: build build-link build-operator build-all test lint clean docker coverage-check
+.PHONY: build build-link build-operator build-all test lint clean docker coverage-check fmt-check mod-check vulncheck checks
 
 MODULE := github.com/lsm/fiso
 
@@ -26,6 +26,27 @@ coverage-check: test
 
 lint:
 	golangci-lint run ./...
+
+fmt-check:
+	@UNFORMATTED=$$(gofmt -l .); \
+	if [ -n "$${UNFORMATTED}" ]; then \
+		echo "FAIL: The following files are not gofmt formatted:"; \
+		echo "$${UNFORMATTED}"; \
+		exit 1; \
+	fi
+
+mod-check:
+	go mod tidy
+	@if ! git diff --exit-code go.mod go.sum > /dev/null 2>&1; then \
+		echo "FAIL: go.mod/go.sum are not tidy. Run 'go mod tidy' and commit."; \
+		exit 1; \
+	fi
+	go mod verify
+
+vulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+checks: fmt-check mod-check vulncheck
 
 clean:
 	rm -rf bin/ coverage.out

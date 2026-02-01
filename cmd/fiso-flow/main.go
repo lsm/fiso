@@ -18,8 +18,8 @@ import (
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/observability"
 	"github.com/lsm/fiso/internal/pipeline"
-	"github.com/lsm/fiso/internal/source/kafka"
 	httpsink "github.com/lsm/fiso/internal/sink/http"
+	"github.com/lsm/fiso/internal/source/kafka"
 	celxform "github.com/lsm/fiso/internal/transform/cel"
 )
 

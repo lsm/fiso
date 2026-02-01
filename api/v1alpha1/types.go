@@ -17,8 +17,8 @@ type FlowDefinition struct {
 // FlowDefinitionSpec defines the desired state of a FlowDefinition.
 type FlowDefinitionSpec struct {
 	Source        SourceSpec        `json:"source"`
-	Transform     *TransformSpec   `json:"transform,omitempty"`
-	Sink          SinkSpec         `json:"sink"`
+	Transform     *TransformSpec    `json:"transform,omitempty"`
+	Sink          SinkSpec          `json:"sink"`
 	ErrorHandling ErrorHandlingSpec `json:"errorHandling,omitempty"`
 }
 
@@ -61,12 +61,12 @@ type LinkTarget struct {
 
 // LinkTargetSpec defines the desired state of a LinkTarget.
 type LinkTargetSpec struct {
-	Protocol       string            `json:"protocol"`
-	Host           string            `json:"host"`
-	Auth           *LinkAuthSpec     `json:"auth,omitempty"`
+	Protocol       string              `json:"protocol"`
+	Host           string              `json:"host"`
+	Auth           *LinkAuthSpec       `json:"auth,omitempty"`
 	CircuitBreaker *CircuitBreakerSpec `json:"circuitBreaker,omitempty"`
-	Retry          *RetrySpec        `json:"retry,omitempty"`
-	AllowedPaths   []string          `json:"allowedPaths,omitempty"`
+	Retry          *RetrySpec          `json:"retry,omitempty"`
+	AllowedPaths   []string            `json:"allowedPaths,omitempty"`
 }
 
 // LinkAuthSpec defines authentication for a link target.

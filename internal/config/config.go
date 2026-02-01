@@ -13,16 +13,16 @@ import (
 
 // FlowDefinition represents a complete inbound pipeline configuration.
 type FlowDefinition struct {
-	Name   string       `yaml:"name"`
-	Source SourceConfig `yaml:"source"`
-	Transform *TransformConfig `yaml:"transform,omitempty"`
-	Sink   SinkConfig   `yaml:"sink"`
+	Name          string              `yaml:"name"`
+	Source        SourceConfig        `yaml:"source"`
+	Transform     *TransformConfig    `yaml:"transform,omitempty"`
+	Sink          SinkConfig          `yaml:"sink"`
 	ErrorHandling ErrorHandlingConfig `yaml:"errorHandling"`
 }
 
 // SourceConfig holds source configuration.
 type SourceConfig struct {
-	Type   string            `yaml:"type"`
+	Type   string                 `yaml:"type"`
 	Config map[string]interface{} `yaml:"config"`
 }
 
@@ -33,7 +33,7 @@ type TransformConfig struct {
 
 // SinkConfig holds sink configuration.
 type SinkConfig struct {
-	Type   string            `yaml:"type"`
+	Type   string                 `yaml:"type"`
 	Config map[string]interface{} `yaml:"config"`
 }
 

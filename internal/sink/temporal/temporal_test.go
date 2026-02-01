@@ -20,14 +20,14 @@ func (m *mockWorkflowRun) GetRunID() string { return m.runID }
 
 // mockClient implements WorkflowClient for testing.
 type mockClient struct {
-	executeErr    error
-	signalErr     error
-	closed        bool
-	lastOpts      StartWorkflowOptions
-	lastWorkflow  string
-	lastArgs      []interface{}
-	lastSignalID  string
-	lastSignalArg interface{}
+	executeErr     error
+	signalErr      error
+	closed         bool
+	lastOpts       StartWorkflowOptions
+	lastWorkflow   string
+	lastArgs       []interface{}
+	lastSignalID   string
+	lastSignalArg  interface{}
 	lastSignalName string
 }
 

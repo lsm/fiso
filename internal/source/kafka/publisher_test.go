@@ -56,7 +56,7 @@ func TestPublisher_Publish_Success(t *testing.T) {
 	pub := &Publisher{client: mp}
 
 	err := pub.Publish(context.Background(), "test-topic", []byte("key"), []byte("value"), map[string]string{
-		"ce-type": "test.event",
+		"ce-type":   "test.event",
 		"ce-source": "test",
 	})
 	if err != nil {

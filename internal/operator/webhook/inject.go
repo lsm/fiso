@@ -39,9 +39,9 @@ func DefaultSidecarConfig() SidecarConfig {
 
 // AdmissionReview is a simplified admission review request/response.
 type AdmissionReview struct {
-	APIVersion string            `json:"apiVersion"`
-	Kind       string            `json:"kind"`
-	Request    *AdmissionRequest `json:"request,omitempty"`
+	APIVersion string             `json:"apiVersion"`
+	Kind       string             `json:"kind"`
+	Request    *AdmissionRequest  `json:"request,omitempty"`
 	Response   *AdmissionResponse `json:"response,omitempty"`
 }
 

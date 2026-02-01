@@ -28,8 +28,8 @@ type Config struct {
 
 // Sink delivers events to an HTTP endpoint.
 type Sink struct {
-	client  *http.Client
-	config  Config
+	client *http.Client
+	config Config
 }
 
 // NewSink creates a new HTTP sink.

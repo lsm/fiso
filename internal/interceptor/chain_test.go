@@ -9,12 +9,12 @@ import (
 
 // mockInterceptor is a test interceptor that optionally modifies or rejects requests.
 type mockInterceptor struct {
-	modifyHeader string
-	modifyValue  string
+	modifyHeader  string
+	modifyValue   string
 	modifyPayload []byte
-	err          error
-	closed       bool
-	closeErr     error
+	err           error
+	closed        bool
+	closeErr      error
 }
 
 func (m *mockInterceptor) Process(_ context.Context, req *Request) (*Request, error) {
