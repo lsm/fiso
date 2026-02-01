@@ -1,6 +1,6 @@
 # Project Fiso: High-Level Design Specification
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Status:** DRAFT
 **Core Philosophy:** "Infrastructure as an Implementation Detail."
 
@@ -105,7 +105,7 @@ The system is composed of two primary data-plane components and a control plane.
   - **Connector:** Connects to physical infrastructure (Kafka Topic, S3 Bucket,
     Webhook).
   - **Normalizer:** Converts proprietary vendor events into standard CloudEvents.
-  - **Mapper:** Applies declarative JQ/Jolt transformations to clean "messy" data.
+  - **Mapper:** Applies declarative CEL (Common Expression Language) transformations to clean "messy" data.
   - **Router:** Delivers the clean event to the configured Sink.
 
 #### C. Fiso Sinks (The Destinations)
@@ -159,7 +159,7 @@ App ◄──POST /callbacks/order-result───┘
 3. **Process:** External system processes order, emits `type: order.success`
    with same `correlation-id`.
 4. **Ingest:** Fiso-Flow consumes `order.success`.
-5. **Transform:** Fiso-Flow runs JQ script to normalize payload.
+5. **Transform:** Fiso-Flow runs CEL expression to normalize payload.
 6. **Deliver:** Fiso-Flow delivers result to App `POST /callbacks/order-result`.
 
 #### Correlation Failure Handling
@@ -259,7 +259,7 @@ spec:
       consumerGroup: fiso-order-flow
       startOffset: latest
   transform:
-    jq: '{ id: .data.legacy_id, timestamp: .time, status: .data.order_status }'
+    cel: '{"id": data.legacy_id, "timestamp": time, "status": data.order_status}'
   sink:
     type: http
     config:
@@ -562,7 +562,7 @@ When no version suffix is present, `v1` is implied.
 
 ### 8.3 Transform Validation
 
-JQ transforms do not inherently validate output schema. To catch issues early:
+CEL transforms do not inherently validate output schema. To catch issues early:
 
 - **`spec.sink.validate`** (optional): A JSON Schema that the transform output
   is validated against before delivery. Validation failures route the event to
@@ -573,7 +573,7 @@ JQ transforms do not inherently validate output schema. To catch issues early:
 ```yaml
 spec:
   transform:
-    jq: '{ id: .data.legacy_id, timestamp: .time }'
+    cel: '{"id": data.legacy_id, "timestamp": time}'
   sink:
     type: http
     validate:
@@ -603,17 +603,18 @@ Schema Registry for:
 
 ### 9.1 Declarative Transformation
 
-- **Engine:** JQ (for JSON) and simple Regex (for text).
+- **Engine:** CEL — Common Expression Language (for JSON). Google-maintained,
+  type-checked at compile time, with first-class sandboxing.
 - **Usage:** Defined inline in YAML config or CRD.
 - **Example:**
   ```yaml
   transform:
-    jq: '{ id: .data.legacy_id, timestamp: .time }'
+    cel: '{"id": data.legacy_id, "timestamp": time}'
   ```
 
 #### Transform Safety
 
-JQ expressions execute in a sandboxed context with the following constraints:
+CEL expressions execute in a sandboxed context with the following constraints:
 
 | Constraint | Default | Configurable |
 |------------|---------|--------------|
@@ -629,9 +630,9 @@ original event to the DLQ with error code `TRANSFORM_FAILED`.
 Transforms can be tested before deployment using the CLI:
 
 ```bash
-# Test a JQ expression against a sample event
+# Test a CEL expression against a sample event
 fiso transform test \
-  --expression '{ id: .data.legacy_id, timestamp: .time }' \
+  --expression '{"id": data.legacy_id, "timestamp": time}' \
   --input sample-event.json
 
 # Test a full FlowDefinition against a sample event
@@ -809,11 +810,11 @@ Prometheus endpoints exposed on `:9090/metrics`.
 ### 12.1 Scope
 
 Phase 1 delivers a **minimal but functional Fiso-Flow** that demonstrates the
-core value proposition: consume from Kafka, transform via JQ, deliver to HTTP
+core value proposition: consume from Kafka, transform via CEL, deliver to HTTP
 sink, with DLQ support.
 
 **In Scope:**
-- Fiso-Flow with Kafka source, JQ transform, HTTP sink.
+- Fiso-Flow with Kafka source, CEL transform, HTTP sink.
 - YAML file-based configuration (Tier 2).
 - At-least-once delivery with DLQ.
 - Structured JSON logging.
@@ -848,8 +849,8 @@ github.com/org/fiso/
 │   │       └── http.go
 │   ├── transform/           # Transformer interface + implementations
 │   │   ├── transform.go     # Transformer interface definition
-│   │   └── jq/              # JQ transformer implementation
-│   │       └── jq.go
+│   │   └── cel/             # CEL transformer implementation
+│   │       └── cel.go
 │   ├── pipeline/            # Pipeline orchestrator (source → transform → sink)
 │   │   └── pipeline.go
 │   ├── dlq/                 # Dead Letter Queue handler
@@ -936,7 +937,7 @@ type Transformer interface {
 | Dependency | Library | Rationale |
 |------------|---------|-----------|
 | Kafka client | `github.com/twmb/franz-go` | Pure Go, high performance, no CGo, good consumer group support |
-| JQ engine | `github.com/itchyny/gojq` | Pure Go JQ implementation, no CGo |
+| CEL engine | `github.com/google/cel-go` | Google-maintained, type-checked, built-in sandboxing, used by K8s/Envoy |
 | CloudEvents | `github.com/cloudevents/sdk-go/v2` | Official SDK |
 | HTTP framework | `net/http` (stdlib) | Minimal dependencies for sink + health endpoints |
 | Metrics | `github.com/prometheus/client_golang` | Standard Prometheus client |
@@ -947,7 +948,7 @@ type Transformer interface {
 
 - [ ] Fiso-Flow binary consumes from a Kafka topic.
 - [ ] Incoming messages are wrapped in CloudEvents format.
-- [ ] JQ transformation is applied to event payload.
+- [ ] CEL transformation is applied to event payload.
 - [ ] Transformed event is POSTed to a configurable HTTP endpoint.
 - [ ] Failed events (after retries) are published to a DLQ topic.
 - [ ] Configuration is loaded from YAML files with hot-reload.

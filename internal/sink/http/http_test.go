@@ -1,0 +1,245 @@
+package http
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestDeliver_Success(t *testing.T) {
+	var receivedBody []byte
+	var receivedHeaders http.Header
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = r.Header
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{URL: server.URL, Method: "POST"})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer s.Close()
+
+	headers := map[string]string{
+		"Content-Type":  "application/cloudevents+json",
+		"X-Custom":      "test-value",
+	}
+	payload := []byte(`{"id":"evt-1","data":"hello"}`)
+
+	err = s.Deliver(context.Background(), payload, headers)
+	if err != nil {
+		t.Fatalf("deliver failed: %v", err)
+	}
+
+	if string(receivedBody) != string(payload) {
+		t.Errorf("body mismatch: got %s, want %s", receivedBody, payload)
+	}
+	if receivedHeaders.Get("Content-Type") != "application/cloudevents+json" {
+		t.Errorf("Content-Type mismatch: got %s", receivedHeaders.Get("Content-Type"))
+	}
+	if receivedHeaders.Get("X-Custom") != "test-value" {
+		t.Errorf("X-Custom mismatch: got %s", receivedHeaders.Get("X-Custom"))
+	}
+}
+
+func TestDeliver_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal error"))
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{URL: server.URL, Method: "POST"})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer s.Close()
+
+	err = s.Deliver(context.Background(), []byte(`{}`), nil)
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+}
+
+func TestDeliver_ClientError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{URL: server.URL, Method: "POST"})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer s.Close()
+
+	err = s.Deliver(context.Background(), []byte(`{}`), nil)
+	if err == nil {
+		t.Fatal("expected error for 400 response")
+	}
+}
+
+func TestDeliver_ContextCancelled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(5 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{URL: server.URL, Method: "POST"})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer s.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err = s.Deliver(ctx, []byte(`{}`), nil)
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+}
+
+func TestDeliver_InvalidURL(t *testing.T) {
+	s, err := NewSink(Config{URL: "http://localhost:1", Method: "POST"})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer s.Close()
+
+	err = s.Deliver(context.Background(), []byte(`{}`), nil)
+	if err == nil {
+		t.Fatal("expected error for unreachable URL")
+	}
+}
+
+func TestDeliver_DefaultMethod(t *testing.T) {
+	var receivedMethod string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{URL: server.URL})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer s.Close()
+
+	err = s.Deliver(context.Background(), []byte(`{}`), nil)
+	if err != nil {
+		t.Fatalf("deliver failed: %v", err)
+	}
+
+	if receivedMethod != "POST" {
+		t.Errorf("expected POST, got %s", receivedMethod)
+	}
+}
+
+func TestDeliver_NilHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{URL: server.URL, Method: "POST"})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer s.Close()
+
+	err = s.Deliver(context.Background(), []byte(`{}`), nil)
+	if err != nil {
+		t.Fatalf("deliver failed: %v", err)
+	}
+}
+
+func TestDeliver_StaticHeaders(t *testing.T) {
+	var receivedHeaders http.Header
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = r.Header
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{
+		URL:    server.URL,
+		Method: "POST",
+		Headers: map[string]string{
+			"X-Static": "configured",
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer s.Close()
+
+	err = s.Deliver(context.Background(), []byte(`{}`), map[string]string{
+		"X-Dynamic": "per-event",
+	})
+	if err != nil {
+		t.Fatalf("deliver failed: %v", err)
+	}
+
+	if receivedHeaders.Get("X-Static") != "configured" {
+		t.Errorf("missing static header, got: %s", receivedHeaders.Get("X-Static"))
+	}
+	if receivedHeaders.Get("X-Dynamic") != "per-event" {
+		t.Errorf("missing dynamic header, got: %s", receivedHeaders.Get("X-Dynamic"))
+	}
+}
+
+func TestDeliver_RetriesOnServerError(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&attempts, 1)
+		if count < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	s, err := NewSink(Config{
+		URL:    server.URL,
+		Method: "POST",
+		Retry: RetryConfig{
+			MaxAttempts:     3,
+			InitialInterval: 10 * time.Millisecond,
+			MaxInterval:     50 * time.Millisecond,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer s.Close()
+
+	err = s.Deliver(context.Background(), []byte(`{}`), nil)
+	if err != nil {
+		t.Fatalf("expected success after retries, got: %v", err)
+	}
+
+	if atomic.LoadInt32(&attempts) != 3 {
+		t.Errorf("expected 3 attempts, got %d", atomic.LoadInt32(&attempts))
+	}
+}
+
+func TestNewSink_MissingURL(t *testing.T) {
+	_, err := NewSink(Config{})
+	if err == nil {
+		t.Fatal("expected error for missing URL")
+	}
+}
