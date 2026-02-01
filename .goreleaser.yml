@@ -39,6 +39,18 @@ builds:
       - amd64
       - arm64
 
+  - id: fiso
+    binary: fiso
+    main: ./cmd/fiso
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
 dockers:
   - id: fiso-flow-amd64
     ids: [fiso-flow]

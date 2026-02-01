@@ -5,10 +5,10 @@ services:
       KAFKA_NODE_ID: "1"
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
     ports:
@@ -27,14 +27,12 @@ services:
       - "8080:8080"
 
   fiso-flow:
-    build:
-      context: .
-      dockerfile: Dockerfile.flow
+    image: ghcr.io/lsm/fiso-flow:latest
     environment:
       FISO_CONFIG_DIR: /etc/fiso/flows
       FISO_METRICS_ADDR: ":9090"
     volumes:
-      - ./configs/compose:/etc/fiso/flows:ro
+      - ../flows:/etc/fiso/flows:ro
     ports:
       - "9090:9090"
     depends_on:
@@ -44,7 +42,7 @@ services:
   prometheus:
     image: prom/prometheus:v2.54.0
     volumes:
-      - ./configs/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9091:9090"
     profiles:

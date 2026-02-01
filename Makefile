@@ -1,4 +1,4 @@
-.PHONY: build build-link build-operator build-all test test-integration lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all compose-up compose-down
+.PHONY: build build-link build-operator build-cli build-all test test-integration lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all compose-up compose-down
 
 MODULE := github.com/lsm/fiso
 IMAGE_REPO ?= ghcr.io/lsm
@@ -13,7 +13,10 @@ build-link:
 build-operator:
 	go build -o bin/fiso-operator ./cmd/fiso-operator
 
-build-all: build build-link build-operator
+build-cli:
+	go build -o bin/fiso ./cmd/fiso
+
+build-all: build build-link build-operator build-cli
 
 test:
 	go test -race -coverprofile=coverage.out ./...

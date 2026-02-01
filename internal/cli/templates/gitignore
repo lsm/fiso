@@ -1,0 +1,15 @@
+# Binaries
+bin/
+dist/
+fiso-flow
+fiso-link
+fiso-operator
+
+# Coverage
+*.out
+
+# Environment
+.env
+
+# OS
+.DS_Store

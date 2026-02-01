@@ -1,0 +1,20 @@
+name: example-flow
+source:
+  type: kafka
+  config:
+    brokers:
+      - kafka:9092
+    topic: events
+    consumerGroup: fiso-example
+    startOffset: earliest
+transform:
+  cel: '{"id": data.id, "timestamp": time}'
+sink:
+  type: http
+  config:
+    url: http://echo-server:8080/callbacks/example
+    method: POST
+errorHandling:
+  deadLetterTopic: fiso-dlq-example
+  maxRetries: 3
+  backoff: exponential
