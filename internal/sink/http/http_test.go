@@ -26,7 +26,7 @@ func TestDeliver_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sink: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	headers := map[string]string{
 		"Content-Type":  "application/cloudevents+json",
@@ -53,7 +53,7 @@ func TestDeliver_Success(t *testing.T) {
 func TestDeliver_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error"))
+		_, _ = w.Write([]byte("internal error"))
 	}))
 	defer server.Close()
 
@@ -61,7 +61,7 @@ func TestDeliver_ServerError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sink: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	err = s.Deliver(context.Background(), []byte(`{}`), nil)
 	if err == nil {
@@ -79,7 +79,7 @@ func TestDeliver_ClientError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sink: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	err = s.Deliver(context.Background(), []byte(`{}`), nil)
 	if err == nil {
@@ -98,7 +98,7 @@ func TestDeliver_ContextCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sink: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -114,7 +114,7 @@ func TestDeliver_InvalidURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sink: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	err = s.Deliver(context.Background(), []byte(`{}`), nil)
 	if err == nil {
@@ -135,7 +135,7 @@ func TestDeliver_DefaultMethod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sink: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	err = s.Deliver(context.Background(), []byte(`{}`), nil)
 	if err != nil {
@@ -157,7 +157,7 @@ func TestDeliver_NilHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sink: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	err = s.Deliver(context.Background(), []byte(`{}`), nil)
 	if err != nil {
@@ -184,7 +184,7 @@ func TestDeliver_StaticHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sink: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	err = s.Deliver(context.Background(), []byte(`{}`), map[string]string{
 		"X-Dynamic": "per-event",
@@ -225,7 +225,7 @@ func TestDeliver_RetriesOnServerError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sink: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	err = s.Deliver(context.Background(), []byte(`{}`), nil)
 	if err != nil {
