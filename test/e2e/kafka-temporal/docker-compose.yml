@@ -12,7 +12,7 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
     healthcheck:
-      test: /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -22,12 +22,12 @@ services:
     image: temporalio/auto-setup:latest
     environment:
       DB: sqlite
-      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
     healthcheck:
-      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      test: ["CMD-SHELL", "temporal operator cluster health --address localhost:7233 || tctl --address localhost:7233 cluster health"]
       interval: 5s
-      timeout: 5s
-      retries: 20
+      timeout: 10s
+      retries: 30
+      start_period: 15s
 
   # External service (behind fiso-link)
   external-api:
