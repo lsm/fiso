@@ -39,7 +39,7 @@ func TestSource_ReceivesEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -104,7 +104,7 @@ func TestSource_CustomPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -136,7 +136,7 @@ func TestSource_HandlerError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("expected 500, got %d", resp.StatusCode)
@@ -165,7 +165,7 @@ func TestSource_MethodNotAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("expected 405, got %d", resp.StatusCode)
@@ -202,7 +202,7 @@ func TestSource_MultipleEvents(t *testing.T) {
 		if err != nil {
 			t.Fatalf("post %d: %v", i, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("post %d: expected 200, got %d", i, resp.StatusCode)
 		}
