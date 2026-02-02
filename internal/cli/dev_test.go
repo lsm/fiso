@@ -13,7 +13,20 @@ func TestRunDev_Help(t *testing.T) {
 	}
 }
 
-func TestWriteDevOverride_WithDockerfiles(t *testing.T) {
+func TestHasFlag(t *testing.T) {
+	if !hasFlag([]string{"--docker"}, "--docker") {
+		t.Error("should find --docker flag")
+	}
+	if hasFlag([]string{"-h"}, "--docker") {
+		t.Error("should not find --docker flag")
+	}
+	if hasFlag(nil, "--docker") {
+		t.Error("should not find flag in nil slice")
+	}
+}
+
+// Hybrid mode (default): no Dockerfiles → override with extra_hosts + ports only.
+func TestWriteDevOverride_Hybrid(t *testing.T) {
 	dir := t.TempDir()
 	orig, err := os.Getwd()
 	if err != nil {
@@ -24,7 +37,71 @@ func TestWriteDevOverride_WithDockerfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create fiso/ dir and both Dockerfiles
+	if err := os.MkdirAll("fiso", 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeDevOverride(false); err != nil {
+		t.Fatalf("writeDevOverride: %v", err)
+	}
+
+	data, err := os.ReadFile(overridePath)
+	if err != nil {
+		t.Fatalf("override file not created: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "extra_hosts") {
+		t.Error("hybrid override should contain extra_hosts")
+	}
+	if !strings.Contains(content, "host-gateway") {
+		t.Error("hybrid override should contain host-gateway")
+	}
+	if !strings.Contains(content, "3500:3500") {
+		t.Error("hybrid override should expose fiso-link port 3500")
+	}
+	if strings.Contains(content, "Dockerfile") {
+		t.Error("hybrid override should not contain build directives")
+	}
+}
+
+// Docker mode: no Dockerfiles → no override file needed.
+func TestWriteDevOverride_Docker(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll("fiso", 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeDevOverride(true); err != nil {
+		t.Fatalf("writeDevOverride: %v", err)
+	}
+
+	if _, err := os.Stat(overridePath); !os.IsNotExist(err) {
+		t.Error("override file should not exist in docker mode without Dockerfiles")
+	}
+}
+
+// Maintainer + hybrid: Dockerfiles present, hybrid mode → build directives + extra_hosts + ports.
+func TestWriteDevOverride_MaintainerHybrid(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := os.MkdirAll("fiso", 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +112,7 @@ func TestWriteDevOverride_WithDockerfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := writeDevOverride(); err != nil {
+	if err := writeDevOverride(false); err != nil {
 		t.Fatalf("writeDevOverride: %v", err)
 	}
 
@@ -45,21 +122,22 @@ func TestWriteDevOverride_WithDockerfiles(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "fiso-flow") {
-		t.Error("override should contain fiso-flow service")
-	}
-	if !strings.Contains(content, "fiso-link") {
-		t.Error("override should contain fiso-link service")
-	}
 	if !strings.Contains(content, "Dockerfile.flow") {
 		t.Error("override should reference Dockerfile.flow")
 	}
 	if !strings.Contains(content, "Dockerfile.link") {
 		t.Error("override should reference Dockerfile.link")
 	}
+	if !strings.Contains(content, "extra_hosts") {
+		t.Error("override should contain extra_hosts in hybrid mode")
+	}
+	if !strings.Contains(content, "3500:3500") {
+		t.Error("override should expose fiso-link port in hybrid mode")
+	}
 }
 
-func TestWriteDevOverride_NoDockerfiles(t *testing.T) {
+// Maintainer + docker: Dockerfiles present, docker mode → build directives only.
+func TestWriteDevOverride_MaintainerDocker(t *testing.T) {
 	dir := t.TempDir()
 	orig, err := os.Getwd()
 	if err != nil {
@@ -73,17 +151,39 @@ func TestWriteDevOverride_NoDockerfiles(t *testing.T) {
 	if err := os.MkdirAll("fiso", 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile("Dockerfile.flow", []byte("FROM scratch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("Dockerfile.link", []byte("FROM scratch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
-	if err := writeDevOverride(); err != nil {
+	if err := writeDevOverride(true); err != nil {
 		t.Fatalf("writeDevOverride: %v", err)
 	}
 
-	if _, err := os.Stat(overridePath); !os.IsNotExist(err) {
-		t.Error("override file should not exist when no Dockerfiles present")
+	data, err := os.ReadFile(overridePath)
+	if err != nil {
+		t.Fatalf("override file not created: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "Dockerfile.flow") {
+		t.Error("override should reference Dockerfile.flow")
+	}
+	if !strings.Contains(content, "Dockerfile.link") {
+		t.Error("override should reference Dockerfile.link")
+	}
+	if strings.Contains(content, "extra_hosts") {
+		t.Error("override should not contain extra_hosts in docker mode")
+	}
+	if strings.Contains(content, "3500:3500") {
+		t.Error("override should not expose ports in docker mode")
 	}
 }
 
-func TestWriteDevOverride_FlowOnly(t *testing.T) {
+// Maintainer + hybrid with only Dockerfile.flow.
+func TestWriteDevOverride_FlowOnlyHybrid(t *testing.T) {
 	dir := t.TempDir()
 	orig, err := os.Getwd()
 	if err != nil {
@@ -101,7 +201,7 @@ func TestWriteDevOverride_FlowOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := writeDevOverride(); err != nil {
+	if err := writeDevOverride(false); err != nil {
 		t.Fatalf("writeDevOverride: %v", err)
 	}
 
@@ -111,11 +211,15 @@ func TestWriteDevOverride_FlowOnly(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "fiso-flow") {
-		t.Error("override should contain fiso-flow service")
+	if !strings.Contains(content, "Dockerfile.flow") {
+		t.Error("override should reference Dockerfile.flow")
 	}
-	if strings.Contains(content, "fiso-link") {
-		t.Error("override should not contain fiso-link when only Dockerfile.flow exists")
+	if !strings.Contains(content, "extra_hosts") {
+		t.Error("override should contain extra_hosts for fiso-flow")
+	}
+	// fiso-link should still get ports exposed (no Dockerfile.link, but hybrid mode)
+	if !strings.Contains(content, "3500:3500") {
+		t.Error("override should expose fiso-link port in hybrid mode")
 	}
 }
 

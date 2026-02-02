@@ -12,7 +12,7 @@ import (
 func main() {
 	linkAddr := os.Getenv("FISO_LINK_ADDR")
 	if linkAddr == "" {
-		linkAddr = "http://fiso-link:8080"
+		linkAddr = "http://localhost:3500"
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

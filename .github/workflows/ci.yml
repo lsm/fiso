@@ -168,6 +168,8 @@ jobs:
           grep -q "type: http" fiso/flows/example-flow.yaml
           grep -q "fiso-link" fiso/docker-compose.yml
           ! grep -q "kafka" fiso/flows/example-flow.yaml
+          grep -q "profiles:" fiso/docker-compose.yml
+          grep -q "localhost:3500" fiso/user-service/main.go
           $GITHUB_WORKSPACE/bin/fiso validate
 
   e2e:
