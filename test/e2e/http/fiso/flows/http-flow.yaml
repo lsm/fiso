@@ -1,0 +1,11 @@
+name: http-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8081"
+    path: /ingest
+sink:
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST

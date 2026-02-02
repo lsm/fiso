@@ -1,0 +1,41 @@
+services:
+  # External service (behind fiso-link)
+  external-api:
+    image: hashicorp/http-echo:latest
+    command: ["-text={\"enrichment\":\"data-from-external\"}", "-listen=:80"]
+
+  # Egress proxy — user-service calls this to reach external-api
+  fiso-link:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.link
+    volumes:
+      - ./fiso/link:/etc/fiso/link:ro
+    environment:
+      FISO_LINK_CONFIG: /etc/fiso/link/config.yaml
+    depends_on:
+      - external-api
+
+  # User's backend business logic
+  user-service:
+    build:
+      context: ./user-service
+    environment:
+      FISO_LINK_ADDR: http://fiso-link:3500
+    depends_on:
+      - fiso-link
+
+  # Ingress — receives HTTP events, forwards to user-service
+  fiso-flow:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.flow
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./fiso/flows:/etc/fiso/flows:ro
+    environment:
+      FISO_CONFIG_DIR: /etc/fiso/flows
+      FISO_METRICS_ADDR: ":9090"
+    depends_on:
+      - user-service

@@ -1,0 +1,6 @@
+listenAddr: ":3500"
+metricsAddr: ":9091"
+targets:
+  - name: echo
+    protocol: http
+    host: external-api

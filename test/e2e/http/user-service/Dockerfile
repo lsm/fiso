@@ -1,0 +1,8 @@
+FROM golang:1.25-alpine AS builder
+WORKDIR /app
+COPY go.mod main.go ./
+RUN CGO_ENABLED=0 go build -o /bin/user-service .
+
+FROM alpine:3.20
+COPY --from=builder /bin/user-service /usr/local/bin/user-service
+ENTRYPOINT ["user-service"]
