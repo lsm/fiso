@@ -23,6 +23,7 @@ import (
 	grpcsource "github.com/lsm/fiso/internal/source/grpc"
 	httpsource "github.com/lsm/fiso/internal/source/http"
 	"github.com/lsm/fiso/internal/source/kafka"
+	"github.com/lsm/fiso/internal/transform"
 	celxform "github.com/lsm/fiso/internal/transform/cel"
 )
 
@@ -182,7 +183,8 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 	}
 
 	// Build transformer (optional)
-	var transformer *celxform.Transformer
+	// Use the interface type so a nil value stays nil (avoids typed-nil gotcha).
+	var transformer transform.Transformer
 	var err error
 	if flowDef.Transform != nil && flowDef.Transform.CEL != "" {
 		transformer, err = celxform.NewTransformer(flowDef.Transform.CEL)
