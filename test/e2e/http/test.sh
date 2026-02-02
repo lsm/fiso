@@ -5,8 +5,9 @@ echo "=== HTTP E2E Test ==="
 echo "Flow: curl → fiso-flow → user-service → fiso-link → external-api"
 echo ""
 
-echo "Starting services..."
-docker compose up -d --build --wait
+BUILD_FLAG="${E2E_BUILD_FLAG:---build}"
+echo "Starting services... ($BUILD_FLAG)"
+docker compose up -d $BUILD_FLAG --wait
 
 echo ""
 echo "Waiting for services to be ready..."

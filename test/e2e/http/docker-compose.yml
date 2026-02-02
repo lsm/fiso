@@ -6,6 +6,7 @@ services:
 
   # Egress proxy — user-service calls this to reach external-api
   fiso-link:
+    image: fiso-link:e2e
     build:
       context: ../../..
       dockerfile: Dockerfile.link
@@ -27,6 +28,7 @@ services:
 
   # Ingress — receives HTTP events, forwards to user-service
   fiso-flow:
+    image: fiso-flow:e2e
     build:
       context: ../../..
       dockerfile: Dockerfile.flow

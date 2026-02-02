@@ -99,10 +99,16 @@ jobs:
 
       - name: Build all binaries
         run: |
-          go build -o bin/fiso-flow ./cmd/fiso-flow
-          go build -o bin/fiso-link ./cmd/fiso-link
-          go build -o bin/fiso-operator ./cmd/fiso-operator
-          go build -o bin/fiso ./cmd/fiso
+          CGO_ENABLED=0 go build -o bin/fiso-flow ./cmd/fiso-flow
+          CGO_ENABLED=0 go build -o bin/fiso-link ./cmd/fiso-link
+          CGO_ENABLED=0 go build -o bin/fiso-operator ./cmd/fiso-operator
+          CGO_ENABLED=0 go build -o bin/fiso ./cmd/fiso
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: bin/
 
   integration:
     runs-on: ubuntu-latest
@@ -144,15 +150,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Download binaries
+        uses: actions/download-artifact@v4
         with:
-          go-version: "1.25"
-
-      - name: Build fiso CLI
-        run: go build -o bin/fiso ./cmd/fiso
+          name: binaries
+          path: bin/
 
       - name: Smoke test — fiso init + validate
         run: |
+          chmod +x $GITHUB_WORKSPACE/bin/fiso
           cd $(mktemp -d)
           $GITHUB_WORKSPACE/bin/fiso init
           test -f fiso/docker-compose.yml
@@ -170,6 +176,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+
+      - name: Build Docker images from pre-compiled binaries
+        run: |
+          chmod +x bin/fiso-flow bin/fiso-link
+          printf 'FROM alpine:3.20\nRUN apk add --no-cache ca-certificates tzdata\nCOPY fiso-flow /usr/local/bin/fiso-flow\nENTRYPOINT ["fiso-flow"]\n' \
+            | docker build -t fiso-flow:e2e -f - bin/
+          printf 'FROM alpine:3.20\nRUN apk add --no-cache ca-certificates tzdata\nCOPY fiso-link /usr/local/bin/fiso-link\nENTRYPOINT ["fiso-link"]\n' \
+            | docker build -t fiso-link:e2e -f - bin/
+
       - name: Run HTTP E2E tests
         working-directory: test/e2e/http
         run: bash test.sh
+        env:
+          E2E_BUILD_FLAG: "--no-build"
