@@ -13,3 +13,6 @@ fiso-operator
 
 # OS
 .DS_Store
+
+# Fiso dev overrides
+fiso/docker-compose.override.yml

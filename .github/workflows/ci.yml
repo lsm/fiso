@@ -138,6 +138,32 @@ jobs:
         env:
           KAFKA_BROKERS: localhost:9092
 
+  cli-smoke:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build fiso CLI
+        run: go build -o bin/fiso ./cmd/fiso
+
+      - name: Smoke test — fiso init + validate
+        run: |
+          cd $(mktemp -d)
+          $GITHUB_WORKSPACE/bin/fiso init
+          test -f fiso/docker-compose.yml
+          test -f fiso/flows/example-flow.yaml
+          test -f fiso/link/config.yaml
+          test -f fiso/user-service/main.go
+          grep -q "type: http" fiso/flows/example-flow.yaml
+          grep -q "fiso-link" fiso/docker-compose.yml
+          ! grep -q "kafka" fiso/flows/example-flow.yaml
+          $GITHUB_WORKSPACE/bin/fiso validate
+
   e2e:
     runs-on: ubuntu-latest
     needs: [build]

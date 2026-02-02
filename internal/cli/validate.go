@@ -35,8 +35,12 @@ func RunValidate(args []string) error {
 
 	// Check for link config files alongside the flows directory
 	parent := filepath.Dir(dir)
-	for _, name := range []string{"link-config.yaml", "links.yaml"} {
-		linkPath := filepath.Join(parent, name)
+	linkSearchPaths := []string{
+		filepath.Join(parent, "link", "config.yaml"),
+		filepath.Join(parent, "link-config.yaml"),
+		filepath.Join(parent, "links.yaml"),
+	}
+	for _, linkPath := range linkSearchPaths {
 		if _, err := os.Stat(linkPath); err == nil {
 			linkErrors := validateLinkConfig(linkPath)
 			allErrors = append(allErrors, linkErrors...)

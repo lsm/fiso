@@ -23,12 +23,13 @@ func RunInit(args []string) error {
 
 	fisoDir := "fiso"
 	flowsDir := filepath.Join(fisoDir, "flows")
+	linkDir := filepath.Join(fisoDir, "link")
+	userServiceDir := filepath.Join(fisoDir, "user-service")
 
-	if err := os.MkdirAll(fisoDir, 0755); err != nil {
-		return fmt.Errorf("create fiso directory: %w", err)
-	}
-	if err := os.MkdirAll(flowsDir, 0755); err != nil {
-		return fmt.Errorf("create flows directory: %w", err)
+	for _, dir := range []string{fisoDir, flowsDir, linkDir, userServiceDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create directory %s: %w", dir, err)
+		}
 	}
 
 	cfg := initConfig{ProjectName: "fiso"}
@@ -39,8 +40,23 @@ func RunInit(args []string) error {
 	if err := copyEmbedded(flowsDir, "example-flow.yaml", "templates/sample-flow.yaml"); err != nil {
 		return err
 	}
+	if err := copyEmbedded(linkDir, "config.yaml", "templates/link-config.yaml"); err != nil {
+		return err
+	}
 	if err := copyEmbedded(fisoDir, "prometheus.yml", "templates/prometheus.yml"); err != nil {
 		return err
+	}
+
+	// User-service scaffold (files stored as .tmpl to avoid go:embed module boundary issues)
+	userServiceFiles := map[string]string{
+		"main.go":    "templates/user-service/main.go.tmpl",
+		"Dockerfile": "templates/user-service/Dockerfile.tmpl",
+		"go.mod":     "templates/user-service/go.mod.tmpl",
+	}
+	for dest, src := range userServiceFiles {
+		if err := copyEmbedded(userServiceDir, dest, src); err != nil {
+			return err
+		}
 	}
 
 	// .gitignore goes at the project root if not already present
@@ -52,12 +68,14 @@ func RunInit(args []string) error {
 
 	fmt.Println("Fiso initialized.")
 	fmt.Println("")
-	fmt.Println("  fiso/                 Fiso environment (docker-compose, prometheus)")
-	fmt.Println("  fiso/flows/           Your pipeline definitions")
+	fmt.Println("  fiso/                   Fiso environment (docker-compose, prometheus)")
+	fmt.Println("  fiso/flows/             Your pipeline definitions")
+	fmt.Println("  fiso/link/              Egress proxy target configs")
+	fmt.Println("  fiso/user-service/      Example backend service (edit or replace)")
 	fmt.Println("")
 	fmt.Println("Next steps:")
-	fmt.Println("  fiso dev              Start local development environment")
-	fmt.Println("  fiso validate         Validate flow configurations")
+	fmt.Println("  fiso dev                Start local development environment")
+	fmt.Println("  fiso validate           Validate flow and link configurations")
 
 	return nil
 }

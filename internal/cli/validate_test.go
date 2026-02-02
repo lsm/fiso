@@ -122,6 +122,48 @@ func TestRunValidate_Help(t *testing.T) {
 	}
 }
 
+func TestRunValidate_LinkConfigInSubdir(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create fiso/flows/ with a valid flow
+	if err := os.MkdirAll(filepath.Join(dir, "fiso", "flows"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "fiso", "flows"), "good.yaml", `
+name: test
+source:
+  type: http
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+
+	// Create fiso/link/config.yaml with a valid link config
+	if err := os.MkdirAll(filepath.Join(dir, "fiso", "link"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "fiso", "link"), "config.yaml", `
+listenAddr: ":3500"
+targets:
+  - name: echo
+    protocol: http
+    host: external-api
+`)
+
+	if err := RunValidate(nil); err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
 func TestSplitErrors(t *testing.T) {
 	tests := []struct {
 		input string

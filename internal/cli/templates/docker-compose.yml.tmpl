@@ -1,43 +1,40 @@
 services:
-  kafka:
-    image: apache/kafka:4.0.0
-    environment:
-      KAFKA_NODE_ID: "1"
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
-    ports:
-      - "9092:9092"
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+  # External service (behind fiso-link egress proxy)
+  external-api:
+    image: hashicorp/http-echo:latest
+    command: ["-text={\"enrichment\":\"data-from-external\"}", "-listen=:80"]
 
-  echo-server:
-    image: ealen/echo-server:0.9.2
+  # Egress proxy — user-service calls this to reach external-api
+  fiso-link:
+    image: ghcr.io/lsm/fiso-link:latest
+    volumes:
+      - ./link:/etc/fiso/link:ro
     environment:
-      PORT: "8080"
-    ports:
-      - "8080:8080"
+      FISO_LINK_CONFIG: /etc/fiso/link/config.yaml
+    depends_on:
+      - external-api
 
+  # Your backend business logic (edit or replace this service)
+  user-service:
+    build:
+      context: ./user-service
+    environment:
+      FISO_LINK_ADDR: http://fiso-link:3500
+    depends_on:
+      - fiso-link
+
+  # Ingress — receives HTTP events, forwards to user-service
   fiso-flow:
     image: ghcr.io/lsm/fiso-flow:latest
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./flows:/etc/fiso/flows:ro
     environment:
       FISO_CONFIG_DIR: /etc/fiso/flows
       FISO_METRICS_ADDR: ":9090"
-    volumes:
-      - ./flows:/etc/fiso/flows:ro
-    ports:
-      - "9090:9090"
     depends_on:
-      kafka:
-        condition: service_healthy
+      - user-service
 
   prometheus:
     image: prom/prometheus:v2.54.0

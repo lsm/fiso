@@ -1,16 +1,15 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
-	"time"
 )
+
+const overridePath = "fiso/docker-compose.override.yml"
 
 // RunDev starts the local Fiso development environment.
 func RunDev(args []string) error {
@@ -31,21 +30,30 @@ func RunDev(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	upArgs := []string{"up", "--remove-orphans"}
+	// Maintainer mode: generate override to build from local Dockerfiles
+	if err := writeDevOverride(); err != nil {
+		return fmt.Errorf("write dev override: %w", err)
+	}
 
-	if _, err := os.Stat("Dockerfile.flow"); err == nil {
+	upArgs := []string{"up", "--remove-orphans"}
+	if fileExists("Dockerfile.flow") || fileExists("Dockerfile.link") {
 		upArgs = append(upArgs, "--build")
 	}
+
+	fmt.Println("Starting Fiso development environment...")
+	fmt.Println("")
+	fmt.Println("Once services are up, send a test event:")
+	fmt.Println("")
+	fmt.Println(`  curl -X POST http://localhost:8081/ingest \`)
+	fmt.Println(`    -H "Content-Type: application/json" \`)
+	fmt.Println(`    -d '{"order_id": "12345", "amount": 99.99}'`)
+	fmt.Println("")
+	fmt.Println("Flow: curl → fiso-flow(:8081) → user-service → fiso-link → external-api")
+	fmt.Println("")
 
 	upDone := make(chan error, 1)
 	go func() {
 		upDone <- runCompose(ctx, upArgs...)
-	}()
-
-	go func() {
-		if err := waitForKafkaAndSeed(ctx); err != nil && ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "warning: seed failed: %v\n", err)
-		}
 	}()
 
 	select {
@@ -59,10 +67,17 @@ func RunDev(args []string) error {
 	}
 }
 
-var composeFileArgs = []string{"compose", "-f", "fiso/docker-compose.yml"}
+func buildComposeFileArgs() []string {
+	args := []string{"compose", "-f", "fiso/docker-compose.yml"}
+	if _, err := os.Stat(overridePath); err == nil {
+		args = append(args, "-f", overridePath)
+	}
+	return args
+}
 
 func runCompose(ctx context.Context, args ...string) error {
-	fullArgs := append(append([]string{}, composeFileArgs...), args...)
+	fileArgs := buildComposeFileArgs()
+	fullArgs := append(append([]string{}, fileArgs...), args...)
 	cmd := exec.CommandContext(ctx, "docker", fullArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -71,69 +86,49 @@ func runCompose(ctx context.Context, args ...string) error {
 }
 
 func composeDown() {
-	fullArgs := append(append([]string{}, composeFileArgs...), "down", "--remove-orphans")
+	fileArgs := buildComposeFileArgs()
+	fullArgs := append(append([]string{}, fileArgs...), "down", "--remove-orphans")
 	cmd := exec.Command("docker", fullArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	_ = cmd.Run()
+	_ = os.Remove(overridePath)
 }
 
-func waitForKafkaAndSeed(ctx context.Context) error {
-	deadline := time.After(60 * time.Second)
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
+// writeDevOverride generates a docker-compose override file when developing
+// fiso itself (Dockerfile.flow or Dockerfile.link present in CWD). This
+// replaces the GHCR image references with local builds.
+func writeDevOverride() error {
+	hasFlow := fileExists("Dockerfile.flow")
+	hasLink := fileExists("Dockerfile.link")
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline:
-			return fmt.Errorf("timed out waiting for Kafka")
-		case <-ticker.C:
-			if kafkaHealthy(ctx) {
-				return seedTestMessage(ctx)
-			}
-		}
+	if !hasFlow && !hasLink {
+		_ = os.Remove(overridePath)
+		return nil
 	}
+
+	content := "services:\n"
+	if hasFlow {
+		content += `  fiso-flow:
+    image: fiso-flow:dev
+    build:
+      context: ..
+      dockerfile: Dockerfile.flow
+`
+	}
+	if hasLink {
+		content += `  fiso-link:
+    image: fiso-link:dev
+    build:
+      context: ..
+      dockerfile: Dockerfile.link
+`
+	}
+
+	return os.WriteFile(overridePath, []byte(content), 0644)
 }
 
-func kafkaHealthy(ctx context.Context) bool {
-	fullArgs := append(append([]string{}, composeFileArgs...), "ps", "--format", "json", "kafka")
-	cmd := exec.CommandContext(ctx, "docker", fullArgs...)
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	return containsHealthy(out)
-}
-
-func containsHealthy(output []byte) bool {
-	if len(output) == 0 {
-		return false
-	}
-	s := bytes.ToLower(output)
-	return bytes.Contains(s, []byte("healthy")) && !bytes.Contains(s, []byte("unhealthy"))
-}
-
-func seedTestMessage(ctx context.Context) error {
-	fmt.Println("Kafka is healthy. Seeding test message...")
-
-	payload := `{"id":"test-001","data":{"legacy_id":"ORD-42","order_status":"created"},"time":"2024-01-01T00:00:00Z"}`
-
-	seedArgs := append(append([]string{}, composeFileArgs...), "exec", "-T", "kafka",
-		"/opt/kafka/bin/kafka-console-producer.sh",
-		"--bootstrap-server", "localhost:9092",
-		"--topic", "events",
-	)
-	cmd := exec.CommandContext(ctx, "docker", seedArgs...)
-	cmd.Stdin = strings.NewReader(payload + "\n")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("seed message: %w", err)
-	}
-
-	fmt.Println("Test message seeded to 'events' topic.")
-	return nil
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
