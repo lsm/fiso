@@ -416,7 +416,10 @@ func TestFlowDefinition_Validate(t *testing.T) {
 			flow: FlowDefinition{
 				Name:   "t",
 				Source: SourceConfig{Type: "grpc"},
-				Sink:   SinkConfig{Type: "temporal"},
+				Sink: SinkConfig{Type: "temporal", Config: map[string]interface{}{
+					"taskQueue":    "q",
+					"workflowType": "W",
+				}},
 			},
 		},
 		{
@@ -437,6 +440,93 @@ func TestFlowDefinition_Validate(t *testing.T) {
 			},
 			wantErr: "name is required",
 		},
+		{
+			name: "cel and mapping mutually exclusive",
+			flow: FlowDefinition{
+				Name:      "t",
+				Source:    SourceConfig{Type: "http"},
+				Sink:      SinkConfig{Type: "http"},
+				Transform: &TransformConfig{CEL: `{"a": data.b}`, Mapping: map[string]interface{}{"a": "$.b"}},
+			},
+			wantErr: "mutually exclusive",
+		},
+		{
+			name: "mapping only is valid",
+			flow: FlowDefinition{
+				Name:      "t",
+				Source:    SourceConfig{Type: "http"},
+				Sink:      SinkConfig{Type: "http"},
+				Transform: &TransformConfig{Mapping: map[string]interface{}{"a": "$.b"}},
+			},
+		},
+		{
+			name: "temporal sink valid",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink: SinkConfig{Type: "temporal", Config: map[string]interface{}{
+					"taskQueue":    "q",
+					"workflowType": "W",
+				}},
+			},
+		},
+		{
+			name: "temporal sink missing taskQueue",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink: SinkConfig{Type: "temporal", Config: map[string]interface{}{
+					"workflowType": "W",
+				}},
+			},
+			wantErr: "sink.config.taskQueue is required",
+		},
+		{
+			name: "temporal sink missing workflowType",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink: SinkConfig{Type: "temporal", Config: map[string]interface{}{
+					"taskQueue": "q",
+				}},
+			},
+			wantErr: "sink.config.workflowType is required",
+		},
+		{
+			name: "temporal sink signal mode missing signalName",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink: SinkConfig{Type: "temporal", Config: map[string]interface{}{
+					"taskQueue":    "q",
+					"workflowType": "W",
+					"mode":         "signal",
+				}},
+			},
+			wantErr: "sink.config.signalName is required",
+		},
+		{
+			name: "temporal sink signal mode valid",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink: SinkConfig{Type: "temporal", Config: map[string]interface{}{
+					"taskQueue":    "q",
+					"workflowType": "W",
+					"mode":         "signal",
+					"signalName":   "event-received",
+				}},
+			},
+		},
+		{
+			name: "temporal sink nil config",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "temporal"},
+			},
+			wantErr: "sink.config is required for temporal",
+		},
 	}
 
 	for _, tt := range tests {
@@ -455,6 +545,84 @@ func TestFlowDefinition_Validate(t *testing.T) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestLoad_WithCloudEvents(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "flow.yaml", `
+name: ce-flow
+source:
+  type: http
+  config: {}
+cloudevents:
+  type: order.created
+  source: my-system
+  subject: "$.order_id"
+sink:
+  type: http
+  config: {}
+`)
+
+	loader := NewLoader(dir, nil)
+	flows, err := loader.Load()
+	if err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+
+	flow := flows["ce-flow"]
+	if flow == nil {
+		t.Fatal("expected flow 'ce-flow'")
+	}
+	if flow.CloudEvents == nil {
+		t.Fatal("expected CloudEvents config")
+	}
+	if flow.CloudEvents.Type != "order.created" {
+		t.Errorf("expected type 'order.created', got %q", flow.CloudEvents.Type)
+	}
+	if flow.CloudEvents.Source != "my-system" {
+		t.Errorf("expected source 'my-system', got %q", flow.CloudEvents.Source)
+	}
+	if flow.CloudEvents.Subject != "$.order_id" {
+		t.Errorf("expected subject '$.order_id', got %q", flow.CloudEvents.Subject)
+	}
+}
+
+func TestLoad_WithMappingTransform(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "flow.yaml", `
+name: mapping-flow
+source:
+  type: http
+  config: {}
+transform:
+  mapping:
+    order_id: "$.legacy_id"
+    customer:
+      name: "$.customer_name"
+sink:
+  type: http
+  config: {}
+`)
+
+	loader := NewLoader(dir, nil)
+	flows, err := loader.Load()
+	if err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+
+	flow := flows["mapping-flow"]
+	if flow == nil {
+		t.Fatal("expected flow 'mapping-flow'")
+	}
+	if flow.Transform == nil {
+		t.Fatal("expected transform config")
+	}
+	if len(flow.Transform.Mapping) == 0 {
+		t.Fatal("expected non-empty mapping")
+	}
+	if flow.Transform.Mapping["order_id"] != "$.legacy_id" {
+		t.Errorf("expected mapping order_id='$.legacy_id', got %v", flow.Transform.Mapping["order_id"])
 	}
 }
 

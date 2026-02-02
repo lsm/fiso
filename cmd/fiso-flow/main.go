@@ -19,12 +19,14 @@ import (
 	"github.com/lsm/fiso/internal/observability"
 	"github.com/lsm/fiso/internal/pipeline"
 	httpsink "github.com/lsm/fiso/internal/sink/http"
+	temporalsink "github.com/lsm/fiso/internal/sink/temporal"
 	"github.com/lsm/fiso/internal/source"
 	grpcsource "github.com/lsm/fiso/internal/source/grpc"
 	httpsource "github.com/lsm/fiso/internal/source/http"
 	"github.com/lsm/fiso/internal/source/kafka"
 	"github.com/lsm/fiso/internal/transform"
 	celxform "github.com/lsm/fiso/internal/transform/cel"
+	mappingxform "github.com/lsm/fiso/internal/transform/mapping"
 )
 
 func main() {
@@ -186,32 +188,79 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 	// Use the interface type so a nil value stays nil (avoids typed-nil gotcha).
 	var transformer transform.Transformer
 	var err error
-	if flowDef.Transform != nil && flowDef.Transform.CEL != "" {
-		transformer, err = celxform.NewTransformer(flowDef.Transform.CEL)
-		if err != nil {
-			return nil, fmt.Errorf("cel transformer: %w", err)
+	if flowDef.Transform != nil {
+		switch {
+		case flowDef.Transform.CEL != "":
+			transformer, err = celxform.NewTransformer(flowDef.Transform.CEL)
+			if err != nil {
+				return nil, fmt.Errorf("cel transformer: %w", err)
+			}
+		case len(flowDef.Transform.Mapping) > 0:
+			transformer, err = mappingxform.NewTransformer(flowDef.Transform.Mapping)
+			if err != nil {
+				return nil, fmt.Errorf("mapping transformer: %w", err)
+			}
 		}
 	}
 
 	// Build sink
-	if flowDef.Sink.Type != "http" {
-		return nil, fmt.Errorf("unsupported sink type: %s (only 'http' supported)", flowDef.Sink.Type)
+	var sk interface {
+		Deliver(context.Context, []byte, map[string]string) error
+		Close() error
 	}
 
-	sinkURL, _ := flowDef.Sink.Config["url"].(string)
-	sinkMethod, _ := flowDef.Sink.Config["method"].(string)
+	switch flowDef.Sink.Type {
+	case "http":
+		sinkURL, _ := flowDef.Sink.Config["url"].(string)
+		sinkMethod, _ := flowDef.Sink.Config["method"].(string)
 
-	sk, err := httpsink.NewSink(httpsink.Config{
-		URL:    sinkURL,
-		Method: sinkMethod,
-		Retry: httpsink.RetryConfig{
-			MaxAttempts:     flowDef.ErrorHandling.MaxRetries,
-			InitialInterval: 200 * time.Millisecond,
-			MaxInterval:     30 * time.Second,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("http sink: %w", err)
+		httpSink, err := httpsink.NewSink(httpsink.Config{
+			URL:    sinkURL,
+			Method: sinkMethod,
+			Retry: httpsink.RetryConfig{
+				MaxAttempts:     flowDef.ErrorHandling.MaxRetries,
+				InitialInterval: 200 * time.Millisecond,
+				MaxInterval:     30 * time.Second,
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("http sink: %w", err)
+		}
+		sk = httpSink
+
+	case "temporal":
+		tcfg := temporalsink.Config{
+			TaskQueue:    getString(flowDef.Sink.Config, "taskQueue"),
+			WorkflowType: getString(flowDef.Sink.Config, "workflowType"),
+		}
+		if v := getString(flowDef.Sink.Config, "hostPort"); v != "" {
+			tcfg.HostPort = v
+		}
+		if v := getString(flowDef.Sink.Config, "namespace"); v != "" {
+			tcfg.Namespace = v
+		}
+		if v := getString(flowDef.Sink.Config, "workflowIdExpr"); v != "" {
+			tcfg.WorkflowIDExpr = v
+		}
+		if v := getString(flowDef.Sink.Config, "signalName"); v != "" {
+			tcfg.SignalName = v
+		}
+		if v := getString(flowDef.Sink.Config, "mode"); v != "" {
+			tcfg.Mode = temporalsink.Mode(v)
+		}
+
+		client, err := newTemporalSDKClient(tcfg)
+		if err != nil {
+			return nil, fmt.Errorf("temporal client: %w", err)
+		}
+		tSink, err := temporalsink.NewSink(client, tcfg)
+		if err != nil {
+			return nil, fmt.Errorf("temporal sink: %w", err)
+		}
+		sk = tSink
+
+	default:
+		return nil, fmt.Errorf("unsupported sink type: %s", flowDef.Sink.Type)
 	}
 
 	// Build DLQ handler — use Kafka publisher when brokers available, noop otherwise
@@ -237,7 +286,21 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 		PropagateErrors: propagateErrors,
 	}
 
+	// Apply CloudEvents overrides from config
+	if flowDef.CloudEvents != nil {
+		cfg.CloudEvents = &pipeline.CloudEventsOverrides{
+			Type:    flowDef.CloudEvents.Type,
+			Source:  flowDef.CloudEvents.Source,
+			Subject: flowDef.CloudEvents.Subject,
+		}
+	}
+
 	return pipeline.New(cfg, src, transformer, sk, dlqHandler), nil
+}
+
+func getString(m map[string]interface{}, key string) string {
+	v, _ := m[key].(string)
+	return v
 }
 
 func getStringSlice(m map[string]interface{}, key string) ([]string, error) {

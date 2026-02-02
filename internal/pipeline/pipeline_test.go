@@ -433,6 +433,297 @@ func TestPipeline_PropagateErrors_HappyPathNoError(t *testing.T) {
 	}
 }
 
+func TestPipeline_CloudEventsOverrides_Static(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"order_id":"abc"}`), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			Type:    "order.created",
+			Source:  "my-service",
+			Subject: "orders",
+		},
+	}, src, nil, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ce["type"] != "order.created" {
+		t.Errorf("expected type 'order.created', got %v", ce["type"])
+	}
+	if ce["source"] != "my-service" {
+		t.Errorf("expected source 'my-service', got %v", ce["source"])
+	}
+	if ce["subject"] != "orders" {
+		t.Errorf("expected subject 'orders', got %v", ce["subject"])
+	}
+}
+
+func TestPipeline_CloudEventsOverrides_DynamicJSONPath(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"order_id":"abc-123","event_type":"order.shipped"}`), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			Type:    "$.event_type",
+			Subject: "$.order_id",
+		},
+	}, src, nil, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ce["type"] != "order.shipped" {
+		t.Errorf("expected type 'order.shipped', got %v", ce["type"])
+	}
+	if ce["subject"] != "abc-123" {
+		t.Errorf("expected subject 'abc-123', got %v", ce["subject"])
+	}
+	// Source should be the default since no override was set
+	if ce["source"] != "fiso-flow/test-flow" {
+		t.Errorf("expected source 'fiso-flow/test-flow', got %v", ce["source"])
+	}
+}
+
+func TestPipeline_CloudEventsOverrides_MissingFieldFallback(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"order_id":"abc"}`), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			Type:    "$.nonexistent",
+			Subject: "$.also_missing",
+		},
+	}, src, nil, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// ResolveString falls back to the raw expression on error
+	if ce["type"] != "$.nonexistent" {
+		t.Errorf("expected type '$.nonexistent' (fallback), got %v", ce["type"])
+	}
+	if ce["subject"] != "$.also_missing" {
+		t.Errorf("expected subject '$.also_missing' (fallback), got %v", ce["subject"])
+	}
+}
+
+func TestPipeline_CloudEventsOverrides_WithTransform(t *testing.T) {
+	// Verifies that CE overrides resolve against the ORIGINAL input, not the transformed output
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"order_id":"orig-123","name":"Alice"}`), Topic: "orders"},
+		},
+	}
+	transformer := &mockTransformer{
+		fn: func(_ context.Context, _ []byte) ([]byte, error) {
+			// Transform completely replaces the payload — original fields not present
+			return []byte(`{"transformed":true}`), nil
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			Subject: "$.order_id",
+		},
+	}, src, transformer, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Subject should be resolved from original input, not transformed output
+	if ce["subject"] != "orig-123" {
+		t.Errorf("expected subject 'orig-123' (from original), got %v", ce["subject"])
+	}
+	// Data should be the transformed output
+	dataBytes, _ := json.Marshal(ce["data"])
+	if !strings.Contains(string(dataBytes), "transformed") {
+		t.Errorf("expected transformed data, got %s", string(dataBytes))
+	}
+}
+
+func TestPipeline_CloudEventsOverrides_NilNoRegression(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"data":"ok"}`), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{FlowName: "test-flow", EventType: "test.event"}, src, nil, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ce["type"] != "test.event" {
+		t.Errorf("expected type 'test.event', got %v", ce["type"])
+	}
+	if ce["source"] != "fiso-flow/test-flow" {
+		t.Errorf("expected source 'fiso-flow/test-flow', got %v", ce["source"])
+	}
+	if _, ok := ce["subject"]; ok {
+		t.Error("expected no subject field when CloudEvents is nil")
+	}
+}
+
+func TestPipeline_CloudEventsOverrides_InvalidJSON(t *testing.T) {
+	// When original input is not valid JSON, CE overrides should fall back to literal values.
+	// A transformer converts non-JSON input into valid JSON for the CloudEvent data field.
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`not valid json`), Topic: "orders"},
+		},
+	}
+	transformer := &mockTransformer{
+		fn: func(_ context.Context, _ []byte) ([]byte, error) {
+			return []byte(`{"converted":true}`), nil
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			Type:    "custom.event",
+			Source:  "my-source",
+			Subject: "my-subject",
+		},
+	}, src, transformer, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Should use literal values since original JSON parse failed
+	if ce["type"] != "custom.event" {
+		t.Errorf("expected type 'custom.event', got %v", ce["type"])
+	}
+	if ce["source"] != "my-source" {
+		t.Errorf("expected source 'my-source', got %v", ce["source"])
+	}
+	if ce["subject"] != "my-subject" {
+		t.Errorf("expected subject 'my-subject', got %v", ce["subject"])
+	}
+}
+
+func TestPipeline_CloudEventsOverrides_PartialOverrides(t *testing.T) {
+	// Only override Type, leave Source and Subject as defaults
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"data":"ok"}`), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			Type: "order.created",
+		},
+	}, src, nil, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ce["type"] != "order.created" {
+		t.Errorf("expected type 'order.created', got %v", ce["type"])
+	}
+	// Source should remain the default
+	if ce["source"] != "fiso-flow/test-flow" {
+		t.Errorf("expected source 'fiso-flow/test-flow', got %v", ce["source"])
+	}
+	// No subject should be set
+	if _, ok := ce["subject"]; ok {
+		t.Error("expected no subject field when Subject override is empty")
+	}
+}
+
 func TestPipeline_Shutdown_PropagatesErrors(t *testing.T) {
 	src := &mockSource{closeErr: errors.New("source close failed")}
 	sk := &mockSink{closeErr: errors.New("sink close failed")}

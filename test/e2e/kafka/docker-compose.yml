@@ -1,0 +1,61 @@
+services:
+  kafka:
+    image: apache/kafka:4.0.0
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+    healthcheck:
+      test: ["/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # External service (behind fiso-link)
+  external-api:
+    image: hashicorp/http-echo:latest
+    command: ["-text={\"enrichment\":\"data-from-external\"}", "-listen=:80"]
+
+  # Egress proxy
+  fiso-link:
+    image: fiso-link:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.link
+    volumes:
+      - ./fiso/link:/etc/fiso/link:ro
+    environment:
+      FISO_LINK_CONFIG: /etc/fiso/link/config.yaml
+    depends_on:
+      - external-api
+
+  # User's backend business logic
+  user-service:
+    build:
+      context: ./user-service
+    environment:
+      FISO_LINK_ADDR: http://fiso-link:3500
+    depends_on:
+      - fiso-link
+
+  # Ingress — consumes Kafka events, forwards to user-service
+  fiso-flow:
+    image: fiso-flow:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.flow
+    volumes:
+      - ./fiso/flows:/etc/fiso/flows:ro
+    environment:
+      FISO_CONFIG_DIR: /etc/fiso/flows
+      FISO_METRICS_ADDR: ":9090"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      user-service:
+        condition: service_started

@@ -28,6 +28,7 @@ func TestRunInit(t *testing.T) {
 
 	// Flows under fiso/
 	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "example-flow.yaml"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "kafka-flow.yaml"))
 
 	// Link config under fiso/link/
 	assertFileExists(t, filepath.Join(dir, "fiso", "link", "config.yaml"))
@@ -93,6 +94,40 @@ func TestRunInit_SampleFlowContent(t *testing.T) {
 	}
 	if !strings.Contains(content, "type: http") {
 		t.Error("sample flow should contain type: http")
+	}
+}
+
+func TestRunInit_KafkaFlowContent(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RunInit(nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "fiso", "flows", "kafka-flow.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "name: kafka-flow") {
+		t.Error("kafka flow should contain name: kafka-flow")
+	}
+	if !strings.Contains(content, "type: kafka") {
+		t.Error("kafka flow should contain type: kafka")
+	}
+	if !strings.Contains(content, "brokers") {
+		t.Error("kafka flow should contain brokers")
+	}
+	if !strings.Contains(content, "consumerGroup") {
+		t.Error("kafka flow should contain consumerGroup")
 	}
 }
 

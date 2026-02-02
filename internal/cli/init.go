@@ -40,6 +40,9 @@ func RunInit(args []string) error {
 	if err := copyEmbedded(flowsDir, "example-flow.yaml", "templates/sample-flow.yaml"); err != nil {
 		return err
 	}
+	if err := copyEmbedded(flowsDir, "kafka-flow.yaml", "templates/kafka-flow.yaml"); err != nil {
+		return err
+	}
 	if err := copyEmbedded(linkDir, "config.yaml", "templates/link-config.yaml"); err != nil {
 		return err
 	}

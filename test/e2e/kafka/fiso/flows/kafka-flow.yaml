@@ -1,0 +1,17 @@
+name: kafka-flow
+source:
+  type: kafka
+  config:
+    brokers:
+      - kafka:9092
+    topic: test-events
+    consumerGroup: fiso-kafka-e2e
+    startOffset: earliest
+sink:
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST
+errorHandling:
+  deadLetterTopic: fiso-dlq-kafka-e2e
+  maxRetries: 3

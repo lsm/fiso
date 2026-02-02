@@ -163,9 +163,12 @@ jobs:
           $GITHUB_WORKSPACE/bin/fiso init
           test -f fiso/docker-compose.yml
           test -f fiso/flows/example-flow.yaml
+          test -f fiso/flows/kafka-flow.yaml
           test -f fiso/link/config.yaml
           test -f fiso/user-service/main.go
           grep -q "type: http" fiso/flows/example-flow.yaml
+          grep -q "type: kafka" fiso/flows/kafka-flow.yaml
+          grep -q "brokers" fiso/flows/kafka-flow.yaml
           grep -q "fiso-link" fiso/docker-compose.yml
           ! grep -q "kafka" fiso/flows/example-flow.yaml
           grep -q "profiles:" fiso/docker-compose.yml
@@ -194,6 +197,58 @@ jobs:
 
       - name: Run HTTP E2E tests
         working-directory: test/e2e/http
+        run: bash test.sh
+        env:
+          E2E_BUILD_FLAG: " "
+
+  e2e-kafka:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+
+      - name: Build Docker images from pre-compiled binaries
+        run: |
+          chmod +x bin/fiso-flow bin/fiso-link
+          printf 'FROM alpine:3.20\nRUN apk add --no-cache ca-certificates tzdata\nCOPY fiso-flow /usr/local/bin/fiso-flow\nENTRYPOINT ["fiso-flow"]\n' \
+            | docker build -t fiso-flow:e2e -f - bin/
+          printf 'FROM alpine:3.20\nRUN apk add --no-cache ca-certificates tzdata\nCOPY fiso-link /usr/local/bin/fiso-link\nENTRYPOINT ["fiso-link"]\n' \
+            | docker build -t fiso-link:e2e -f - bin/
+
+      - name: Run Kafka E2E tests
+        working-directory: test/e2e/kafka
+        run: bash test.sh
+        env:
+          E2E_BUILD_FLAG: " "
+
+  e2e-kafka-temporal:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+
+      - name: Build Docker images from pre-compiled binaries
+        run: |
+          chmod +x bin/fiso-flow bin/fiso-link
+          printf 'FROM alpine:3.20\nRUN apk add --no-cache ca-certificates tzdata\nCOPY fiso-flow /usr/local/bin/fiso-flow\nENTRYPOINT ["fiso-flow"]\n' \
+            | docker build -t fiso-flow:e2e -f - bin/
+          printf 'FROM alpine:3.20\nRUN apk add --no-cache ca-certificates tzdata\nCOPY fiso-link /usr/local/bin/fiso-link\nENTRYPOINT ["fiso-link"]\n' \
+            | docker build -t fiso-link:e2e -f - bin/
+
+      - name: Run Kafka → Temporal E2E tests
+        working-directory: test/e2e/kafka-temporal
         run: bash test.sh
         env:
           E2E_BUILD_FLAG: " "

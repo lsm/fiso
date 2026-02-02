@@ -1,0 +1,17 @@
+name: kafka-flow
+source:
+  type: kafka
+  config:
+    brokers:
+      - localhost:9092
+    topic: my-events
+    consumerGroup: fiso-kafka-flow
+    startOffset: latest
+sink:
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST
+errorHandling:
+  deadLetterTopic: fiso-dlq-kafka-flow
+  maxRetries: 3

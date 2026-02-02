@@ -1,0 +1,30 @@
+name: kafka-temporal-flow
+source:
+  type: kafka
+  config:
+    brokers:
+      - kafka:9092
+    topic: order-events
+    consumerGroup: fiso-temporal-e2e
+    startOffset: earliest
+transform:
+  mapping:
+    order_id: "$.order_id"
+    total: "$.amount"
+    customer_name: "$.customer"
+    status: "pending"
+cloudevents:
+  type: order.created
+  source: fiso-e2e
+  subject: "$.order_id"
+sink:
+  type: temporal
+  config:
+    hostPort: temporal:7233
+    namespace: default
+    taskQueue: order-processing
+    workflowType: ProcessOrder
+    workflowIdExpr: "order-{{.order_id}}"
+errorHandling:
+  deadLetterTopic: fiso-dlq-temporal-e2e
+  maxRetries: 3

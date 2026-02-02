@@ -11,6 +11,7 @@ import (
 	"github.com/lsm/fiso/internal/config"
 	"github.com/lsm/fiso/internal/link"
 	celxform "github.com/lsm/fiso/internal/transform/cel"
+	mappingxform "github.com/lsm/fiso/internal/transform/mapping"
 )
 
 // RunValidate validates flow and link configuration files.
@@ -122,6 +123,16 @@ func validateFlowFile(path string) []validationError {
 			errs = append(errs, validationError{
 				File:    path,
 				Field:   "transform.cel",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	if flow.Transform != nil && len(flow.Transform.Mapping) > 0 {
+		if _, err := mappingxform.NewTransformer(flow.Transform.Mapping); err != nil {
+			errs = append(errs, validationError{
+				File:    path,
+				Field:   "transform.mapping",
 				Message: err.Error(),
 			})
 		}

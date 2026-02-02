@@ -10,16 +10,26 @@ import (
 	"time"
 
 	"github.com/lsm/fiso/internal/dlq"
+	"github.com/lsm/fiso/internal/jsonpath"
 	"github.com/lsm/fiso/internal/sink"
 	"github.com/lsm/fiso/internal/source"
 	"github.com/lsm/fiso/internal/transform"
 )
+
+// CloudEventsOverrides allows customizing CloudEvent envelope fields.
+// Values starting with "$." are resolved as JSONPath against the original input.
+type CloudEventsOverrides struct {
+	Type    string // CloudEvent type override
+	Source  string // CloudEvent source override
+	Subject string // CloudEvent subject override
+}
 
 // Config holds pipeline configuration.
 type Config struct {
 	FlowName        string
 	EventType       string // CloudEvent type (e.g., "order.created")
 	PropagateErrors bool   // When true, return processing errors to the source handler.
+	CloudEvents     *CloudEventsOverrides
 }
 
 // Pipeline orchestrates the source → transform → sink flow.
@@ -65,6 +75,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 }
 
 func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
+	originalPayload := evt.Value // preserve for CE field resolution
 	payload := evt.Value
 
 	// Transform
@@ -78,7 +89,7 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 	}
 
 	// Wrap in CloudEvent
-	wrapped, err := p.wrapCloudEvent(payload)
+	wrapped, err := p.wrapCloudEvent(payload, originalPayload)
 	if err != nil {
 		p.sendToDLQ(ctx, evt, "CLOUDEVENT_WRAP_FAILED", err.Error())
 		return err
@@ -96,19 +107,56 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 	return nil
 }
 
-func (p *Pipeline) wrapCloudEvent(data []byte) ([]byte, error) {
+func (p *Pipeline) wrapCloudEvent(data, originalInput []byte) ([]byte, error) {
 	eventType := p.config.EventType
 	if eventType == "" {
 		eventType = "fiso.event"
+	}
+	ceSource := "fiso-flow/" + p.config.FlowName
+	var ceSubject string
+
+	// Apply CloudEvents overrides
+	if p.config.CloudEvents != nil {
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(originalInput, &parsed); err != nil {
+			// If we can't parse original input, use overrides as literals only
+			parsed = nil
+		}
+
+		if p.config.CloudEvents.Type != "" {
+			if parsed != nil {
+				eventType = jsonpath.ResolveString(parsed, p.config.CloudEvents.Type)
+			} else {
+				eventType = p.config.CloudEvents.Type
+			}
+		}
+		if p.config.CloudEvents.Source != "" {
+			if parsed != nil {
+				ceSource = jsonpath.ResolveString(parsed, p.config.CloudEvents.Source)
+			} else {
+				ceSource = p.config.CloudEvents.Source
+			}
+		}
+		if p.config.CloudEvents.Subject != "" {
+			if parsed != nil {
+				ceSubject = jsonpath.ResolveString(parsed, p.config.CloudEvents.Subject)
+			} else {
+				ceSubject = p.config.CloudEvents.Subject
+			}
+		}
 	}
 
 	ce := map[string]interface{}{
 		"specversion": "1.0",
 		"id":          generateID(),
-		"source":      "fiso-flow/" + p.config.FlowName,
+		"source":      ceSource,
 		"type":        eventType,
 		"time":        time.Now().UTC().Format(time.RFC3339),
 		"data":        json.RawMessage(data),
+	}
+
+	if ceSubject != "" {
+		ce["subject"] = ceSubject
 	}
 
 	return json.Marshal(ce)

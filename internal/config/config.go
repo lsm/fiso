@@ -38,6 +38,31 @@ func (f *FlowDefinition) Validate() error {
 		errs = append(errs, fmt.Errorf("sink.type %q is not valid (must be one of: http, grpc, temporal)", f.Sink.Type))
 	}
 
+	// Transform: cel and mapping are mutually exclusive.
+	if f.Transform != nil && f.Transform.CEL != "" && len(f.Transform.Mapping) > 0 {
+		errs = append(errs, fmt.Errorf("transform: 'cel' and 'mapping' are mutually exclusive"))
+	}
+
+	// Temporal sink validation.
+	if f.Sink.Type == "temporal" {
+		if f.Sink.Config == nil {
+			errs = append(errs, fmt.Errorf("sink.config is required for temporal sink"))
+		} else {
+			if _, ok := f.Sink.Config["taskQueue"].(string); !ok {
+				errs = append(errs, fmt.Errorf("sink.config.taskQueue is required for temporal sink"))
+			}
+			if _, ok := f.Sink.Config["workflowType"].(string); !ok {
+				errs = append(errs, fmt.Errorf("sink.config.workflowType is required for temporal sink"))
+			}
+			mode, _ := f.Sink.Config["mode"].(string)
+			if mode == "signal" {
+				if _, ok := f.Sink.Config["signalName"].(string); !ok {
+					errs = append(errs, fmt.Errorf("sink.config.signalName is required when mode is 'signal'"))
+				}
+			}
+		}
+	}
+
 	if f.ErrorHandling.MaxRetries < 0 {
 		errs = append(errs, fmt.Errorf("errorHandling.maxRetries must be >= 0, got %d", f.ErrorHandling.MaxRetries))
 	}
@@ -49,9 +74,18 @@ func (f *FlowDefinition) Validate() error {
 type FlowDefinition struct {
 	Name          string              `yaml:"name"`
 	Source        SourceConfig        `yaml:"source"`
+	CloudEvents   *CloudEventsConfig  `yaml:"cloudevents,omitempty"`
 	Transform     *TransformConfig    `yaml:"transform,omitempty"`
 	Sink          SinkConfig          `yaml:"sink"`
 	ErrorHandling ErrorHandlingConfig `yaml:"errorHandling"`
+}
+
+// CloudEventsConfig holds overrides for the CloudEvents envelope fields.
+// Values starting with "$." are resolved as JSONPath expressions against the input event.
+type CloudEventsConfig struct {
+	Type    string `yaml:"type,omitempty"`
+	Source  string `yaml:"source,omitempty"`
+	Subject string `yaml:"subject,omitempty"`
 }
 
 // SourceConfig holds source configuration.
@@ -61,8 +95,10 @@ type SourceConfig struct {
 }
 
 // TransformConfig holds transform configuration.
+// CEL and Mapping are mutually exclusive.
 type TransformConfig struct {
-	CEL string `yaml:"cel"`
+	CEL     string                 `yaml:"cel"`
+	Mapping map[string]interface{} `yaml:"mapping,omitempty"`
 }
 
 // SinkConfig holds sink configuration.
