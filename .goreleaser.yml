@@ -51,100 +51,52 @@ builds:
       - amd64
       - arm64
 
-dockers:
-  - id: fiso-flow-amd64
+dockers_v2:
+  - id: fiso-flow
     ids: [fiso-flow]
-    goos: linux
-    goarch: amd64
-    image_templates:
-      - "ghcr.io/lsm/fiso-flow:{{ .Tag }}-amd64"
+    images:
+      - "ghcr.io/lsm/fiso-flow"
+    tags:
+      - "{{ .Tag }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
     dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--build-arg=BINARY=fiso-flow"
+    build_args:
+      BINARY: fiso-flow
 
-  - id: fiso-flow-arm64
-    ids: [fiso-flow]
-    goos: linux
-    goarch: arm64
-    image_templates:
-      - "ghcr.io/lsm/fiso-flow:{{ .Tag }}-arm64"
-    dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--build-arg=BINARY=fiso-flow"
-
-  - id: fiso-link-amd64
+  - id: fiso-link
     ids: [fiso-link]
-    goos: linux
-    goarch: amd64
-    image_templates:
-      - "ghcr.io/lsm/fiso-link:{{ .Tag }}-amd64"
+    images:
+      - "ghcr.io/lsm/fiso-link"
+    tags:
+      - "{{ .Tag }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
     dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--build-arg=BINARY=fiso-link"
+    build_args:
+      BINARY: fiso-link
 
-  - id: fiso-link-arm64
-    ids: [fiso-link]
-    goos: linux
-    goarch: arm64
-    image_templates:
-      - "ghcr.io/lsm/fiso-link:{{ .Tag }}-arm64"
-    dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--build-arg=BINARY=fiso-link"
-
-  - id: fiso-operator-amd64
+  - id: fiso-operator
     ids: [fiso-operator]
-    goos: linux
-    goarch: amd64
-    image_templates:
-      - "ghcr.io/lsm/fiso-operator:{{ .Tag }}-amd64"
+    images:
+      - "ghcr.io/lsm/fiso-operator"
+    tags:
+      - "{{ .Tag }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
     dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--build-arg=BINARY=fiso-operator"
-
-  - id: fiso-operator-arm64
-    ids: [fiso-operator]
-    goos: linux
-    goarch: arm64
-    image_templates:
-      - "ghcr.io/lsm/fiso-operator:{{ .Tag }}-arm64"
-    dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--build-arg=BINARY=fiso-operator"
-
-docker_manifests:
-  - name_template: "ghcr.io/lsm/fiso-flow:{{ .Tag }}"
-    image_templates:
-      - "ghcr.io/lsm/fiso-flow:{{ .Tag }}-amd64"
-      - "ghcr.io/lsm/fiso-flow:{{ .Tag }}-arm64"
-
-  - name_template: "ghcr.io/lsm/fiso-flow:latest"
-    image_templates:
-      - "ghcr.io/lsm/fiso-flow:{{ .Tag }}-amd64"
-      - "ghcr.io/lsm/fiso-flow:{{ .Tag }}-arm64"
-
-  - name_template: "ghcr.io/lsm/fiso-link:{{ .Tag }}"
-    image_templates:
-      - "ghcr.io/lsm/fiso-link:{{ .Tag }}-amd64"
-      - "ghcr.io/lsm/fiso-link:{{ .Tag }}-arm64"
-
-  - name_template: "ghcr.io/lsm/fiso-link:latest"
-    image_templates:
-      - "ghcr.io/lsm/fiso-link:{{ .Tag }}-amd64"
-      - "ghcr.io/lsm/fiso-link:{{ .Tag }}-arm64"
-
-  - name_template: "ghcr.io/lsm/fiso-operator:{{ .Tag }}"
-    image_templates:
-      - "ghcr.io/lsm/fiso-operator:{{ .Tag }}-amd64"
-      - "ghcr.io/lsm/fiso-operator:{{ .Tag }}-arm64"
-
-  - name_template: "ghcr.io/lsm/fiso-operator:latest"
-    image_templates:
-      - "ghcr.io/lsm/fiso-operator:{{ .Tag }}-amd64"
-      - "ghcr.io/lsm/fiso-operator:{{ .Tag }}-arm64"
+    build_args:
+      BINARY: fiso-operator
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 changelog:
