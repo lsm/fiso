@@ -17,17 +17,16 @@ services:
       timeout: 5s
       retries: 20
 
-  # Temporal server with auto-setup (creates default namespace)
+  # Temporal dev server (in-memory, no external DB needed)
   temporal:
-    image: temporalio/auto-setup:latest
-    environment:
-      DB: sqlite
+    image: temporalio/cli:latest
+    command: temporal server start-dev --ip 0.0.0.0 --port 7233
     healthcheck:
-      test: ["CMD-SHELL", "temporal operator cluster health --address localhost:7233 || tctl --address localhost:7233 cluster health"]
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
       interval: 5s
-      timeout: 10s
-      retries: 30
-      start_period: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
 
   # External service (behind fiso-link)
   external-api:
