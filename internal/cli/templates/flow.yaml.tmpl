@@ -1,0 +1,51 @@
+name: {{.FlowName}}
+source:
+{{- if eq .Source "http"}}
+  type: http
+  config:
+    listenAddr: ":8081"
+    path: /ingest
+{{- else if eq .Source "kafka"}}
+  type: kafka
+  config:
+    brokers:
+      - kafka:9092
+    topic: my-events
+    consumerGroup: fiso-{{.FlowName}}
+    startOffset: latest
+{{- end}}
+{{- if eq .Transform "cel"}}
+transform:
+  cel: '{"id": data.id, "processed_at": time}'
+{{- else if eq .Transform "mapping"}}
+transform:
+  mapping:
+    order_id: "$.order_id"
+    total: "$.amount"
+    status: "pending"
+{{- end}}
+{{- if .CloudEvents}}
+cloudevents:
+  type: app.event.created
+  source: my-service
+  subject: "$.id"
+{{- end}}
+sink:
+{{- if eq .Sink "http"}}
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST
+{{- else if eq .Sink "temporal"}}
+  type: temporal
+  config:
+    hostPort: temporal:7233
+    namespace: default
+    taskQueue: my-task-queue
+    workflowType: ProcessEvent
+{{- end}}
+{{- if eq .Source "kafka"}}
+errorHandling:
+  deadLetterTopic: fiso-dlq-{{.FlowName}}
+  maxRetries: 3
+{{- end}}

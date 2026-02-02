@@ -34,7 +34,7 @@ func run() error {
 
 	switch os.Args[1] {
 	case "init":
-		return cli.RunInit(os.Args[2:])
+		return cli.RunInit(os.Args[2:], nil)
 	case "dev":
 		return cli.RunDev(os.Args[2:])
 	case "validate":

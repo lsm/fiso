@@ -3,8 +3,62 @@ services:
   external-api:
     image: hashicorp/http-echo:latest
     command: ["-text={\"enrichment\":\"data-from-external\"}", "-listen=:80"]
+{{- if .IncludeKafka}}
 
-  # Egress proxy — user-service calls this to reach external-api
+  # Kafka broker (KRaft mode, no ZooKeeper)
+  kafka:
+    image: apache/kafka:4.0.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+{{- end}}
+{{- if .IncludeTemporal}}
+
+  # Temporal dev server (in-memory)
+  temporal:
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--port", "7233"]
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # Temporal worker — runs workflows + activities that call fiso-link
+  # Only started in docker mode: fiso dev --docker
+  temporal-worker:
+    build:
+      context: ./temporal-worker
+    environment:
+      TEMPORAL_HOST: temporal:7233
+      FISO_LINK_ADDR: http://fiso-link:3500
+    depends_on:
+      temporal:
+        condition: service_healthy
+      fiso-link:
+        condition: service_started
+    profiles:
+      - docker
+{{- end}}
+
+  # Egress proxy — your service calls external APIs through this
   fiso-link:
     image: ghcr.io/lsm/fiso-link:latest
     volumes:
@@ -13,6 +67,7 @@ services:
       FISO_LINK_CONFIG: /etc/fiso/link/config.yaml
     depends_on:
       - external-api
+{{- if not .IncludeTemporal}}
 
   # Your backend business logic (edit or replace this service)
   # Only started in docker mode: fiso dev --docker
@@ -25,8 +80,9 @@ services:
       - fiso-link
     profiles:
       - docker
+{{- end}}
 
-  # Ingress — receives HTTP events, forwards to user-service
+  # Ingress — receives events, forwards to your service
   fiso-flow:
     image: ghcr.io/lsm/fiso-flow:latest
     ports:
@@ -36,6 +92,17 @@ services:
     environment:
       FISO_CONFIG_DIR: /etc/fiso/flows
       FISO_METRICS_ADDR: ":9090"
+{{- if or .IncludeKafka .IncludeTemporal}}
+    depends_on:
+{{- if .IncludeKafka}}
+      kafka:
+        condition: service_healthy
+{{- end}}
+{{- if .IncludeTemporal}}
+      temporal:
+        condition: service_healthy
+{{- end}}
+{{- end}}
 
   prometheus:
     image: prom/prometheus:v2.54.0

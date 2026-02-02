@@ -160,15 +160,12 @@ jobs:
         run: |
           chmod +x $GITHUB_WORKSPACE/bin/fiso
           cd $(mktemp -d)
-          $GITHUB_WORKSPACE/bin/fiso init
+          $GITHUB_WORKSPACE/bin/fiso init --defaults
           test -f fiso/docker-compose.yml
           test -f fiso/flows/example-flow.yaml
-          test -f fiso/flows/kafka-flow.yaml
           test -f fiso/link/config.yaml
           test -f fiso/user-service/main.go
           grep -q "type: http" fiso/flows/example-flow.yaml
-          grep -q "type: kafka" fiso/flows/kafka-flow.yaml
-          grep -q "brokers" fiso/flows/kafka-flow.yaml
           grep -q "fiso-link" fiso/docker-compose.yml
           ! grep -q "kafka" fiso/flows/example-flow.yaml
           grep -q "profiles:" fiso/docker-compose.yml

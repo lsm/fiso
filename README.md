@@ -35,18 +35,64 @@ mkdir my-project && cd my-project
 fiso init
 ```
 
-This scaffolds a ready-to-run project:
+`fiso init` walks you through an interactive setup:
+
+```
+$ fiso init
+
+Source type:
+  ▸ 1) HTTP
+    2) Kafka
+  Choose [1]: 2
+
+Sink type:
+  ▸ 1) HTTP
+    2) Temporal
+  Choose [1]: 1
+
+Transform:
+  ▸ 1) None
+    2) CEL expression
+    3) YAML field mapping
+  Choose [1]: 3
+
+Customize CloudEvents envelope fields? [y/N]: y
+
+Fiso initialized with kafka source → http sink.
+```
+
+This generates a customized project scaffold. Use `fiso init --defaults` to skip prompts (HTTP source → HTTP sink, no transform).
+
+Default scaffold (HTTP → HTTP):
 
 ```
 fiso/
-├── docker-compose.yml        # 4-service local environment
-├── prometheus.yml             # Metrics (optional)
+├── docker-compose.yml
+├── prometheus.yml
 ├── flows/
-│   └── example-flow.yaml     # HTTP source → HTTP sink pipeline
+│   └── example-flow.yaml
 ├── link/
-│   └── config.yaml           # Egress proxy target config
+│   └── config.yaml
 └── user-service/
-    ├── main.go               # Example backend (edit or replace)
+    ├── main.go
+    ├── Dockerfile
+    └── go.mod
+```
+
+Kafka → Temporal scaffold:
+
+```
+fiso/
+├── docker-compose.yml        # Includes Kafka + Temporal services
+├── prometheus.yml
+├── flows/
+│   └── kafka-temporal-flow.yaml
+├── link/
+│   └── config.yaml
+└── temporal-worker/           # Temporal workflow worker
+    ├── main.go
+    ├── workflow.go
+    ├── activity.go
     ├── Dockerfile
     └── go.mod
 ```
@@ -57,14 +103,21 @@ fiso/
 fiso dev
 ```
 
-This starts 4 services via Docker Compose:
+By default, `fiso dev` runs in **hybrid mode**: Fiso infrastructure runs in Docker while your service runs on the host for fast iteration with live reload.
 
-| Service | Role |
-|---------|------|
-| **fiso-flow** | Ingress — receives HTTP events on `:8081`, forwards to your service |
-| **user-service** | Your backend business logic (built from the scaffold) |
-| **fiso-link** | Egress proxy — your service calls external APIs through this |
-| **external-api** | Mock external dependency (http-echo) |
+```bash
+# Terminal 1: Start Fiso infrastructure
+fiso dev
+
+# Terminal 2: Run your service on host
+cd fiso/user-service && go run .
+```
+
+To run everything in Docker (including your service):
+
+```bash
+fiso dev --docker
+```
 
 Send a test event:
 
@@ -77,8 +130,25 @@ curl -X POST http://localhost:8081/ingest \
 The request flows through the full chain:
 
 ```
-curl → fiso-flow(:8081) → user-service → fiso-link → external-api
+curl → fiso-flow(:8081) → user-service(host:8082) → fiso-link(:3500) → external-api
 ```
+
+#### Kafka Source
+
+If you selected Kafka, publish events directly:
+
+```bash
+echo '{"order_id": "12345", "amount": 99.99}' | \
+  docker compose -f fiso/docker-compose.yml exec -T kafka \
+  /opt/kafka/bin/kafka-console-producer.sh \
+  --bootstrap-server localhost:9092 --topic my-events
+```
+
+#### Temporal Sink
+
+If you selected Temporal, events are delivered as Temporal workflow executions. The scaffolded `temporal-worker/` contains an example workflow that processes events and calls external services via fiso-link.
+
+View workflow executions in the Temporal UI at `http://localhost:8233`.
 
 ### Validate
 
@@ -93,7 +163,7 @@ Checks your flow definitions and link configuration for errors before running.
 ```
                          ┌──────────────────────────────────────────┐
                          │              Fiso-Flow                   │
-  HTTP / Kafka / gRPC ──▶│  Source → CEL Transform → CloudEvent → Sink │──▶ HTTP / gRPC / Temporal
+  HTTP / Kafka / gRPC ──▶│  Source → Transform → CloudEvent → Sink    │──▶ HTTP / gRPC / Temporal
                          │                                    ↓    │
                          │                                   DLQ   │
                          └──────────────────────────────────────────┘
@@ -124,6 +194,11 @@ Consumes events from sources, optionally transforms them using CEL expressions, 
 #### Transform
 
 - **CEL** — [Common Expression Language](https://github.com/google/cel-go) from Google. Type-checked at compile time, sandboxed execution with configurable timeout (default 5s) and max output size (default 1MB). Available variables: `data`, `time`, `source`, `type`, `id`, `subject`.
+- **Mapping** — Declarative YAML field mapping using JSONPath dot-notation (`$.field.nested`). Maps input fields to output fields with static values and dynamic path resolution. Mutually exclusive with CEL.
+
+#### CloudEvents Customization
+
+CloudEvents envelope fields (`type`, `source`, `subject`) can be customized per flow. Values starting with `$.` are resolved as JSONPath expressions against the original input event (before transforms).
 
 #### Sinks
 
@@ -210,6 +285,39 @@ errorHandling:
 ```
 
 Fiso watches the config directory and hot-reloads on changes.
+
+Mapping transform with CloudEvents customization:
+
+```yaml
+name: order-pipeline
+source:
+  type: kafka
+  config:
+    brokers:
+      - kafka.infra.svc:9092
+    topic: orders
+    consumerGroup: fiso-order-flow
+    startOffset: latest
+transform:
+  mapping:
+    order_id: "$.legacy_id"
+    total: "$.amount"
+    customer: "$.customer_name"
+    status: "pending"
+cloudevents:
+  type: order.created
+  source: order-service
+  subject: "$.legacy_id"
+sink:
+  type: temporal
+  config:
+    hostPort: temporal:7233
+    taskQueue: order-processing
+    workflowType: ProcessOrder
+errorHandling:
+  deadLetterTopic: fiso-dlq-order-pipeline
+  maxRetries: 3
+```
 
 ### Link Targets (fiso-link)
 
@@ -407,6 +515,8 @@ internal/
     kafka/                   Kafka consumer source
   transform/
     cel/                     CEL expression transformer
+    mapping/                 YAML field mapping transformer
+  jsonpath/                  Shared JSONPath resolver
 api/v1alpha1/                CRD type definitions
 deploy/
   crds/                      CustomResourceDefinition manifests
@@ -427,8 +537,10 @@ GitHub Actions runs on every push and PR to `main`:
 | **checks** | gofmt, go mod tidy, go mod verify, govulncheck |
 | **build** | Compile all 4 binaries, upload artifacts |
 | **integration** | Kafka integration tests |
-| **e2e** | Full HTTP flow end-to-end test (4-service Docker Compose) |
-| **cli-smoke** | `fiso init` + `fiso validate` smoke test |
+| **e2e** | HTTP flow end-to-end test (Docker Compose) |
+| **e2e-kafka** | Kafka flow end-to-end test (Docker Compose) |
+| **e2e-kafka-temporal** | Kafka → Temporal full pipeline E2E (6-service Docker Compose) |
+| **cli-smoke** | `fiso init --defaults` + `fiso validate` smoke test |
 
 ### Release
 

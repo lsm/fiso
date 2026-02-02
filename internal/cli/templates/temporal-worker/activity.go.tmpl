@@ -1,0 +1,44 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+)
+
+// Activities holds dependencies for Temporal activities.
+type Activities struct {
+	LinkAddr string
+}
+
+// CallExternalService calls an external API through fiso-link.
+func (a *Activities) CallExternalService(ctx context.Context, input []byte) (string, error) {
+	// Parse CloudEvent wrapper to extract data
+	var ce map[string]interface{}
+	if err := json.Unmarshal(input, &ce); err != nil {
+		return "", fmt.Errorf("unmarshal cloud event: %w", err)
+	}
+
+	data, _ := json.Marshal(ce["data"])
+	log.Printf("calling fiso-link with data: %s", data)
+
+	url := a.LinkAddr + "/link/echo"
+	resp, err := http.Post(url, "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		return "", fmt.Errorf("fiso-link call: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("WORKFLOW_COMPLETE external_response=%s", body)
+
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("fiso-link returned %d: %s", resp.StatusCode, body)
+	}
+
+	return string(body), nil
+}
