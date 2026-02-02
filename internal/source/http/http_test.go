@@ -249,3 +249,45 @@ func TestSource_ContextCancellation(t *testing.T) {
 		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }
+
+func TestSource_CloseWithServer(t *testing.T) {
+	src, err := NewSource(Config{ListenAddr: "127.0.0.1:0"}, nil)
+	if err != nil {
+		t.Fatalf("new source: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- src.Start(ctx, func(_ context.Context, evt source.Event) error {
+			return nil
+		})
+	}()
+	<-src.ready
+
+	// Close the server directly
+	if err := src.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestSource_InvalidListenAddress(t *testing.T) {
+	src, err := NewSource(Config{ListenAddr: "127.0.0.1:99999"}, nil) // invalid port
+	if err != nil {
+		t.Fatalf("new source: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = src.Start(ctx, func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+
+	if err == nil {
+		t.Fatal("expected error for invalid listen address")
+	}
+}

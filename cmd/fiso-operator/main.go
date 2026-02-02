@@ -10,9 +10,27 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	fisov1alpha1 "github.com/lsm/fiso/api/v1alpha1"
 	"github.com/lsm/fiso/internal/observability"
+	"github.com/lsm/fiso/internal/operator/controller"
 	"github.com/lsm/fiso/internal/operator/webhook"
 )
+
+var scheme = runtime.NewScheme()
+
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(fisov1alpha1.AddToScheme(scheme))
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -25,6 +43,73 @@ func run() error {
 	logger := observability.NewLogger("fiso-operator", slog.LevelInfo)
 	slog.SetDefault(logger)
 
+	mode := os.Getenv("FISO_OPERATOR_MODE")
+	if mode == "" {
+		mode = "controller"
+	}
+
+	if mode == "webhook-only" {
+		return runWebhookOnly(logger)
+	}
+
+	return runController(logger)
+}
+
+func runController(logger *slog.Logger) error {
+	// Setup controller-runtime logging
+	ctrllog.SetLogger(logr.FromSlogHandler(logger.Handler()))
+
+	metricsAddr := envOrDefault("FISO_METRICS_ADDR", ":8080")
+	healthAddr := envOrDefault("FISO_HEALTH_ADDR", ":9090")
+	enableLeaderElection := os.Getenv("FISO_ENABLE_LEADER_ELECTION") == "true"
+
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		Scheme:                 scheme,
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		HealthProbeBindAddress: healthAddr,
+		LeaderElection:         enableLeaderElection,
+		LeaderElectionID:       "fiso-operator-leader.fiso.io",
+	})
+	if err != nil {
+		return fmt.Errorf("create manager: %w", err)
+	}
+
+	// Setup controllers
+	if err := (&controller.FlowDefinitionReconciler{
+		Client: mgr.GetClient(),
+		Logger: logger,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("setup FlowDefinition controller: %w", err)
+	}
+
+	if err := (&controller.LinkTargetReconciler{
+		Client: mgr.GetClient(),
+		Logger: logger,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("setup LinkTarget controller: %w", err)
+	}
+
+	// Setup webhook
+	sidecarCfg := webhook.DefaultSidecarConfig()
+	if img := os.Getenv("FISO_LINK_IMAGE"); img != "" {
+		sidecarCfg.Image = img
+	}
+	whHandler := webhook.NewWebhookHandler(sidecarCfg)
+	mgr.GetWebhookServer().Register("/mutate", whHandler)
+
+	// Health probes
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return fmt.Errorf("add healthz: %w", err)
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		return fmt.Errorf("add readyz: %w", err)
+	}
+
+	logger.Info("starting operator", "mode", "controller", "metrics", metricsAddr, "health", healthAddr, "leaderElection", enableLeaderElection)
+	return mgr.Start(ctrl.SetupSignalHandler())
+}
+
+func runWebhookOnly(logger *slog.Logger) error {
 	webhookAddr := os.Getenv("FISO_WEBHOOK_ADDR")
 	if webhookAddr == "" {
 		webhookAddr = ":8443"
@@ -106,4 +191,11 @@ func run() error {
 
 	logger.Info("shutdown complete")
 	return nil
+}
+
+func envOrDefault(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
 }

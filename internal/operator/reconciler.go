@@ -50,7 +50,7 @@ func (r *FlowReconciler) Reconcile(ctx context.Context, req ReconcileRequest) er
 	}
 
 	// Validate the flow definition
-	if err := validateFlowSpec(&fd.Spec); err != nil {
+	if err := ValidateFlowSpec(&fd.Spec); err != nil {
 		fd.Status.Phase = "Error"
 		fd.Status.Message = err.Error()
 		if updateErr := r.client.UpdateFlowDefinitionStatus(ctx, fd); updateErr != nil {
@@ -69,14 +69,14 @@ func (r *FlowReconciler) Reconcile(ctx context.Context, req ReconcileRequest) er
 	return nil
 }
 
-func validateFlowSpec(spec *v1alpha1.FlowDefinitionSpec) error {
+func ValidateFlowSpec(spec *v1alpha1.FlowDefinitionSpec) error {
 	if spec.Source.Type == "" {
 		return fmt.Errorf("source type is required")
 	}
 	if spec.Sink.Type == "" {
 		return fmt.Errorf("sink type is required")
 	}
-	validSourceTypes := map[string]bool{"kafka": true, "grpc": true}
+	validSourceTypes := map[string]bool{"kafka": true, "grpc": true, "http": true}
 	if !validSourceTypes[spec.Source.Type] {
 		return fmt.Errorf("unsupported source type: %s", spec.Source.Type)
 	}
@@ -110,7 +110,7 @@ func (r *LinkReconciler) Reconcile(ctx context.Context, req ReconcileRequest) er
 		return fmt.Errorf("get link target: %w", err)
 	}
 
-	if err := validateLinkSpec(&lt.Spec); err != nil {
+	if err := ValidateLinkSpec(&lt.Spec); err != nil {
 		lt.Status.Phase = "Error"
 		lt.Status.Message = err.Error()
 		if updateErr := r.client.UpdateLinkTargetStatus(ctx, lt); updateErr != nil {
@@ -129,7 +129,7 @@ func (r *LinkReconciler) Reconcile(ctx context.Context, req ReconcileRequest) er
 	return nil
 }
 
-func validateLinkSpec(spec *v1alpha1.LinkTargetSpec) error {
+func ValidateLinkSpec(spec *v1alpha1.LinkTargetSpec) error {
 	if spec.Host == "" {
 		return fmt.Errorf("host is required")
 	}

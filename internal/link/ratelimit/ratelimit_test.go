@@ -96,3 +96,67 @@ func TestLimiter_MultipleTargets(t *testing.T) {
 		t.Fatal("expected rate limit for target b")
 	}
 }
+
+func TestLimiter_DefaultBurst(t *testing.T) {
+	l := New()
+	// When burst <= 0, it should default to int(rps)
+	l.Set("svc", 5, 0) // burst=0, should default to 5
+
+	// Should allow 5 requests (default burst = rps)
+	allowed := 0
+	for i := 0; i < 10; i++ {
+		if l.Allow("svc") {
+			allowed++
+		}
+	}
+
+	if allowed != 5 {
+		t.Errorf("expected 5 requests to be allowed with default burst, got %d", allowed)
+	}
+}
+
+func TestLimiter_DefaultBurstSmallRPS(t *testing.T) {
+	l := New()
+	// When rps < 1 and burst <= 0, burst should default to 1
+	l.Set("svc", 0.5, 0) // burst=0, rps=0.5, should default burst to 1
+
+	// Should allow at least 1 request
+	if !l.Allow("svc") {
+		t.Fatal("expected first request to be allowed with default burst=1")
+	}
+
+	// Second should be rate limited
+	if l.Allow("svc") {
+		t.Fatal("expected second request to be rate limited")
+	}
+}
+
+func TestLimiter_NegativeBurst(t *testing.T) {
+	l := New()
+	// When burst < 0, it should default to int(rps)
+	l.Set("svc", 3, -1) // burst=-1, should default to 3
+
+	// Should allow 3 requests (default burst = rps)
+	allowed := 0
+	for i := 0; i < 10; i++ {
+		if l.Allow("svc") {
+			allowed++
+		}
+	}
+
+	if allowed != 3 {
+		t.Errorf("expected 3 requests to be allowed with default burst, got %d", allowed)
+	}
+}
+
+func TestLimiter_NegativeRPS(t *testing.T) {
+	l := New()
+	// Negative rps should behave like zero (no limit)
+	l.Set("svc", -1, 10)
+
+	for i := 0; i < 100; i++ {
+		if !l.Allow("svc") {
+			t.Fatal("expected allow for negative rps target")
+		}
+	}
+}

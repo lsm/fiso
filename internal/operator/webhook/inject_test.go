@@ -319,3 +319,37 @@ func TestDefaultSidecarConfig(t *testing.T) {
 		t.Errorf("expected metrics port 9090, got %d", cfg.MetricsPort)
 	}
 }
+
+func TestWebhook_InjectWithNilAnnotations(t *testing.T) {
+	h := NewWebhookHandler(DefaultSidecarConfig())
+	// Create a pod that has injection annotation but annotations map was initially nil
+	pod := PodPartial{}
+	pod.Metadata.Annotations = map[string]string{AnnotationInject: "true"}
+	pod.Spec.Containers = []Container{{Name: "app", Image: "myapp:latest"}}
+	podBytes, _ := json.Marshal(pod)
+
+	// Now manually create the review to ensure we test the nil annotations path
+	review := AdmissionReview{
+		APIVersion: "admission.k8s.io/v1",
+		Kind:       "AdmissionReview",
+		Request: &AdmissionRequest{
+			UID:    "test-nil-ann",
+			Object: podBytes,
+		},
+	}
+	body, _ := json.Marshal(review)
+
+	req := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	var resp AdmissionReview
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+
+	// Should inject since annotation is present
+	if resp.Response.Patch == "" {
+		t.Fatal("expected patch when inject annotation is true")
+	}
+}
