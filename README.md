@@ -10,16 +10,90 @@ Fiso is built on two principles:
 
 **1. Abstract every external dependency.** Your application should never directly interact with anything outside its own process — not Kafka, not Stripe, not Salesforce, not any message broker or third-party API. Every external dependency, whether infrastructure or service, is mediated through a local interface that Fiso provides. Inbound events arrive as transformed CloudEvents on a local endpoint. Outbound requests go through `localhost:3500/link/{target}`. Your app doesn't import broker clients or embed API SDKs.
 
-**2. Invert every integration.** Instead of your application reaching out to external systems, Fiso inverts the relationship. Your app depends on stable local interfaces. The concrete details — which broker, which API endpoint, what auth method, what retry policy — are declared in configuration and managed by the runtime. Swap Kafka for gRPC ingestion, change an API provider, rotate credentials — all through config changes, zero application code touched, no redeployment of your service.
+**2. Invert every integration.** Instead of your application reaching out to external systems, Fiso inverts the relationship. Your app depends on stable local interfaces. The concrete details — which broker, which API endpoint, what auth method, what retry policy — are declared in configuration and managed by the runtime. Swap Kafka for HTTP ingestion, change an API provider, rotate credentials — all through config changes, zero application code touched, no redeployment of your service.
 
 The result: your app talks to localhost, Fiso talks to the world. Infrastructure and external services become pluggable, observable, and independently evolvable.
+
+## Quick Start
+
+### Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lsm/fiso/main/install.sh | sh
+```
+
+Or with Go:
+
+```bash
+go install github.com/lsm/fiso/cmd/fiso@latest
+```
+
+### Create a Project
+
+```bash
+mkdir my-project && cd my-project
+fiso init
+```
+
+This scaffolds a ready-to-run project:
+
+```
+fiso/
+├── docker-compose.yml        # 4-service local environment
+├── prometheus.yml             # Metrics (optional)
+├── flows/
+│   └── example-flow.yaml     # HTTP source → HTTP sink pipeline
+├── link/
+│   └── config.yaml           # Egress proxy target config
+└── user-service/
+    ├── main.go               # Example backend (edit or replace)
+    ├── Dockerfile
+    └── go.mod
+```
+
+### Run
+
+```bash
+fiso dev
+```
+
+This starts 4 services via Docker Compose:
+
+| Service | Role |
+|---------|------|
+| **fiso-flow** | Ingress — receives HTTP events on `:8081`, forwards to your service |
+| **user-service** | Your backend business logic (built from the scaffold) |
+| **fiso-link** | Egress proxy — your service calls external APIs through this |
+| **external-api** | Mock external dependency (http-echo) |
+
+Send a test event:
+
+```bash
+curl -X POST http://localhost:8081/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"order_id": "12345", "amount": 99.99}'
+```
+
+The request flows through the full chain:
+
+```
+curl → fiso-flow(:8081) → user-service → fiso-link → external-api
+```
+
+### Validate
+
+```bash
+fiso validate
+```
+
+Checks your flow definitions and link configuration for errors before running.
 
 ## Architecture
 
 ```
                          ┌──────────────────────────────────────────┐
                          │              Fiso-Flow                   │
-  Kafka / gRPC ─────────▶│  Source → CEL Transform → CloudEvent → Sink │──▶ HTTP / gRPC / Temporal
+  HTTP / Kafka / gRPC ──▶│  Source → CEL Transform → CloudEvent → Sink │──▶ HTTP / gRPC / Temporal
                          │                                    ↓    │
                          │                                   DLQ   │
                          └──────────────────────────────────────────┘
@@ -35,77 +109,15 @@ The result: your app talks to localhost, Fiso talks to the world. Infrastructure
                          └──────────────────────────────────────────┘
 ```
 
-## Quick Start
-
-### Prerequisites
-
-- Go 1.25+
-- Docker (for container builds and local dev)
-
-### Build
-
-```bash
-# Build all binaries
-make build-all
-
-# Or individually
-make build           # fiso-flow
-make build-link      # fiso-link
-make build-operator  # fiso-operator
-```
-
-### Run Locally
-
-```bash
-# Fiso-Flow
-export FISO_CONFIG_DIR=./configs/examples
-export FISO_METRICS_ADDR=:9090
-./bin/fiso-flow
-
-# Fiso-Link
-export FISO_LINK_CONFIG=./configs/examples/link-targets.yaml
-./bin/fiso-link
-
-# Fiso-Operator
-export FISO_WEBHOOK_ADDR=:8443
-export FISO_HEALTH_ADDR=:9090
-./bin/fiso-operator
-```
-
-### Docker
-
-```bash
-# Build all images
-make docker-all
-
-# Or individually
-make docker-flow
-make docker-link
-make docker-operator
-```
-
-### Docker Compose (Local Dev)
-
-Starts Kafka (KRaft mode), fiso-flow, and an echo server as HTTP sink:
-
-```bash
-make compose-up
-
-# With Prometheus monitoring
-docker compose --profile monitoring up -d
-
-# Tear down
-make compose-down
-```
-
 ## Components
 
 ### Fiso-Flow — Inbound Event Pipeline
 
-Consumes events from message brokers, transforms them using CEL expressions, wraps them in [CloudEvents v1.0](https://cloudevents.io/) format, and delivers them to configured sinks.
+Consumes events from sources, optionally transforms them using CEL expressions, wraps them in [CloudEvents v1.0](https://cloudevents.io/) format, and delivers them to configured sinks.
 
 #### Sources
 
+- **HTTP** — Synchronous request-response ingestion. Listens on a configurable address and path, forwards events to the sink, and returns the sink's response to the caller.
 - **Kafka** — Consumer group-based consumption via [franz-go](https://github.com/twmb/franz-go). Supports `earliest`/`latest` start offset. At-least-once delivery with manual offset commits.
 - **gRPC** — Streaming gRPC source for push-based event ingestion.
 
@@ -156,6 +168,24 @@ Manages Fiso CRDs and automates sidecar injection.
 
 ### Flow Definition (fiso-flow)
 
+HTTP source example (used by `fiso init`):
+
+```yaml
+name: example-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8081"
+    path: /ingest
+sink:
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST
+```
+
+Kafka source example:
+
 ```yaml
 name: order-events
 source:
@@ -184,7 +214,7 @@ Fiso watches the config directory and hot-reloads on changes.
 ### Link Targets (fiso-link)
 
 ```yaml
-listenAddr: "127.0.0.1:3500"
+listenAddr: ":3500"
 metricsAddr: ":9091"
 
 targets:
@@ -316,20 +346,48 @@ See `deploy/examples/` for complete examples.
 
 ## Development
 
+### Prerequisites
+
+- Go 1.25+
+- Docker
+
+### Build
+
+```bash
+make build-all    # All binaries (fiso-flow, fiso-link, fiso-operator, fiso CLI)
+make build        # fiso-flow only
+make build-link   # fiso-link only
+make build-cli    # fiso CLI only
+```
+
+### Test
+
+```bash
+make test                # Unit tests with race detection
+make test-integration    # Integration tests (requires Kafka)
+make coverage-check      # Enforce 95% coverage threshold
+```
+
+### Lint & Checks
+
+```bash
+make lint     # golangci-lint
+make checks   # gofmt + go mod tidy + govulncheck
+```
+
 ### Project Structure
 
 ```
-api/v1alpha1/               CRD type definitions
 cmd/
+  fiso/                      CLI entry point (init, dev, validate)
   fiso-flow/                 Flow pipeline entry point
   fiso-link/                 Link proxy entry point
   fiso-operator/             K8s operator entry point
 internal/
+  cli/                       CLI commands and templates
   config/                    YAML config loading + hot-reload (fsnotify)
   dlq/                       Dead Letter Queue handler
-  interceptor/               Request interceptors (gRPC, WASM)
   link/
-    async/                   Async message publishing
     auth/                    Auth credential providers
     circuitbreaker/          Circuit breaker implementation
     discovery/               Target discovery (DNS)
@@ -339,36 +397,23 @@ internal/
   operator/
     webhook/                 Mutating admission webhook
   pipeline/                  Pipeline orchestrator (source → transform → sink)
-  schema/                    Schema registry integration
   sink/
     grpc/                    gRPC sink
     http/                    HTTP sink
     temporal/                Temporal workflow sink
   source/
     grpc/                    gRPC streaming source
+    http/                    HTTP request-response source
     kafka/                   Kafka consumer source
   transform/
     cel/                     CEL expression transformer
-configs/
-  compose/                   Docker Compose flow configs
-  examples/                  Example configurations
+api/v1alpha1/                CRD type definitions
 deploy/
   crds/                      CustomResourceDefinition manifests
   examples/                  Example K8s deployments
-```
-
-### Testing
-
-```bash
-make test           # Run all tests with race detection
-make coverage-check # Enforce 95% coverage threshold
-```
-
-### Linting & Checks
-
-```bash
-make lint           # golangci-lint
-make checks         # gofmt + go mod tidy + govulncheck
+test/
+  e2e/                       End-to-end tests (HTTP flow)
+  integration/               Integration tests (Kafka)
 ```
 
 ### CI
@@ -380,15 +425,18 @@ GitHub Actions runs on every push and PR to `main`:
 | **test** | `go test -race` with 95% coverage gate |
 | **lint** | golangci-lint v2 |
 | **checks** | gofmt, go mod tidy, go mod verify, govulncheck |
-| **build** | Compile all 3 binaries |
+| **build** | Compile all 4 binaries, upload artifacts |
+| **integration** | Kafka integration tests |
+| **e2e** | Full HTTP flow end-to-end test (4-service Docker Compose) |
+| **cli-smoke** | `fiso init` + `fiso validate` smoke test |
 
 ### Release
 
 Releases are automated with [GoReleaser](https://goreleaser.com/). Push a version tag to trigger:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 This builds cross-platform binaries (linux/darwin, amd64/arm64), multi-arch Docker images pushed to `ghcr.io/lsm/fiso-{flow,link,operator}`, and creates a GitHub release with changelog.
