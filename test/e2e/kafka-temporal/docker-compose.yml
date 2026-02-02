@@ -19,7 +19,7 @@ services:
 
   # Temporal dev server (in-memory, no external DB needed)
   temporal:
-    image: temporalio/cli:latest
+    image: temporalio/temporal:latest
     command: temporal server start-dev --ip 0.0.0.0 --port 7233
     healthcheck:
       test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]

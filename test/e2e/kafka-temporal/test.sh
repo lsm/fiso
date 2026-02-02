@@ -7,7 +7,7 @@ echo ""
 
 BUILD_FLAG="${E2E_BUILD_FLAG:---build}"
 echo "Starting services... ($BUILD_FLAG)"
-docker compose up -d $BUILD_FLAG --wait
+docker compose up -d $BUILD_FLAG --wait --wait-timeout 120
 echo ""
 
 echo "Waiting for Kafka to be ready..."
