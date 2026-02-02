@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -221,6 +222,24 @@ func TestWriteDevOverride_FlowOnlyHybrid(t *testing.T) {
 	if !strings.Contains(content, "3500:3500") {
 		t.Error("override should expose fiso-link port in hybrid mode")
 	}
+}
+
+func TestPrintHybridBanner(t *testing.T) {
+	// Exercise the function to cover it; output goes to stdout.
+	printHybridBanner()
+}
+
+func TestPrintDockerBanner(t *testing.T) {
+	printDockerBanner()
+}
+
+func TestPrintGHCRHint_Matching(t *testing.T) {
+	printGHCRHint(fmt.Errorf("Head \"https://ghcr.io/v2/lsm/fiso-flow/manifests/latest\": denied: denied"))
+}
+
+func TestPrintGHCRHint_NonMatching(t *testing.T) {
+	// Should not panic or print anything for unrelated errors.
+	printGHCRHint(fmt.Errorf("connection refused"))
 }
 
 func TestBuildComposeFileArgs(t *testing.T) {
