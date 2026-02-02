@@ -194,4 +194,4 @@ jobs:
         working-directory: test/e2e/http
         run: bash test.sh
         env:
-          E2E_BUILD_FLAG: "--no-build"
+          E2E_BUILD_FLAG: " "
