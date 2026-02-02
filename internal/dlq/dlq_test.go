@@ -143,3 +143,27 @@ func TestClose(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestNoopPublisher(t *testing.T) {
+	var pub Publisher = &NoopPublisher{}
+	if err := pub.Publish(context.Background(), "topic", nil, nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := pub.Close(); err != nil {
+		t.Fatalf("unexpected close error: %v", err)
+	}
+}
+
+func TestNoopPublisher_WithHandler(t *testing.T) {
+	h := NewHandler(&NoopPublisher{})
+	err := h.Send(context.Background(), []byte("key"), []byte("val"), FailureInfo{
+		FlowName:  "test",
+		ErrorCode: "TEST",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := h.Close(); err != nil {
+		t.Fatalf("unexpected close error: %v", err)
+	}
+}

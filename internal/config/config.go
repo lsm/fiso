@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	validSourceTypes = map[string]bool{"kafka": true, "grpc": true}
+	validSourceTypes = map[string]bool{"kafka": true, "grpc": true, "http": true}
 	validSinkTypes   = map[string]bool{"http": true, "grpc": true, "temporal": true}
 )
 
@@ -29,7 +29,7 @@ func (f *FlowDefinition) Validate() error {
 	if f.Source.Type == "" {
 		errs = append(errs, fmt.Errorf("source.type is required"))
 	} else if !validSourceTypes[f.Source.Type] {
-		errs = append(errs, fmt.Errorf("source.type %q is not valid (must be one of: kafka, grpc)", f.Source.Type))
+		errs = append(errs, fmt.Errorf("source.type %q is not valid (must be one of: kafka, grpc, http)", f.Source.Type))
 	}
 
 	if f.Sink.Type == "" {

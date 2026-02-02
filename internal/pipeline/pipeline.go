@@ -17,8 +17,9 @@ import (
 
 // Config holds pipeline configuration.
 type Config struct {
-	FlowName  string
-	EventType string // CloudEvent type (e.g., "order.created")
+	FlowName        string
+	EventType       string // CloudEvent type (e.g., "order.created")
+	PropagateErrors bool   // When true, return processing errors to the source handler.
 }
 
 // Pipeline orchestrates the source → transform → sink flow.
@@ -55,8 +56,10 @@ func (p *Pipeline) Run(ctx context.Context) error {
 				"offset", evt.Offset,
 				"error", err,
 			)
+			if p.config.PropagateErrors {
+				return err
+			}
 		}
-		// Always return nil to the source — errors are handled via DLQ.
 		return nil
 	})
 }

@@ -375,6 +375,64 @@ func TestPipeline_Shutdown_ClosesAll(t *testing.T) {
 	}
 }
 
+func TestPipeline_PropagateErrors_ReturnsToSource(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"bad":"data"}`), Topic: "http"},
+		},
+	}
+	transformer := &mockTransformer{
+		fn: func(_ context.Context, _ []byte) ([]byte, error) {
+			return nil, fmt.Errorf("transform failed")
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{FlowName: "http-flow", PropagateErrors: true}, src, transformer, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err == nil {
+		t.Fatal("expected error from Run when PropagateErrors is true")
+	}
+	if !strings.Contains(err.Error(), "transform failed") {
+		t.Errorf("expected error to contain 'transform failed', got %s", err.Error())
+	}
+	// DLQ should still receive the event
+	if pub.count() != 1 {
+		t.Fatalf("expected 1 DLQ event, got %d", pub.count())
+	}
+}
+
+func TestPipeline_PropagateErrors_HappyPathNoError(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"data":"ok"}`), Topic: "http"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{FlowName: "http-flow", PropagateErrors: true}, src, nil, sk, dlqHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatalf("expected 1 delivered event, got %d", sk.count())
+	}
+	if pub.count() != 0 {
+		t.Fatalf("expected 0 DLQ events, got %d", pub.count())
+	}
+}
+
 func TestPipeline_Shutdown_PropagatesErrors(t *testing.T) {
 	src := &mockSource{closeErr: errors.New("source close failed")}
 	sk := &mockSink{closeErr: errors.New("sink close failed")}

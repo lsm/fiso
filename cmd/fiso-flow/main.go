@@ -19,6 +19,9 @@ import (
 	"github.com/lsm/fiso/internal/observability"
 	"github.com/lsm/fiso/internal/pipeline"
 	httpsink "github.com/lsm/fiso/internal/sink/http"
+	"github.com/lsm/fiso/internal/source"
+	grpcsource "github.com/lsm/fiso/internal/source/grpc"
+	httpsource "github.com/lsm/fiso/internal/source/http"
 	"github.com/lsm/fiso/internal/source/kafka"
 	celxform "github.com/lsm/fiso/internal/transform/cel"
 )
@@ -131,30 +134,56 @@ func run() error {
 
 func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeline.Pipeline, error) {
 	// Build source
-	if flowDef.Source.Type != "kafka" {
-		return nil, fmt.Errorf("unsupported source type: %s (only 'kafka' supported in Phase 1)", flowDef.Source.Type)
-	}
+	var src source.Source
+	var propagateErrors bool
 
-	brokers, err := getStringSlice(flowDef.Source.Config, "brokers")
-	if err != nil {
-		return nil, fmt.Errorf("source config: %w", err)
-	}
-	topic, _ := flowDef.Source.Config["topic"].(string)
-	consumerGroup, _ := flowDef.Source.Config["consumerGroup"].(string)
-	startOffset, _ := flowDef.Source.Config["startOffset"].(string)
+	switch flowDef.Source.Type {
+	case "kafka":
+		brokers, err := getStringSlice(flowDef.Source.Config, "brokers")
+		if err != nil {
+			return nil, fmt.Errorf("source config: %w", err)
+		}
+		topic, _ := flowDef.Source.Config["topic"].(string)
+		consumerGroup, _ := flowDef.Source.Config["consumerGroup"].(string)
+		startOffset, _ := flowDef.Source.Config["startOffset"].(string)
 
-	src, err := kafka.NewSource(kafka.Config{
-		Brokers:       brokers,
-		Topic:         topic,
-		ConsumerGroup: consumerGroup,
-		StartOffset:   startOffset,
-	}, logger)
-	if err != nil {
-		return nil, fmt.Errorf("kafka source: %w", err)
+		s, err := kafka.NewSource(kafka.Config{
+			Brokers:       brokers,
+			Topic:         topic,
+			ConsumerGroup: consumerGroup,
+			StartOffset:   startOffset,
+		}, logger)
+		if err != nil {
+			return nil, fmt.Errorf("kafka source: %w", err)
+		}
+		src = s
+
+	case "grpc":
+		listenAddr, _ := flowDef.Source.Config["listenAddr"].(string)
+		s, err := grpcsource.NewSource(grpcsource.Config{ListenAddr: listenAddr}, logger)
+		if err != nil {
+			return nil, fmt.Errorf("grpc source: %w", err)
+		}
+		src = s
+		propagateErrors = true
+
+	case "http":
+		listenAddr, _ := flowDef.Source.Config["listenAddr"].(string)
+		path, _ := flowDef.Source.Config["path"].(string)
+		s, err := httpsource.NewSource(httpsource.Config{ListenAddr: listenAddr, Path: path}, logger)
+		if err != nil {
+			return nil, fmt.Errorf("http source: %w", err)
+		}
+		src = s
+		propagateErrors = true
+
+	default:
+		return nil, fmt.Errorf("unsupported source type: %s", flowDef.Source.Type)
 	}
 
 	// Build transformer (optional)
 	var transformer *celxform.Transformer
+	var err error
 	if flowDef.Transform != nil && flowDef.Transform.CEL != "" {
 		transformer, err = celxform.NewTransformer(flowDef.Transform.CEL)
 		if err != nil {
@@ -164,7 +193,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 
 	// Build sink
 	if flowDef.Sink.Type != "http" {
-		return nil, fmt.Errorf("unsupported sink type: %s (only 'http' supported in Phase 1)", flowDef.Sink.Type)
+		return nil, fmt.Errorf("unsupported sink type: %s (only 'http' supported)", flowDef.Sink.Type)
 	}
 
 	sinkURL, _ := flowDef.Sink.Config["url"].(string)
@@ -183,21 +212,27 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 		return nil, fmt.Errorf("http sink: %w", err)
 	}
 
-	// Build DLQ handler
-	pub, err := kafka.NewPublisher(brokers)
-	if err != nil {
-		return nil, fmt.Errorf("dlq publisher: %w", err)
-	}
-
-	dlqHandler := dlq.NewHandler(pub)
-	if flowDef.ErrorHandling.DeadLetterTopic != "" {
-		dlqHandler = dlq.NewHandler(pub, dlq.WithTopicFunc(func(_ string) string {
-			return flowDef.ErrorHandling.DeadLetterTopic
-		}))
+	// Build DLQ handler — use Kafka publisher when brokers available, noop otherwise
+	var dlqHandler *dlq.Handler
+	if flowDef.Source.Type == "kafka" {
+		brokers, _ := getStringSlice(flowDef.Source.Config, "brokers")
+		pub, err := kafka.NewPublisher(brokers)
+		if err != nil {
+			return nil, fmt.Errorf("dlq publisher: %w", err)
+		}
+		dlqHandler = dlq.NewHandler(pub)
+		if flowDef.ErrorHandling.DeadLetterTopic != "" {
+			dlqHandler = dlq.NewHandler(pub, dlq.WithTopicFunc(func(_ string) string {
+				return flowDef.ErrorHandling.DeadLetterTopic
+			}))
+		}
+	} else {
+		dlqHandler = dlq.NewHandler(&dlq.NoopPublisher{})
 	}
 
 	cfg := pipeline.Config{
-		FlowName: flowDef.Name,
+		FlowName:        flowDef.Name,
+		PropagateErrors: propagateErrors,
 	}
 
 	return pipeline.New(cfg, src, transformer, sk, dlqHandler), nil

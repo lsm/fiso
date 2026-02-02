@@ -72,3 +72,13 @@ func (h *Handler) Send(ctx context.Context, key, value []byte, info FailureInfo)
 func (h *Handler) Close() error {
 	return h.publisher.Close()
 }
+
+// NoopPublisher is a Publisher that discards all messages.
+// Used when no message broker is configured (e.g., HTTP/gRPC sources).
+type NoopPublisher struct{}
+
+func (*NoopPublisher) Publish(context.Context, string, []byte, []byte, map[string]string) error {
+	return nil
+}
+
+func (*NoopPublisher) Close() error { return nil }
