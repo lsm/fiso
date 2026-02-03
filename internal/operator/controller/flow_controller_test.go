@@ -45,7 +45,7 @@ func TestFlowReconciler_ValidFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Requeue {
+	if result.RequeueAfter != 0 {
 		t.Error("expected no requeue")
 	}
 
@@ -82,7 +82,7 @@ func TestFlowReconciler_InvalidSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Requeue {
+	if result.RequeueAfter != 0 {
 		t.Error("expected no requeue for validation error")
 	}
 
@@ -118,7 +118,7 @@ func TestFlowReconciler_InvalidSink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Requeue {
+	if result.RequeueAfter != 0 {
 		t.Error("expected no requeue")
 	}
 
@@ -204,7 +204,7 @@ func TestFlowReconciler_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error for not-found: %v", err)
 	}
-	if result.Requeue {
+	if result.RequeueAfter != 0 {
 		t.Error("expected no requeue")
 	}
 }

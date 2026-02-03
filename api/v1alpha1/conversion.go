@@ -4,15 +4,15 @@ package v1alpha1
 func (cr *FlowDefinitionCR) ToFlowDefinition() *FlowDefinition {
 	return &FlowDefinition{
 		TypeMeta: TypeMeta{
-			Kind:       cr.TypeMeta.Kind,
-			APIVersion: cr.TypeMeta.APIVersion,
+			Kind:       cr.Kind,
+			APIVersion: cr.APIVersion,
 		},
 		ObjectMeta: ObjectMeta{
-			Name:        cr.ObjectMeta.Name,
-			Namespace:   cr.ObjectMeta.Namespace,
-			Labels:      cr.ObjectMeta.Labels,
-			Annotations: cr.ObjectMeta.Annotations,
-			Generation:  cr.ObjectMeta.Generation,
+			Name:        cr.Name,
+			Namespace:   cr.Namespace,
+			Labels:      cr.Labels,
+			Annotations: cr.Annotations,
+			Generation:  cr.Generation,
 		},
 		Spec:   cr.Spec,
 		Status: cr.Status,
@@ -23,15 +23,15 @@ func (cr *FlowDefinitionCR) ToFlowDefinition() *FlowDefinition {
 func (cr *LinkTargetCR) ToLinkTarget() *LinkTarget {
 	return &LinkTarget{
 		TypeMeta: TypeMeta{
-			Kind:       cr.TypeMeta.Kind,
-			APIVersion: cr.TypeMeta.APIVersion,
+			Kind:       cr.Kind,
+			APIVersion: cr.APIVersion,
 		},
 		ObjectMeta: ObjectMeta{
-			Name:        cr.ObjectMeta.Name,
-			Namespace:   cr.ObjectMeta.Namespace,
-			Labels:      cr.ObjectMeta.Labels,
-			Annotations: cr.ObjectMeta.Annotations,
-			Generation:  cr.ObjectMeta.Generation,
+			Name:        cr.Name,
+			Namespace:   cr.Namespace,
+			Labels:      cr.Labels,
+			Annotations: cr.Annotations,
+			Generation:  cr.Generation,
 		},
 		Spec:   cr.Spec,
 		Status: cr.Status,

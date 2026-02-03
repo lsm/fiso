@@ -28,15 +28,15 @@ func newPrompter(in io.Reader, out io.Writer) *prompter {
 // of the selected option. defaultIdx is the 0-based index used when the user
 // presses Enter without typing anything or on EOF.
 func (p *prompter) choose(question string, options []string, defaultIdx int) int {
-	fmt.Fprintf(p.out, "\n%s\n", question)
+	_, _ = fmt.Fprintf(p.out, "\n%s\n", question)
 	for i, opt := range options {
 		marker := "  "
 		if i == defaultIdx {
 			marker = "▸ "
 		}
-		fmt.Fprintf(p.out, "  %s%d) %s\n", marker, i+1, opt)
+		_, _ = fmt.Fprintf(p.out, "  %s%d) %s\n", marker, i+1, opt)
 	}
-	fmt.Fprintf(p.out, "  Choose [%d]: ", defaultIdx+1)
+	_, _ = fmt.Fprintf(p.out, "  Choose [%d]: ", defaultIdx+1)
 
 	if !p.scanner.Scan() {
 		return defaultIdx
@@ -59,7 +59,7 @@ func (p *prompter) confirm(question string, defaultYes bool) bool {
 	if defaultYes {
 		hint = "[Y/n]"
 	}
-	fmt.Fprintf(p.out, "\n%s %s: ", question, hint)
+	_, _ = fmt.Fprintf(p.out, "\n%s %s: ", question, hint)
 
 	if !p.scanner.Scan() {
 		return defaultYes
