@@ -418,13 +418,104 @@ Structured JSON logging via Go's `log/slog`.
 
 ## Kubernetes
 
+### Prerequisites
+
+- Kubernetes 1.27+
+- `kubectl` configured with cluster-admin access (for CRD and ClusterRole installation)
+
 ### Install CRDs
 
 ```bash
 kubectl apply -f deploy/crds/
+kubectl wait --for=condition=Established crd/flowdefinitions.fiso.io --timeout=30s
+kubectl wait --for=condition=Established crd/linktargets.fiso.io --timeout=30s
 ```
 
-### Example FlowDefinition CR
+This installs two CRDs:
+
+| CRD | Group | Kind | Scope |
+|-----|-------|------|-------|
+| `flowdefinitions.fiso.io` | `fiso.io/v1alpha1` | `FlowDefinition` | Namespaced |
+| `linktargets.fiso.io` | `fiso.io/v1alpha1` | `LinkTarget` | Namespaced |
+
+### Deploy the Operator
+
+#### 1. Create Namespace
+
+```bash
+kubectl create namespace fiso-system
+```
+
+#### 2. Apply RBAC
+
+```bash
+kubectl apply -f deploy/rbac/service_account.yaml
+kubectl apply -f deploy/rbac/role.yaml
+kubectl apply -f deploy/rbac/role_binding.yaml
+```
+
+This creates:
+
+| Resource | Name | Scope | Description |
+|----------|------|-------|-------------|
+| ServiceAccount | `fiso-operator` | `fiso-system` | Identity for the operator pod |
+| ClusterRole | `fiso-operator` | Cluster-wide | Permissions for CRD reconciliation, webhook, and leader election |
+| ClusterRoleBinding | `fiso-operator` | Cluster-wide | Binds the ServiceAccount to the ClusterRole |
+
+A **ClusterRole** (not a namespaced Role) is required because the operator reconciles CRDs across all namespaces.
+
+#### 3. Create TLS Secret (for webhook)
+
+The mutating webhook requires TLS. Generate a self-signed certificate or use cert-manager:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -keyout tls.key -out tls.crt \
+    -days 365 -nodes \
+    -subj "/CN=fiso-operator.fiso-system.svc" \
+    -addext "subjectAltName=DNS:fiso-operator.fiso-system.svc,DNS:fiso-operator.fiso-system.svc.cluster.local"
+
+kubectl create secret tls fiso-operator-tls \
+    --cert=tls.crt --key=tls.key -n fiso-system
+```
+
+#### 4. Deploy
+
+```bash
+kubectl apply -f deploy/operator/deployment.yaml
+```
+
+### Operator Permissions
+
+The operator's ClusterRole grants the following permissions:
+
+#### CRD Reconciliation
+
+| API Group | Resource | Verbs | Purpose |
+|-----------|----------|-------|---------|
+| `fiso.io` | `flowdefinitions` | get, list, watch, create, update, patch | Watch and reconcile FlowDefinition CRs |
+| `fiso.io` | `flowdefinitions/status` | get, update, patch | Write reconciliation status (`phase: Ready` or `Error`) |
+| `fiso.io` | `linktargets` | get, list, watch, create, update, patch | Watch and reconcile LinkTarget CRs |
+| `fiso.io` | `linktargets/status` | get, update, patch | Write reconciliation status |
+
+#### Sidecar Injection Webhook
+
+| API Group | Resource | Verbs | Purpose |
+|-----------|----------|-------|---------|
+| _(core)_ | `pods` | get, list, watch | Read Pod annotations to decide on sidecar injection |
+| `admissionregistration.k8s.io` | `mutatingwebhookconfigurations` | get, list, watch | Read webhook configuration |
+
+#### Infrastructure
+
+| API Group | Resource | Verbs | Purpose |
+|-----------|----------|-------|---------|
+| _(core)_ | `events` | create, patch | Emit Kubernetes Events for observability |
+| `coordination.k8s.io` | `leases` | get, list, watch, create, update, patch, delete | Leader election for HA deployments |
+
+Leader election permissions are only used when `FISO_ENABLE_LEADER_ELECTION=true`.
+
+### Example CRs
+
+#### FlowDefinition
 
 ```yaml
 apiVersion: fiso.io/v1alpha1
@@ -444,6 +535,31 @@ spec:
       url: "http://order-service:8080/callbacks/order-result"
 ```
 
+#### LinkTarget
+
+```yaml
+apiVersion: fiso.io/v1alpha1
+kind: LinkTarget
+metadata:
+  name: crm-api
+spec:
+  protocol: https
+  host: api.salesforce.com
+```
+
+The operator validates specs and sets `.status.phase` to `Ready` or `Error` with a descriptive `.status.message`.
+
+### Export Local Config to CRDs
+
+Convert local flow/link YAML files to Kubernetes CRD manifests:
+
+```bash
+fiso export                              # Export from default fiso/ directory
+fiso export --namespace=my-namespace     # Override namespace (default: fiso-system)
+```
+
+This generates `FlowDefinition` and `LinkTarget` CRs that can be applied with `kubectl apply`.
+
 ### Sidecar Injection
 
 Add the annotation to any Pod to get fiso-link injected automatically:
@@ -453,6 +569,8 @@ metadata:
   annotations:
     fiso.io/inject: "true"
 ```
+
+The webhook injects a `fiso-link` sidecar container with ports `3500` (proxy) and `9090` (metrics). Once injected, it sets `fiso.io/status: "injected"` to prevent duplicate injection.
 
 See `deploy/examples/` for complete examples.
 
@@ -532,6 +650,7 @@ test/
     http/                    HTTP flow E2E (Docker Compose)
     kafka/                   Kafka flow E2E (Docker Compose)
     kafka-temporal/          Kafka → Temporal E2E (Docker Compose)
+    wasm/                    WASM interceptor E2E (Docker Compose)
     operator/                CRD operator E2E (kind cluster)
   integration/               Integration tests (Kafka)
 ```
@@ -550,6 +669,7 @@ GitHub Actions runs on every push and PR to `main`:
 | **e2e** | HTTP flow end-to-end test (Docker Compose) |
 | **e2e-kafka** | Kafka flow end-to-end test (Docker Compose) |
 | **e2e-kafka-temporal** | Kafka → Temporal full pipeline E2E (6-service Docker Compose) |
+| **e2e-wasm** | WASM interceptor E2E test (Docker Compose) |
 | **e2e-operator** | CRD operator E2E test (kind cluster — CRD reconciliation, status updates) |
 | **cli-smoke** | `fiso init --defaults` + `fiso validate` smoke test |
 
