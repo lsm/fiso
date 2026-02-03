@@ -7,6 +7,7 @@ require (
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cel-go v0.27.0
 	github.com/prometheus/client_golang v1.23.2
+	github.com/tetratelabs/wazero v1.11.0
 	github.com/twmb/franz-go v1.20.6
 	github.com/twmb/franz-go/pkg/kadm v1.17.2
 	go.temporal.io/sdk v1.39.0

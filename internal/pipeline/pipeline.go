@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lsm/fiso/internal/dlq"
+	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/jsonpath"
 	"github.com/lsm/fiso/internal/sink"
 	"github.com/lsm/fiso/internal/source"
@@ -32,25 +33,28 @@ type Config struct {
 	CloudEvents     *CloudEventsOverrides
 }
 
-// Pipeline orchestrates the source → transform → sink flow.
+// Pipeline orchestrates the source → transform → interceptors → sink flow.
 type Pipeline struct {
-	config      Config
-	source      source.Source
-	transformer transform.Transformer
-	sink        sink.Sink
-	dlq         *dlq.Handler
-	logger      *slog.Logger
+	config       Config
+	source       source.Source
+	transformer  transform.Transformer
+	interceptors *interceptor.Chain
+	sink         sink.Sink
+	dlq          *dlq.Handler
+	logger       *slog.Logger
 }
 
 // New creates a new Pipeline. If transformer is nil, events pass through untransformed.
-func New(cfg Config, src source.Source, tr transform.Transformer, sk sink.Sink, dlqHandler *dlq.Handler) *Pipeline {
+// If chain is nil, no interceptors are applied.
+func New(cfg Config, src source.Source, tr transform.Transformer, sk sink.Sink, dlqHandler *dlq.Handler, chain *interceptor.Chain) *Pipeline {
 	return &Pipeline{
-		config:      cfg,
-		source:      src,
-		transformer: tr,
-		sink:        sk,
-		dlq:         dlqHandler,
-		logger:      slog.Default(),
+		config:       cfg,
+		source:       src,
+		transformer:  tr,
+		interceptors: chain,
+		sink:         sk,
+		dlq:          dlqHandler,
+		logger:       slog.Default(),
 	}
 }
 
@@ -86,6 +90,21 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 			return err
 		}
 		payload = transformed
+	}
+
+	// Run interceptors
+	if p.interceptors != nil && p.interceptors.Len() > 0 {
+		req := &interceptor.Request{
+			Payload:   payload,
+			Headers:   evt.Headers,
+			Direction: interceptor.Inbound,
+		}
+		result, err := p.interceptors.Process(ctx, req)
+		if err != nil {
+			p.sendToDLQ(ctx, evt, "INTERCEPTOR_FAILED", err.Error())
+			return err
+		}
+		payload = result.Payload
 	}
 
 	// Wrap in CloudEvent
@@ -187,6 +206,12 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 	if err := p.source.Close(); err != nil {
 		p.logger.Error("source close error", "flow", p.config.FlowName, "error", err)
 		errs = append(errs, fmt.Errorf("source close: %w", err))
+	}
+	if p.interceptors != nil {
+		if err := p.interceptors.Close(); err != nil {
+			p.logger.Error("interceptor close error", "flow", p.config.FlowName, "error", err)
+			errs = append(errs, fmt.Errorf("interceptor close: %w", err))
+		}
 	}
 	if err := p.sink.Close(); err != nil {
 		p.logger.Error("sink close error", "flow", p.config.FlowName, "error", err)

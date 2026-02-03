@@ -99,7 +99,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	p := pipeline.New(pipeline.Config{
 		FlowName:  "integration-test",
 		EventType: "test.event",
-	}, src, transformer, sk, dlqHandler)
+	}, src, transformer, sk, dlqHandler, nil)
 
 	// Start pipeline in background
 	pipelineCtx, pipelineCancel := context.WithCancel(ctx)

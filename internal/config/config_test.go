@@ -527,6 +527,47 @@ func TestFlowDefinition_Validate(t *testing.T) {
 			},
 			wantErr: "sink.config is required for temporal",
 		},
+		{
+			name: "valid wasm interceptor",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{
+					{Type: "wasm", Config: map[string]interface{}{"module": "/path/to/module.wasm"}},
+				},
+			},
+		},
+		{
+			name: "interceptor missing type",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Config: map[string]interface{}{}}},
+			},
+			wantErr: "interceptors[0].type is required",
+		},
+		{
+			name: "interceptor invalid type",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "invalid"}},
+			},
+			wantErr: "interceptors[0].type \"invalid\" is not valid",
+		},
+		{
+			name: "wasm interceptor missing module",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{}}},
+			},
+			wantErr: "interceptors[0].config.module is required",
+		},
 	}
 
 	for _, tt := range tests {

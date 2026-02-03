@@ -1,0 +1,15 @@
+name: wasm-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8081"
+    path: /ingest
+interceptors:
+  - type: wasm
+    config:
+      module: /etc/fiso/modules/enrich.wasm
+sink:
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST

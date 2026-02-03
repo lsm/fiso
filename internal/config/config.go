@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	validSourceTypes = map[string]bool{"kafka": true, "grpc": true, "http": true}
-	validSinkTypes   = map[string]bool{"http": true, "grpc": true, "temporal": true}
+	validSourceTypes      = map[string]bool{"kafka": true, "grpc": true, "http": true}
+	validSinkTypes        = map[string]bool{"http": true, "grpc": true, "temporal": true}
+	validInterceptorTypes = map[string]bool{"wasm": true, "grpc": true}
 )
 
 // Validate checks the FlowDefinition for configuration errors.
@@ -63,6 +64,20 @@ func (f *FlowDefinition) Validate() error {
 		}
 	}
 
+	// Interceptor validation.
+	for i, ic := range f.Interceptors {
+		if ic.Type == "" {
+			errs = append(errs, fmt.Errorf("interceptors[%d].type is required", i))
+		} else if !validInterceptorTypes[ic.Type] {
+			errs = append(errs, fmt.Errorf("interceptors[%d].type %q is not valid (must be one of: wasm, grpc)", i, ic.Type))
+		}
+		if ic.Type == "wasm" {
+			if _, ok := ic.Config["module"].(string); !ok {
+				errs = append(errs, fmt.Errorf("interceptors[%d].config.module is required for wasm interceptor", i))
+			}
+		}
+	}
+
 	if f.ErrorHandling.MaxRetries < 0 {
 		errs = append(errs, fmt.Errorf("errorHandling.maxRetries must be >= 0, got %d", f.ErrorHandling.MaxRetries))
 	}
@@ -76,8 +91,15 @@ type FlowDefinition struct {
 	Source        SourceConfig        `yaml:"source"`
 	CloudEvents   *CloudEventsConfig  `yaml:"cloudevents,omitempty"`
 	Transform     *TransformConfig    `yaml:"transform,omitempty"`
+	Interceptors  []InterceptorConfig `yaml:"interceptors,omitempty"`
 	Sink          SinkConfig          `yaml:"sink"`
 	ErrorHandling ErrorHandlingConfig `yaml:"errorHandling"`
+}
+
+// InterceptorConfig holds configuration for a pipeline interceptor.
+type InterceptorConfig struct {
+	Type   string                 `yaml:"type"`
+	Config map[string]interface{} `yaml:"config"`
 }
 
 // CloudEventsConfig holds overrides for the CloudEvents envelope fields.

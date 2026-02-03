@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lsm/fiso/internal/dlq"
+	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/source"
 )
 
@@ -127,7 +128,7 @@ func TestPipeline_HappyPath(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "test-flow"}, src, transformer, sk, dlqHandler)
+	p := New(Config{FlowName: "test-flow"}, src, transformer, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -157,7 +158,7 @@ func TestPipeline_TransformError_SendsToDLQ(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "order-events"}, src, transformer, sk, dlqHandler)
+	p := New(Config{FlowName: "order-events"}, src, transformer, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -195,7 +196,7 @@ func TestPipeline_SinkError_SendsToDLQ(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "order-events"}, src, transformer, sk, dlqHandler)
+	p := New(Config{FlowName: "order-events"}, src, transformer, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -225,7 +226,7 @@ func TestPipeline_CloudEventWrapping(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "test-flow", EventType: "order.created"}, src, transformer, sk, dlqHandler)
+	p := New(Config{FlowName: "test-flow", EventType: "order.created"}, src, transformer, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -268,7 +269,7 @@ func TestPipeline_NilTransformer_Passthrough(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler)
+	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -295,7 +296,7 @@ func TestPipeline_DLQPublishError(t *testing.T) {
 	pub := &mockPublisher{err: fmt.Errorf("dlq unavailable")}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "test-flow"}, src, transformer, sk, dlqHandler)
+	p := New(Config{FlowName: "test-flow"}, src, transformer, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -313,7 +314,7 @@ func TestPipeline_DefaultEventType(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "test"}, src, nil, sk, dlqHandler)
+	p := New(Config{FlowName: "test"}, src, nil, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -349,7 +350,7 @@ func TestPipeline_MultipleEvents(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "test-flow"}, src, transformer, sk, dlqHandler)
+	p := New(Config{FlowName: "test-flow"}, src, transformer, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -367,7 +368,7 @@ func TestPipeline_Shutdown_ClosesAll(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler)
+	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler, nil)
 
 	err := p.Shutdown(context.Background())
 	if err != nil {
@@ -390,7 +391,7 @@ func TestPipeline_PropagateErrors_ReturnsToSource(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "http-flow", PropagateErrors: true}, src, transformer, sk, dlqHandler)
+	p := New(Config{FlowName: "http-flow", PropagateErrors: true}, src, transformer, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -418,7 +419,7 @@ func TestPipeline_PropagateErrors_HappyPathNoError(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "http-flow", PropagateErrors: true}, src, nil, sk, dlqHandler)
+	p := New(Config{FlowName: "http-flow", PropagateErrors: true}, src, nil, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -450,7 +451,7 @@ func TestPipeline_CloudEventsOverrides_Static(t *testing.T) {
 			Source:  "my-service",
 			Subject: "orders",
 		},
-	}, src, nil, sk, dlqHandler)
+	}, src, nil, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -490,7 +491,7 @@ func TestPipeline_CloudEventsOverrides_DynamicJSONPath(t *testing.T) {
 			Type:    "$.event_type",
 			Subject: "$.order_id",
 		},
-	}, src, nil, sk, dlqHandler)
+	}, src, nil, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -531,7 +532,7 @@ func TestPipeline_CloudEventsOverrides_MissingFieldFallback(t *testing.T) {
 			Type:    "$.nonexistent",
 			Subject: "$.also_missing",
 		},
-	}, src, nil, sk, dlqHandler)
+	}, src, nil, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -575,7 +576,7 @@ func TestPipeline_CloudEventsOverrides_WithTransform(t *testing.T) {
 		CloudEvents: &CloudEventsOverrides{
 			Subject: "$.order_id",
 		},
-	}, src, transformer, sk, dlqHandler)
+	}, src, transformer, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -609,7 +610,7 @@ func TestPipeline_CloudEventsOverrides_NilNoRegression(t *testing.T) {
 	pub := &mockPublisher{}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "test-flow", EventType: "test.event"}, src, nil, sk, dlqHandler)
+	p := New(Config{FlowName: "test-flow", EventType: "test.event"}, src, nil, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -657,7 +658,7 @@ func TestPipeline_CloudEventsOverrides_InvalidJSON(t *testing.T) {
 			Source:  "my-source",
 			Subject: "my-subject",
 		},
-	}, src, transformer, sk, dlqHandler)
+	}, src, transformer, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -698,7 +699,7 @@ func TestPipeline_CloudEventsOverrides_PartialOverrides(t *testing.T) {
 		CloudEvents: &CloudEventsOverrides{
 			Type: "order.created",
 		},
-	}, src, nil, sk, dlqHandler)
+	}, src, nil, sk, dlqHandler, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -730,7 +731,7 @@ func TestPipeline_Shutdown_PropagatesErrors(t *testing.T) {
 	pub := &mockPublisher{closeErr: errors.New("dlq close failed")}
 	dlqHandler := dlq.NewHandler(pub)
 
-	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler)
+	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler, nil)
 
 	err := p.Shutdown(context.Background())
 	if err == nil {
@@ -746,5 +747,176 @@ func TestPipeline_Shutdown_PropagatesErrors(t *testing.T) {
 	}
 	if !strings.Contains(errMsg, "dlq close failed") {
 		t.Errorf("expected dlq close error, got %s", errMsg)
+	}
+}
+
+// --- Interceptor Tests ---
+
+type pipelineInterceptor struct {
+	modifyPayload []byte
+	addHeader     string
+	addValue      string
+	err           error
+	closed        bool
+}
+
+func (m *pipelineInterceptor) Process(_ context.Context, req *interceptor.Request) (*interceptor.Request, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	result := &interceptor.Request{
+		Payload:   req.Payload,
+		Headers:   make(map[string]string),
+		Direction: req.Direction,
+	}
+	for k, v := range req.Headers {
+		result.Headers[k] = v
+	}
+	if m.modifyPayload != nil {
+		result.Payload = m.modifyPayload
+	}
+	if m.addHeader != "" {
+		result.Headers[m.addHeader] = m.addValue
+	}
+	return result, nil
+}
+
+func (m *pipelineInterceptor) Close() error {
+	m.closed = true
+	return nil
+}
+
+func TestPipeline_WithInterceptor(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"data":"original"}`), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	ic := &pipelineInterceptor{modifyPayload: []byte(`{"data":"intercepted"}`)}
+	chain := interceptor.NewChain(ic)
+
+	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler, chain)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatalf("expected 1 delivered event, got %d", sk.count())
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	dataBytes, _ := json.Marshal(ce["data"])
+	if !strings.Contains(string(dataBytes), "intercepted") {
+		t.Errorf("expected intercepted data, got %s", string(dataBytes))
+	}
+}
+
+func TestPipeline_InterceptorError_SendsToDLQ(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"data":"ok"}`), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	ic := &pipelineInterceptor{err: fmt.Errorf("interceptor rejected")}
+	chain := interceptor.NewChain(ic)
+
+	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler, chain)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 0 {
+		t.Fatalf("expected 0 delivered events, got %d", sk.count())
+	}
+	if pub.count() != 1 {
+		t.Fatalf("expected 1 DLQ event, got %d", pub.count())
+	}
+	if pub.published[0].headers["fiso-error-code"] != "INTERCEPTOR_FAILED" {
+		t.Errorf("expected INTERCEPTOR_FAILED, got %s", pub.published[0].headers["fiso-error-code"])
+	}
+}
+
+func TestPipeline_NilInterceptors_Passthrough(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"data":"ok"}`), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatalf("expected 1 delivered event, got %d", sk.count())
+	}
+}
+
+func TestPipeline_Shutdown_WithInterceptorCloseError(t *testing.T) {
+	src := &mockSource{}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	ic := &pipelineInterceptor{}
+	ic.closed = false
+	chain := interceptor.NewChain(ic)
+
+	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler, chain)
+
+	err := p.Shutdown(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ic.closed {
+		t.Error("expected interceptor to be closed")
+	}
+}
+
+func TestPipeline_InterceptorError_PropagateErrors(t *testing.T) {
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"data":"ok"}`), Topic: "http"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	ic := &pipelineInterceptor{err: fmt.Errorf("interceptor failed")}
+	chain := interceptor.NewChain(ic)
+
+	p := New(Config{FlowName: "http-flow", PropagateErrors: true}, src, nil, sk, dlqHandler, chain)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err == nil {
+		t.Fatal("expected error from Run when PropagateErrors is true")
+	}
+	if !strings.Contains(err.Error(), "interceptor failed") {
+		t.Errorf("expected error to contain 'interceptor failed', got %s", err.Error())
+	}
+	if pub.count() != 1 {
+		t.Fatalf("expected 1 DLQ event, got %d", pub.count())
 	}
 }

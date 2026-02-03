@@ -16,6 +16,8 @@ import (
 
 	"github.com/lsm/fiso/internal/config"
 	"github.com/lsm/fiso/internal/dlq"
+	"github.com/lsm/fiso/internal/interceptor"
+	"github.com/lsm/fiso/internal/interceptor/wasm"
 	"github.com/lsm/fiso/internal/observability"
 	"github.com/lsm/fiso/internal/pipeline"
 	httpsink "github.com/lsm/fiso/internal/sink/http"
@@ -295,7 +297,32 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 		}
 	}
 
-	return pipeline.New(cfg, src, transformer, sk, dlqHandler), nil
+	// Build interceptor chain (optional)
+	var chain *interceptor.Chain
+	if len(flowDef.Interceptors) > 0 {
+		var interceptors []interceptor.Interceptor
+		for _, ic := range flowDef.Interceptors {
+			switch ic.Type {
+			case "wasm":
+				modulePath := getString(ic.Config, "module")
+				wasmBytes, err := os.ReadFile(modulePath)
+				if err != nil {
+					return nil, fmt.Errorf("read wasm module %s: %w", modulePath, err)
+				}
+				rt, err := wasm.NewWazeroRuntime(context.Background(), wasmBytes)
+				if err != nil {
+					return nil, fmt.Errorf("wasm runtime for %s: %w", modulePath, err)
+				}
+				interceptors = append(interceptors, wasm.New(rt, modulePath))
+				logger.Info("loaded wasm interceptor", "module", modulePath)
+			default:
+				return nil, fmt.Errorf("unsupported interceptor type: %s", ic.Type)
+			}
+		}
+		chain = interceptor.NewChain(interceptors...)
+	}
+
+	return pipeline.New(cfg, src, transformer, sk, dlqHandler, chain), nil
 }
 
 func getString(m map[string]interface{}, key string) string {
