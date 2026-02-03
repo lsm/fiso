@@ -486,32 +486,31 @@ kubectl apply -f deploy/operator/deployment.yaml
 
 ### Operator Permissions
 
-The operator's ClusterRole grants the following permissions:
+The operator's ClusterRole grants the minimum permissions required at runtime:
 
 #### CRD Reconciliation
 
 | API Group | Resource | Verbs | Purpose |
 |-----------|----------|-------|---------|
-| `fiso.io` | `flowdefinitions` | get, list, watch, create, update, patch | Watch and reconcile FlowDefinition CRs |
+| `fiso.io` | `flowdefinitions` | get, list, watch | Informer cache (list, watch) and reconciler read (get) |
 | `fiso.io` | `flowdefinitions/status` | get, update, patch | Write reconciliation status (`phase: Ready` or `Error`) |
-| `fiso.io` | `linktargets` | get, list, watch, create, update, patch | Watch and reconcile LinkTarget CRs |
+| `fiso.io` | `linktargets` | get, list, watch | Informer cache (list, watch) and reconciler read (get) |
 | `fiso.io` | `linktargets/status` | get, update, patch | Write reconciliation status |
 
-#### Sidecar Injection Webhook
-
-| API Group | Resource | Verbs | Purpose |
-|-----------|----------|-------|---------|
-| _(core)_ | `pods` | get, list, watch | Read Pod annotations to decide on sidecar injection |
-| `admissionregistration.k8s.io` | `mutatingwebhookconfigurations` | get, list, watch | Read webhook configuration |
+The reconciler never creates, updates, or patches the main CRD resources — it only reads them and writes to the `/status` subresource.
 
 #### Infrastructure
 
 | API Group | Resource | Verbs | Purpose |
 |-----------|----------|-------|---------|
-| _(core)_ | `events` | create, patch | Emit Kubernetes Events for observability |
+| _(core)_ | `events` | create, patch | Controller-runtime event recorder |
 | `coordination.k8s.io` | `leases` | get, list, watch, create, update, patch, delete | Leader election for HA deployments |
 
-Leader election permissions are only used when `FISO_ENABLE_LEADER_ELECTION=true`.
+Leader election permissions are only used when `FISO_ENABLE_LEADER_ELECTION=true`. If running a single replica without HA, the `leases` rule can be removed.
+
+#### Webhook Note
+
+The mutating admission webhook does **not** require `pods` or `mutatingwebhookconfigurations` RBAC permissions. The Kubernetes API server sends the Pod object in the `AdmissionReview` request body — the webhook handler never queries the API to read pods.
 
 ### Example CRs
 

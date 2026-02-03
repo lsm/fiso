@@ -6,32 +6,25 @@ metadata:
     app.kubernetes.io/name: fiso-operator
     app.kubernetes.io/part-of: fiso
 rules:
-  # FlowDefinition CRDs
+  # FlowDefinition CRDs — reconciler reads via Get; informer cache needs List/Watch
   - apiGroups: ["fiso.io"]
     resources: ["flowdefinitions"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["fiso.io"]
     resources: ["flowdefinitions/status"]
     verbs: ["get", "update", "patch"]
-  # LinkTarget CRDs
+  # LinkTarget CRDs — reconciler reads via Get; informer cache needs List/Watch
   - apiGroups: ["fiso.io"]
     resources: ["linktargets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["fiso.io"]
     resources: ["linktargets/status"]
     verbs: ["get", "update", "patch"]
-  # Events
+  # Events — controller-runtime event recorder
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
-  # Leader election
+  # Leader election — only used when FISO_ENABLE_LEADER_ELECTION=true
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Webhook — needs to read pods for sidecar injection
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["admissionregistration.k8s.io"]
-    resources: ["mutatingwebhookconfigurations"]
-    verbs: ["get", "list", "watch"]
