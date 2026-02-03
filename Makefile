@@ -1,4 +1,4 @@
-.PHONY: build build-link build-operator build-cli build-all test test-integration lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all compose-up compose-down
+.PHONY: build build-link build-operator build-cli build-all test test-integration e2e-operator lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all compose-up compose-down
 
 MODULE := github.com/lsm/fiso
 IMAGE_REPO ?= ghcr.io/lsm
@@ -53,6 +53,9 @@ mod-check:
 
 vulncheck:
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+e2e-operator:
+	bash test/e2e/operator/test.sh
 
 checks: fmt-check mod-check vulncheck
 
