@@ -84,9 +84,13 @@ Examples:
 
 	for i, doc := range docs {
 		if i > 0 {
-			fmt.Fprintln(w, "---")
+			if _, err := fmt.Fprintln(w, "---"); err != nil {
+				return err
+			}
 		}
-		fmt.Fprint(w, string(doc))
+		if _, err := fmt.Fprint(w, string(doc)); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -192,17 +196,17 @@ func convertFlowToCRD(flow *config.FlowDefinition, namespace string) *v1alpha1.F
 
 	// Preserve CloudEvents config as annotations
 	if flow.CloudEvents != nil {
-		if crd.ObjectMeta.Annotations == nil {
-			crd.ObjectMeta.Annotations = make(map[string]string)
+		if crd.Annotations == nil {
+			crd.Annotations = make(map[string]string)
 		}
 		if flow.CloudEvents.Type != "" {
-			crd.ObjectMeta.Annotations["fiso.io/cloudevents-type"] = flow.CloudEvents.Type
+			crd.Annotations["fiso.io/cloudevents-type"] = flow.CloudEvents.Type
 		}
 		if flow.CloudEvents.Source != "" {
-			crd.ObjectMeta.Annotations["fiso.io/cloudevents-source"] = flow.CloudEvents.Source
+			crd.Annotations["fiso.io/cloudevents-source"] = flow.CloudEvents.Source
 		}
 		if flow.CloudEvents.Subject != "" {
-			crd.ObjectMeta.Annotations["fiso.io/cloudevents-subject"] = flow.CloudEvents.Subject
+			crd.Annotations["fiso.io/cloudevents-subject"] = flow.CloudEvents.Subject
 		}
 	}
 
