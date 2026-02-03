@@ -51,7 +51,7 @@ func TestInitHTTPSinkUserServiceProfile(t *testing.T) {
 
 	// Verify user-service does NOT have profile: docker
 	hasDockerProfile := strings.Contains(userServiceSection, "profiles:") &&
-	                     strings.Contains(userServiceSection, "- docker")
+		strings.Contains(userServiceSection, "- docker")
 
 	if hasDockerProfile {
 		t.Error("user-service should NOT have 'profiles: [docker]' in docker-compose.yml\n" +
@@ -104,7 +104,7 @@ func extractServiceSection(dockerCompose, serviceName string) string {
 
 	for i, line := range lines {
 		trimmed := strings.TrimLeft(line, " ")
-		
+
 		// Found the service
 		if strings.HasPrefix(trimmed, serviceName+":") {
 			inService = true
@@ -116,20 +116,20 @@ func extractServiceSection(dockerCompose, serviceName string) string {
 		if inService {
 			// Still in this service?
 			lineIndent := len(line) - len(strings.TrimLeft(line, " "))
-			
+
 			// Empty line or comment
 			if len(strings.TrimSpace(line)) == 0 || strings.HasPrefix(strings.TrimSpace(line), "#") {
 				section = append(section, line)
 				continue
 			}
-			
+
 			// If we hit a line at the same or lower indent level (and it's not empty), we've exited the service
 			if lineIndent <= indent && len(strings.TrimSpace(line)) > 0 {
 				break
 			}
-			
+
 			section = append(section, line)
-			
+
 			// Safety: don't read too far
 			if i > 100 {
 				break
