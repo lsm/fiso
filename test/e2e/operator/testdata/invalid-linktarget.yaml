@@ -1,0 +1,8 @@
+apiVersion: fiso.io/v1alpha1
+kind: LinkTarget
+metadata:
+  name: test-invalid-linktarget
+  namespace: fiso-system
+spec:
+  protocol: ftp
+  host: files.example.com

@@ -1,0 +1,20 @@
+apiVersion: fiso.io/v1alpha1
+kind: LinkTarget
+metadata:
+  name: test-external-api
+  namespace: fiso-system
+spec:
+  protocol: https
+  host: api.example.com
+  auth:
+    type: Bearer
+    secretName: api-token
+  circuitBreaker:
+    failureThreshold: 5
+    resetTimeout: 30s
+  retry:
+    maxAttempts: 3
+    backoff: 1s
+  allowedPaths:
+    - /api/v1/orders
+    - /api/v1/users

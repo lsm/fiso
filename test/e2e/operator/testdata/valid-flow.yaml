@@ -1,0 +1,19 @@
+apiVersion: fiso.io/v1alpha1
+kind: FlowDefinition
+metadata:
+  name: test-kafka-http-flow
+  namespace: fiso-system
+spec:
+  source:
+    type: kafka
+    config:
+      brokers: kafka:9092
+      topic: test-events
+      group: fiso-test
+  sink:
+    type: http
+    config:
+      url: http://user-service:8080/webhook
+  errorHandling:
+    deadLetterTopic: test-events-dlq
+    maxRetries: 3

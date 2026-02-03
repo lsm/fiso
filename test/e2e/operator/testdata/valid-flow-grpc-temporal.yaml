@@ -1,0 +1,17 @@
+apiVersion: fiso.io/v1alpha1
+kind: FlowDefinition
+metadata:
+  name: test-grpc-temporal-flow
+  namespace: fiso-system
+spec:
+  source:
+    type: grpc
+    config:
+      port: "50051"
+  transform:
+    cel: "event.amount > 100"
+  sink:
+    type: temporal
+    config:
+      host: temporal:7233
+      taskQueue: order-processing
