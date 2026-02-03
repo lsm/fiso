@@ -75,8 +75,8 @@ func TestFlowDefinitionCR_DeepCopy(t *testing.T) {
 	copied := original.DeepCopy()
 
 	// Verify independence
-	copied.ObjectMeta.Labels["app"] = "changed"
-	if original.ObjectMeta.Labels["app"] != "fiso" {
+	copied.Labels["app"] = "changed"
+	if original.Labels["app"] != "fiso" {
 		t.Error("deep copy labels not independent")
 	}
 
@@ -237,22 +237,22 @@ func TestConversion_FlowDefinitionCR_ToFlowDefinition(t *testing.T) {
 
 	fd := cr.ToFlowDefinition()
 
-	if fd.TypeMeta.Kind != "FlowDefinition" {
-		t.Errorf("kind mismatch: %s", fd.TypeMeta.Kind)
+	if fd.Kind != "FlowDefinition" {
+		t.Errorf("kind mismatch: %s", fd.Kind)
 	}
-	if fd.ObjectMeta.Name != "my-flow" {
-		t.Errorf("name mismatch: %s", fd.ObjectMeta.Name)
+	if fd.Name != "my-flow" {
+		t.Errorf("name mismatch: %s", fd.Name)
 	}
-	if fd.ObjectMeta.Namespace != "production" {
-		t.Errorf("namespace mismatch: %s", fd.ObjectMeta.Namespace)
+	if fd.Namespace != "production" {
+		t.Errorf("namespace mismatch: %s", fd.Namespace)
 	}
-	if fd.ObjectMeta.Labels["env"] != "prod" {
+	if fd.Labels["env"] != "prod" {
 		t.Error("labels not converted")
 	}
-	if fd.ObjectMeta.Annotations["note"] != "test" {
+	if fd.Annotations["note"] != "test" {
 		t.Error("annotations not converted")
 	}
-	if fd.ObjectMeta.Generation != 3 {
+	if fd.Generation != 3 {
 		t.Error("generation not converted")
 	}
 	if fd.Spec.Source.Type != "kafka" {
@@ -280,11 +280,11 @@ func TestConversion_LinkTargetCR_ToLinkTarget(t *testing.T) {
 
 	lt := cr.ToLinkTarget()
 
-	if lt.TypeMeta.Kind != "LinkTarget" {
-		t.Errorf("kind mismatch: %s", lt.TypeMeta.Kind)
+	if lt.Kind != "LinkTarget" {
+		t.Errorf("kind mismatch: %s", lt.Kind)
 	}
-	if lt.ObjectMeta.Name != "crm" {
-		t.Errorf("name mismatch: %s", lt.ObjectMeta.Name)
+	if lt.Name != "crm" {
+		t.Errorf("name mismatch: %s", lt.Name)
 	}
 	if lt.Spec.Protocol != "https" {
 		t.Error("spec not converted")
