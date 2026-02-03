@@ -42,7 +42,6 @@ services:
       start_period: 10s
 
   # Temporal worker — runs workflows + activities that call fiso-link
-  # Only started in docker mode: fiso dev --docker
   temporal-worker:
     build:
       context: ./temporal-worker
@@ -54,8 +53,6 @@ services:
         condition: service_healthy
       fiso-link:
         condition: service_started
-    profiles:
-      - docker
 {{- end}}
 
   # Egress proxy — your service calls external APIs through this
@@ -70,7 +67,6 @@ services:
 {{- if not .IncludeTemporal}}
 
   # Your backend business logic (edit or replace this service)
-  # Only started in docker mode: fiso dev --docker
   user-service:
     build:
       context: ./user-service
@@ -78,8 +74,6 @@ services:
       FISO_LINK_ADDR: http://fiso-link:3500
     depends_on:
       - fiso-link
-    profiles:
-      - docker
 {{- end}}
 
   # Ingress — receives events, forwards to your service

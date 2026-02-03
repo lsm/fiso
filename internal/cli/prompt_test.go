@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"bufio"
+	"bytes"
 	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -128,5 +131,123 @@ func TestChoose_MultiplePrompts(t *testing.T) {
 	idx3 := p.choose("Q3:", []string{"P", "Q", "R"}, 0)
 	if idx3 != 2 {
 		t.Errorf("Q3: expected 2, got %d", idx3)
+	}
+}
+
+// testInteractivePrompter creates a prompter for testing interactive mode
+func testInteractivePrompter(input string) (*prompter, *bytes.Buffer) {
+	r, w, _ := os.Pipe()
+	go func() {
+		_, _ = w.WriteString(input)
+		_ = w.Close()
+	}()
+	var out bytes.Buffer
+	return &prompter{
+		in:      r,
+		scanner: bufio.NewScanner(r),
+		out:     &out,
+		isTTY:   true,
+		inFd:    -1, // not used by interactiveChooseRaw
+	}, &out
+}
+
+func TestInteractiveChoose_EnterWithNoNavigation(t *testing.T) {
+	p, out := testInteractivePrompter("\r")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 1)
+	if idx != 1 {
+		t.Errorf("expected 1 (default), got %d", idx)
+	}
+	// Verify output contains ANSI color codes
+	if !strings.Contains(out.String(), ansiCyan) {
+		t.Error("expected output to contain cyan color code")
+	}
+}
+
+func TestInteractiveChoose_DownArrowThenEnter(t *testing.T) {
+	p, _ := testInteractivePrompter("\x1b[B\r")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 1 {
+		t.Errorf("expected 1 (defaultIdx+1), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_UpArrowAtTop(t *testing.T) {
+	p, _ := testInteractivePrompter("\x1b[A\r")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 0 {
+		t.Errorf("expected 0 (stays at top), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_VimJKey(t *testing.T) {
+	p, _ := testInteractivePrompter("j\r")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 1 {
+		t.Errorf("expected 1 (moved down), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_VimKKeyAtTop(t *testing.T) {
+	p, _ := testInteractivePrompter("k\r")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 0 {
+		t.Errorf("expected 0 (stays at top), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_NumberKeyAutoConfirms(t *testing.T) {
+	p, _ := testInteractivePrompter("2")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 1 {
+		t.Errorf("expected 1 (index of option 2), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_OutputContainsCyan(t *testing.T) {
+	p, out := testInteractivePrompter("\r")
+	p.interactiveChooseRaw("Pick:", []string{"A", "B"}, 0)
+	output := out.String()
+	if !strings.Contains(output, ansiCyan) {
+		t.Error("expected output to contain cyan color code for selected option")
+	}
+}
+
+func TestInteractiveChoose_MultipleDownArrows(t *testing.T) {
+	p, _ := testInteractivePrompter("\x1b[B\x1b[B\r")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 2 {
+		t.Errorf("expected 2 (moved down twice), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_DownThenUpArrow(t *testing.T) {
+	p, _ := testInteractivePrompter("\x1b[B\x1b[A\r")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 0 {
+		t.Errorf("expected 0 (down then up), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_DownArrowAtBottom(t *testing.T) {
+	p, _ := testInteractivePrompter("\x1b[B\x1b[B\x1b[B\r")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B"}, 0)
+	if idx != 1 {
+		t.Errorf("expected 1 (stays at bottom), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_VimJKNavigation(t *testing.T) {
+	p, _ := testInteractivePrompter("jjk\r")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 1 {
+		t.Errorf("expected 1 (j,j,k navigation), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_NumberKey3(t *testing.T) {
+	p, _ := testInteractivePrompter("3")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 2 {
+		t.Errorf("expected 2 (index of option 3), got %d", idx)
 	}
 }

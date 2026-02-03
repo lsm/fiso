@@ -48,9 +48,6 @@ Flags:
 	}
 
 	upArgs := []string{"up", "--remove-orphans"}
-	if dockerMode {
-		upArgs = append(upArgs, "--profile", "docker")
-	}
 	if fileExists("Dockerfile.flow") || fileExists("Dockerfile.link") {
 		upArgs = append(upArgs, "--build")
 	}
@@ -141,9 +138,6 @@ func runCompose(ctx context.Context, args ...string) error {
 func composeDown(dockerMode bool) {
 	fileArgs := buildComposeFileArgs()
 	downArgs := append(append([]string{}, fileArgs...), "down", "--remove-orphans")
-	if dockerMode {
-		downArgs = append(downArgs, "--profile", "docker")
-	}
 	cmd := exec.Command("docker", downArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -205,6 +199,22 @@ func writeDevOverride(dockerMode bool) error {
 		content += "  fiso-link:\n"
 		content += "    ports:\n"
 		content += "      - \"3500:3500\"\n"
+	}
+
+	// In hybrid mode, disable app services that run on the host instead.
+	if !dockerMode {
+		composeBytes, _ := os.ReadFile("fiso/docker-compose.yml")
+		composeContent := string(composeBytes)
+		if strings.Contains(composeContent, "\n  user-service:\n") || strings.Contains(composeContent, "\n  user-service:") {
+			content += "  user-service:\n"
+			content += "    profiles:\n"
+			content += "      - disabled\n"
+		}
+		if strings.Contains(composeContent, "\n  temporal-worker:\n") || strings.Contains(composeContent, "\n  temporal-worker:") {
+			content += "  temporal-worker:\n"
+			content += "    profiles:\n"
+			content += "      - disabled\n"
+		}
 	}
 
 	return os.WriteFile(overridePath, []byte(content), 0644)
