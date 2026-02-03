@@ -649,6 +649,7 @@ test/
     http/                    HTTP flow E2E (Docker Compose)
     kafka/                   Kafka flow E2E (Docker Compose)
     kafka-temporal/          Kafka → Temporal E2E (Docker Compose)
+    kafka-temporal-signal/   Kafka → Temporal signal E2E (Docker Compose)
     wasm/                    WASM interceptor E2E (Docker Compose)
     operator/                CRD operator E2E (kind cluster)
   integration/               Integration tests (Kafka)
@@ -668,6 +669,7 @@ GitHub Actions runs on every push and PR to `main`:
 | **e2e** | HTTP flow end-to-end test (Docker Compose) |
 | **e2e-kafka** | Kafka flow end-to-end test (Docker Compose) |
 | **e2e-kafka-temporal** | Kafka → Temporal full pipeline E2E (6-service Docker Compose) |
+| **e2e-kafka-temporal-signal** | Kafka → Temporal signal mode E2E (6-service Docker Compose) |
 | **e2e-wasm** | WASM interceptor E2E test (Docker Compose) |
 | **e2e-operator** | CRD operator E2E test (kind cluster — CRD reconciliation, status updates) |
 | **cli-smoke** | `fiso init --defaults` + `fiso validate` smoke test |

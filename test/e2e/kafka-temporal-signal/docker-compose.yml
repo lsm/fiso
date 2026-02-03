@@ -1,0 +1,79 @@
+services:
+  # Kafka broker (KRaft mode, no ZooKeeper)
+  kafka:
+    image: apache/kafka:4.0.0
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Temporal dev server (in-memory, no external DB needed)
+  temporal:
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--port", "7233"]
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # External service (behind fiso-link)
+  external-api:
+    image: hashicorp/http-echo:latest
+    command: ["-text={\"enrichment\":\"from-external\"}", "-listen=:80"]
+
+  # Egress proxy — temporal-worker calls this to reach external-api
+  fiso-link:
+    image: fiso-link:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.link
+    volumes:
+      - ./fiso/link:/etc/fiso/link:ro
+    environment:
+      FISO_LINK_CONFIG: /etc/fiso/link/config.yaml
+    depends_on:
+      - external-api
+
+  # Temporal worker — starts a workflow that waits for a signal,
+  # then processes the signal data via fiso-link
+  temporal-worker:
+    build:
+      context: ./temporal-worker
+    environment:
+      TEMPORAL_HOST: temporal:7233
+      FISO_LINK_ADDR: http://fiso-link:3500
+      WORKFLOW_ID: order-signal-e2e
+    depends_on:
+      temporal:
+        condition: service_healthy
+      fiso-link:
+        condition: service_started
+
+  # Ingress — consumes Kafka, signals the running Temporal workflow
+  fiso-flow:
+    image: fiso-flow:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.flow
+    volumes:
+      - ./fiso/flows:/etc/fiso/flows:ro
+    environment:
+      FISO_CONFIG_DIR: /etc/fiso/flows
+      FISO_METRICS_ADDR: ":9090"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
