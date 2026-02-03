@@ -13,40 +13,40 @@ func TestSchemeRegistration(t *testing.T) {
 		t.Fatalf("AddToScheme failed: %v", err)
 	}
 
-	// Verify FlowDefinitionCR is registered
-	gvk := SchemeGroupVersion.WithKind("FlowDefinitionCR")
+	// Verify FlowDefinition Kind maps to FlowDefinitionCR struct
+	gvk := SchemeGroupVersion.WithKind("FlowDefinition")
 	obj, err := s.New(gvk)
 	if err != nil {
-		t.Fatalf("scheme.New for FlowDefinitionCR: %v", err)
+		t.Fatalf("scheme.New for FlowDefinition: %v", err)
 	}
 	if _, ok := obj.(*FlowDefinitionCR); !ok {
 		t.Errorf("expected *FlowDefinitionCR, got %T", obj)
 	}
 
-	// Verify LinkTargetCR is registered
-	gvk = SchemeGroupVersion.WithKind("LinkTargetCR")
+	// Verify LinkTarget Kind maps to LinkTargetCR struct
+	gvk = SchemeGroupVersion.WithKind("LinkTarget")
 	obj, err = s.New(gvk)
 	if err != nil {
-		t.Fatalf("scheme.New for LinkTargetCR: %v", err)
+		t.Fatalf("scheme.New for LinkTarget: %v", err)
 	}
 	if _, ok := obj.(*LinkTargetCR); !ok {
 		t.Errorf("expected *LinkTargetCR, got %T", obj)
 	}
 
 	// Verify list types
-	gvk = SchemeGroupVersion.WithKind("FlowDefinitionCRList")
+	gvk = SchemeGroupVersion.WithKind("FlowDefinitionList")
 	obj, err = s.New(gvk)
 	if err != nil {
-		t.Fatalf("scheme.New for FlowDefinitionCRList: %v", err)
+		t.Fatalf("scheme.New for FlowDefinitionList: %v", err)
 	}
 	if _, ok := obj.(*FlowDefinitionCRList); !ok {
 		t.Errorf("expected *FlowDefinitionCRList, got %T", obj)
 	}
 
-	gvk = SchemeGroupVersion.WithKind("LinkTargetCRList")
+	gvk = SchemeGroupVersion.WithKind("LinkTargetList")
 	obj, err = s.New(gvk)
 	if err != nil {
-		t.Fatalf("scheme.New for LinkTargetCRList: %v", err)
+		t.Fatalf("scheme.New for LinkTargetList: %v", err)
 	}
 	if _, ok := obj.(*LinkTargetCRList); !ok {
 		t.Errorf("expected *LinkTargetCRList, got %T", obj)

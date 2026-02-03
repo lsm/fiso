@@ -18,10 +18,25 @@ var (
 )
 
 func addKnownTypes(scheme *runtime.Scheme) error {
-	scheme.AddKnownTypes(SchemeGroupVersion,
+	// Use AddKnownTypeWithName to map the CRD Kinds (FlowDefinition, LinkTarget)
+	// to the Go structs (FlowDefinitionCR, LinkTargetCR). Without this, the scheme
+	// infers Kind from the struct name (FlowDefinitionCR) which doesn't match the
+	// CRD-defined Kind (FlowDefinition), causing controller-runtime informers to
+	// miss reconciliation events.
+	scheme.AddKnownTypeWithName(
+		SchemeGroupVersion.WithKind("FlowDefinition"),
 		&FlowDefinitionCR{},
+	)
+	scheme.AddKnownTypeWithName(
+		SchemeGroupVersion.WithKind("FlowDefinitionList"),
 		&FlowDefinitionCRList{},
+	)
+	scheme.AddKnownTypeWithName(
+		SchemeGroupVersion.WithKind("LinkTarget"),
 		&LinkTargetCR{},
+	)
+	scheme.AddKnownTypeWithName(
+		SchemeGroupVersion.WithKind("LinkTargetList"),
 		&LinkTargetCRList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
