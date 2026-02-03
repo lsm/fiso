@@ -44,20 +44,24 @@ if [ "$STATUS" != "200" ]; then
     exit 1
 fi
 
-# Verify the WASM interceptor enriched the payload
-if grep -q "wasm_enriched" /tmp/e2e-wasm-response.txt; then
+# Give the async pipeline a moment to deliver to user-service
+sleep 2
+
+# Verify the WASM interceptor enriched the payload by checking user-service logs
+USER_LOGS=$(docker compose logs user-service)
+if echo "$USER_LOGS" | grep -q "wasm_enriched"; then
     echo ""
     echo "SUCCESS: WASM interceptor enriched the payload"
     echo "  curl → fiso-flow (WASM enrich) → user-service"
 else
     echo ""
-    echo "FAIL: Expected 'wasm_enriched' in response body"
+    echo "FAIL: Expected 'wasm_enriched' in user-service logs"
     echo ""
     echo "=== fiso-flow logs ==="
     docker compose logs fiso-flow
     echo ""
     echo "=== user-service logs ==="
-    docker compose logs user-service
+    echo "$USER_LOGS"
     docker compose down
     exit 1
 fi
