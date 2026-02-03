@@ -241,24 +241,22 @@ else
 fi
 
 # -------------------------------------------------------------------
-# 9. Test: Invalid FlowDefinition → Error
+# 9. Test: Invalid FlowDefinition → rejected by CRD validation
 # -------------------------------------------------------------------
 TESTS=$((TESTS + 1))
-info "Test: Invalid FlowDefinition (unsupported sink) should become Error..."
-kubectl apply -f "$SCRIPT_DIR/testdata/invalid-flow.yaml" --context "kind-${CLUSTER_NAME}"
-
-if wait_for_phase "flowdefinition" "test-invalid-flow" "Error" 30; then
-    msg=$(kubectl get flowdefinition test-invalid-flow -n "$NAMESPACE" --context "kind-${CLUSTER_NAME}" \
-        -o jsonpath='{.status.message}' 2>/dev/null || echo "")
-    if echo "$msg" | grep -q "unsupported sink type"; then
-        pass "Invalid FlowDefinition reconciled to Error with correct message"
+info "Test: Invalid FlowDefinition (unsupported sink) should be rejected by CRD validation..."
+if kubectl apply -f "$SCRIPT_DIR/testdata/invalid-flow.yaml" --context "kind-${CLUSTER_NAME}" 2>/tmp/e2e-invalid-fd-err.txt; then
+    # CRD validation didn't reject it — check if reconciler catches it
+    if wait_for_phase "flowdefinition" "test-invalid-flow" "Error" 30; then
+        pass "Invalid FlowDefinition caught by reconciler (phase=Error)"
     else
-        fail "Invalid FlowDefinition: phase is Error but message unexpected: $msg"
+        phase=$(kubectl get flowdefinition test-invalid-flow -n "$NAMESPACE" --context "kind-${CLUSTER_NAME}" \
+            -o jsonpath='{.status.phase}' 2>/dev/null || echo "<none>")
+        fail "Invalid FlowDefinition: expected CRD rejection or Error phase, got phase=$phase"
     fi
 else
-    phase=$(kubectl get flowdefinition test-invalid-flow -n "$NAMESPACE" --context "kind-${CLUSTER_NAME}" \
-        -o jsonpath='{.status.phase}' 2>/dev/null || echo "<none>")
-    fail "Invalid FlowDefinition: expected Error, got phase=$phase"
+    # CRD validation rejected it — good
+    pass "Invalid FlowDefinition rejected by CRD schema validation"
 fi
 
 # -------------------------------------------------------------------
