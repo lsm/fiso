@@ -393,6 +393,120 @@ func TestRunInit_InteractiveHTTPTemporal(t *testing.T) {
 	}
 }
 
+// --- Kubernetes manifest tests ---
+
+func TestRunInit_WithK8sManifests(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// All defaults + K8s=yes: HTTP(1), HTTP(1), None(1), no CE(n), K8s=yes(y)
+	input := strings.NewReader("\n\n\n\ny\n")
+	if err := RunInit(nil, input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify K8s deploy files exist
+	assertFileExists(t, filepath.Join(dir, "fiso", "deploy", "kustomization.yaml"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "deploy", "namespace.yaml"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "deploy", "flow-deployment.yaml"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "deploy", "link-deployment.yaml"))
+
+	// kustomization.yaml should reference the correct flow file
+	data, err := os.ReadFile(filepath.Join(dir, "fiso", "deploy", "kustomization.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kustomize := string(data)
+	if !strings.Contains(kustomize, "../flows/example-flow.yaml") {
+		t.Error("kustomization.yaml should reference ../flows/example-flow.yaml")
+	}
+	if !strings.Contains(kustomize, "../link/config.yaml") {
+		t.Error("kustomization.yaml should reference ../link/config.yaml")
+	}
+	if !strings.Contains(kustomize, "configMapGenerator") {
+		t.Error("kustomization.yaml should contain configMapGenerator")
+	}
+
+	// flow-deployment should contain Service (HTTP source)
+	flowDeploy, err := os.ReadFile(filepath.Join(dir, "fiso", "deploy", "flow-deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(flowDeploy), "kind: Service") {
+		t.Error("flow-deployment.yaml should contain Service for HTTP source")
+	}
+	if !strings.Contains(string(flowDeploy), "containerPort: 8081") {
+		t.Error("flow-deployment.yaml should expose ingest port 8081")
+	}
+
+	// Docker Compose should still exist (K8s is additive)
+	assertFileExists(t, filepath.Join(dir, "fiso", "docker-compose.yml"))
+}
+
+func TestRunInit_WithK8sKafkaSource(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Kafka(2), HTTP(1), None(1), no CE(n), K8s=yes(y)
+	input := strings.NewReader("2\n1\n1\nn\ny\n")
+	if err := RunInit(nil, input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// kustomization.yaml should reference kafka-http-flow
+	data, err := os.ReadFile(filepath.Join(dir, "fiso", "deploy", "kustomization.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "../flows/kafka-http-flow.yaml") {
+		t.Error("kustomization.yaml should reference ../flows/kafka-http-flow.yaml")
+	}
+
+	// flow-deployment should NOT contain Service (Kafka source, no HTTP ingress)
+	flowDeploy, err := os.ReadFile(filepath.Join(dir, "fiso", "deploy", "flow-deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(flowDeploy), "kind: Service") {
+		t.Error("flow-deployment.yaml should NOT contain Service for Kafka source")
+	}
+}
+
+func TestRunInit_DefaultsNoK8s(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RunInit([]string{"--defaults"}, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// deploy/ should NOT exist with --defaults
+	if _, err := os.Stat(filepath.Join(dir, "fiso", "deploy")); !os.IsNotExist(err) {
+		t.Error("fiso/deploy/ should not exist with --defaults")
+	}
+}
+
 func assertFileExists(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); os.IsNotExist(err) {

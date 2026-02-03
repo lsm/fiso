@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: fiso-system
+
+resources:
+  - namespace.yaml
+  - flow-deployment.yaml
+  - link-deployment.yaml
+
+configMapGenerator:
+  - name: fiso-flow-config
+    files:
+      - ../flows/{{.FlowName}}.yaml
+  - name: fiso-link-config
+    files:
+      - config.yaml=../link/config.yaml

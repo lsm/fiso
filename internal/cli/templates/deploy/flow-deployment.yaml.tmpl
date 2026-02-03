@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fiso-flow
+  labels:
+    app.kubernetes.io/name: fiso-flow
+    app.kubernetes.io/part-of: fiso
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fiso-flow
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fiso-flow
+    spec:
+      containers:
+        - name: fiso-flow
+          image: ghcr.io/lsm/fiso-flow:latest
+          env:
+            - name: FISO_CONFIG_DIR
+              value: /etc/fiso/flows
+            - name: FISO_METRICS_ADDR
+              value: ":9090"
+          ports:
+            - name: metrics
+              containerPort: 9090
+{{- if eq .Source "http"}}
+            - name: ingest
+              containerPort: 8081
+{{- end}}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: flow-config
+              mountPath: /etc/fiso/flows
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: flow-config
+          configMap:
+            name: fiso-flow-config
+{{- if eq .Source "http"}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fiso-flow
+  labels:
+    app.kubernetes.io/name: fiso-flow
+    app.kubernetes.io/part-of: fiso
+spec:
+  selector:
+    app.kubernetes.io/name: fiso-flow
+  ports:
+    - name: ingest
+      port: 8081
+      targetPort: ingest
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+{{- end}}

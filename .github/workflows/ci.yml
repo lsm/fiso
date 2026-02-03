@@ -170,7 +170,12 @@ jobs:
           ! grep -q "kafka" fiso/flows/example-flow.yaml
           grep -q "profiles:" fiso/docker-compose.yml
           grep -q "localhost:3500" fiso/user-service/main.go
+          ! test -d fiso/deploy
           $GITHUB_WORKSPACE/bin/fiso validate
+          $GITHUB_WORKSPACE/bin/fiso export | grep -q "kind: FlowDefinition"
+          $GITHUB_WORKSPACE/bin/fiso export | grep -q "kind: LinkTarget"
+          $GITHUB_WORKSPACE/bin/fiso export | grep -q "apiVersion: fiso.io/v1alpha1"
+          $GITHUB_WORKSPACE/bin/fiso export | grep -q "namespace: fiso-system"
 
   e2e:
     runs-on: ubuntu-latest

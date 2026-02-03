@@ -17,6 +17,7 @@ type initConfig struct {
 	CloudEvents     bool
 	IncludeKafka    bool // derived: Source == "kafka"
 	IncludeTemporal bool // derived: Sink == "temporal"
+	IncludeK8s      bool // scaffold fiso/deploy/ with Kustomize manifests
 }
 
 // flowTemplateData extends initConfig with a FlowName for the flow template.
@@ -44,6 +45,7 @@ func RunInit(args []string, stdin io.Reader) error {
 		cfg.Sink = "http"
 		cfg.Transform = "none"
 		cfg.CloudEvents = false
+		cfg.IncludeK8s = false
 	}
 
 	cfg.IncludeKafka = cfg.Source == "kafka"
@@ -84,6 +86,8 @@ func promptChoices(p *prompter, cfg *initConfig) {
 	cfg.Transform = []string{"none", "cel", "mapping"}[transformIdx]
 
 	cfg.CloudEvents = p.confirm("Customize CloudEvents envelope fields?", false)
+
+	cfg.IncludeK8s = p.confirm("Include Kubernetes deployment manifests?", false)
 }
 
 func scaffold(cfg initConfig) error {
@@ -162,6 +166,30 @@ func scaffold(cfg initConfig) error {
 		}
 	}
 
+	// Kubernetes deployment manifests (Kustomize)
+	if cfg.IncludeK8s {
+		deployDir := filepath.Join(fisoDir, "deploy")
+		if err := os.MkdirAll(deployDir, 0755); err != nil {
+			return fmt.Errorf("create directory %s: %w", deployDir, err)
+		}
+
+		flowName := deriveFlowName(cfg.Source, cfg.Sink)
+		flowData := flowTemplateData{initConfig: cfg, FlowName: flowName}
+
+		if err := writeTemplate(deployDir, "kustomization.yaml", "templates/deploy/kustomization.yaml.tmpl", flowData); err != nil {
+			return err
+		}
+		if err := writeTemplate(deployDir, "flow-deployment.yaml", "templates/deploy/flow-deployment.yaml.tmpl", flowData); err != nil {
+			return err
+		}
+		if err := copyEmbedded(deployDir, "namespace.yaml", "templates/deploy/namespace.yaml"); err != nil {
+			return err
+		}
+		if err := copyEmbedded(deployDir, "link-deployment.yaml", "templates/deploy/link-deployment.yaml"); err != nil {
+			return err
+		}
+	}
+
 	printInitSummary(cfg)
 	return nil
 }
@@ -183,6 +211,9 @@ func printInitSummary(cfg initConfig) {
 		fmt.Println("  fiso/temporal-worker/   Temporal workflow worker (edit or replace)")
 	} else {
 		fmt.Println("  fiso/user-service/      Example backend service (edit or replace)")
+	}
+	if cfg.IncludeK8s {
+		fmt.Println("  fiso/deploy/            Kubernetes manifests (kubectl apply -k fiso/deploy/)")
 	}
 	fmt.Println("")
 	fmt.Println("Next steps:")

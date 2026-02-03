@@ -234,10 +234,11 @@ Reverse proxy sidecar that routes application requests to external services thro
 
 ### Fiso-Operator — Kubernetes Controller
 
-Manages Fiso CRDs and automates sidecar injection.
+Manages Fiso CRDs and automates sidecar injection. Built with [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime).
 
-- **CRD Management** — Reconciles `FlowDefinition` and `LinkTarget` custom resources.
+- **CRD Reconciliation** — Reconciles `FlowDefinition` and `LinkTarget` custom resources. Validates specs and updates `.status.phase` to `Ready` or `Error`.
 - **Sidecar Injection** — Mutating webhook automatically injects fiso-link sidecar when Pod annotation `fiso.io/inject: "true"` is present.
+- **Modes** — `controller` (default): full controller + webhook. `webhook-only`: runs only the sidecar injection webhook (`FISO_OPERATOR_MODE=webhook-only`).
 
 ## Configuration
 
@@ -369,9 +370,12 @@ asyncBrokers:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FISO_WEBHOOK_ADDR` | `:8443` | Mutating webhook server address |
+| `FISO_OPERATOR_MODE` | `controller` | `controller` (full) or `webhook-only` |
+| `FISO_METRICS_ADDR` | `:8080` | Metrics endpoint (controller mode) |
 | `FISO_HEALTH_ADDR` | `:9090` | Health check server address |
+| `FISO_ENABLE_LEADER_ELECTION` | `false` | Enable leader election for HA |
 | `FISO_LINK_IMAGE` | `ghcr.io/lsm/fiso-link:latest` | Sidecar container image |
+| `FISO_WEBHOOK_ADDR` | `:8443` | Mutating webhook server address (webhook-only mode) |
 | `FISO_TLS_CERT_FILE` | `/etc/fiso/tls/tls.crt` | TLS certificate for webhook server |
 | `FISO_TLS_KEY_FILE` | `/etc/fiso/tls/tls.key` | TLS private key for webhook server |
 
@@ -473,6 +477,7 @@ make build-cli    # fiso CLI only
 ```bash
 make test                # Unit tests with race detection
 make test-integration    # Integration tests (requires Kafka)
+make e2e-operator        # Operator E2E tests (requires kind + Docker)
 make coverage-check      # Enforce 95% coverage threshold
 ```
 
@@ -503,6 +508,7 @@ internal/
     retry/                   Retry with backoff
   observability/             Metrics, logging, health endpoints
   operator/
+    controller/              FlowDefinition + LinkTarget reconcilers
     webhook/                 Mutating admission webhook
   pipeline/                  Pipeline orchestrator (source → transform → sink)
   sink/
@@ -522,7 +528,11 @@ deploy/
   crds/                      CustomResourceDefinition manifests
   examples/                  Example K8s deployments
 test/
-  e2e/                       End-to-end tests (HTTP flow)
+  e2e/
+    http/                    HTTP flow E2E (Docker Compose)
+    kafka/                   Kafka flow E2E (Docker Compose)
+    kafka-temporal/          Kafka → Temporal E2E (Docker Compose)
+    operator/                CRD operator E2E (kind cluster)
   integration/               Integration tests (Kafka)
 ```
 
@@ -540,6 +550,7 @@ GitHub Actions runs on every push and PR to `main`:
 | **e2e** | HTTP flow end-to-end test (Docker Compose) |
 | **e2e-kafka** | Kafka flow end-to-end test (Docker Compose) |
 | **e2e-kafka-temporal** | Kafka → Temporal full pipeline E2E (6-service Docker Compose) |
+| **e2e-operator** | CRD operator E2E test (kind cluster — CRD reconciliation, status updates) |
 | **cli-smoke** | `fiso init --defaults` + `fiso validate` smoke test |
 
 ### Release

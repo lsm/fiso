@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fiso-link
+  labels:
+    app.kubernetes.io/name: fiso-link
+    app.kubernetes.io/part-of: fiso
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fiso-link
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fiso-link
+    spec:
+      containers:
+        - name: fiso-link
+          image: ghcr.io/lsm/fiso-link:latest
+          env:
+            - name: FISO_LINK_CONFIG
+              value: /etc/fiso/link/config.yaml
+          ports:
+            - name: proxy
+              containerPort: 3500
+            - name: metrics
+              containerPort: 9091
+          volumeMounts:
+            - name: link-config
+              mountPath: /etc/fiso/link
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: link-config
+          configMap:
+            name: fiso-link-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fiso-link
+  labels:
+    app.kubernetes.io/name: fiso-link
+    app.kubernetes.io/part-of: fiso
+spec:
+  selector:
+    app.kubernetes.io/name: fiso-link
+  ports:
+    - name: proxy
+      port: 3500
+      targetPort: proxy
+    - name: metrics
+      port: 9091
+      targetPort: metrics

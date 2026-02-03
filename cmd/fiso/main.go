@@ -16,6 +16,7 @@ Commands:
   init [project-name]   Create a new Fiso project
   dev                   Start local development environment
   validate [path]       Validate flow and link configuration files
+  export [path]         Export configs as Kubernetes CRDs
 
 Run 'fiso <command> -h' for help on a specific command.`
 
@@ -39,6 +40,8 @@ func run() error {
 		return cli.RunDev(os.Args[2:])
 	case "validate":
 		return cli.RunValidate(os.Args[2:])
+	case "export":
+		return cli.RunExport(os.Args[2:], nil)
 	case "-h", "--help", "help":
 		fmt.Println(usage)
 		return nil
