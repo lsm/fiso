@@ -90,7 +90,23 @@ kubectl create namespace "$NAMESPACE" --context "kind-${CLUSTER_NAME}" --dry-run
 kubectl apply -f "$ROOT_DIR/deploy/rbac/" --context "kind-${CLUSTER_NAME}"
 
 # -------------------------------------------------------------------
-# 5. Deploy operator
+# 5. Generate self-signed TLS certs for webhook server
+# -------------------------------------------------------------------
+info "Generating self-signed TLS certificate for webhook..."
+CERT_DIR=$(mktemp -d)
+openssl req -x509 -newkey rsa:2048 -keyout "$CERT_DIR/tls.key" -out "$CERT_DIR/tls.crt" \
+    -days 1 -nodes -subj "/CN=fiso-operator.${NAMESPACE}.svc" \
+    -addext "subjectAltName=DNS:fiso-operator.${NAMESPACE}.svc,DNS:fiso-operator.${NAMESPACE}.svc.cluster.local" \
+    2>/dev/null
+
+kubectl create secret tls fiso-operator-tls \
+    --cert="$CERT_DIR/tls.crt" --key="$CERT_DIR/tls.key" \
+    -n "$NAMESPACE" --context "kind-${CLUSTER_NAME}" --dry-run=client -o yaml \
+    | kubectl apply -f - --context "kind-${CLUSTER_NAME}"
+rm -rf "$CERT_DIR"
+
+# -------------------------------------------------------------------
+# 6. Deploy operator
 # -------------------------------------------------------------------
 info "Deploying operator..."
 
@@ -131,6 +147,8 @@ spec:
               containerPort: 8080
             - name: health
               containerPort: 9090
+            - name: webhook
+              containerPort: 9443
           livenessProbe:
             httpGet:
               path: /healthz
@@ -150,6 +168,14 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: fiso-operator-tls
       terminationGracePeriodSeconds: 10
 EOF
 
@@ -181,7 +207,7 @@ wait_for_phase() {
 }
 
 # -------------------------------------------------------------------
-# 6. Test: Valid FlowDefinition → Ready
+# 7. Test: Valid FlowDefinition → Ready
 # -------------------------------------------------------------------
 TESTS=$((TESTS + 1))
 info "Test: Valid FlowDefinition (kafka→http) should become Ready..."
@@ -200,7 +226,7 @@ else
 fi
 
 # -------------------------------------------------------------------
-# 7. Test: Valid FlowDefinition (grpc→temporal with CEL) → Ready
+# 8. Test: Valid FlowDefinition (grpc→temporal with CEL) → Ready
 # -------------------------------------------------------------------
 TESTS=$((TESTS + 1))
 info "Test: Valid FlowDefinition (grpc→temporal+CEL) should become Ready..."
@@ -215,7 +241,7 @@ else
 fi
 
 # -------------------------------------------------------------------
-# 8. Test: Invalid FlowDefinition → Error
+# 9. Test: Invalid FlowDefinition → Error
 # -------------------------------------------------------------------
 TESTS=$((TESTS + 1))
 info "Test: Invalid FlowDefinition (unsupported sink) should become Error..."
@@ -236,7 +262,7 @@ else
 fi
 
 # -------------------------------------------------------------------
-# 9. Test: Valid LinkTarget → Ready
+# 10. Test: Valid LinkTarget → Ready
 # -------------------------------------------------------------------
 TESTS=$((TESTS + 1))
 info "Test: Valid LinkTarget (https with auth) should become Ready..."
@@ -251,7 +277,7 @@ else
 fi
 
 # -------------------------------------------------------------------
-# 10. Test: Invalid LinkTarget → rejected by CRD validation
+# 11. Test: Invalid LinkTarget → rejected by CRD validation
 # -------------------------------------------------------------------
 TESTS=$((TESTS + 1))
 info "Test: Invalid LinkTarget (unsupported protocol) should be rejected by CRD validation..."
@@ -270,7 +296,7 @@ else
 fi
 
 # -------------------------------------------------------------------
-# 11. Test: Delete FlowDefinition — no errors
+# 12. Test: Delete FlowDefinition — no errors
 # -------------------------------------------------------------------
 TESTS=$((TESTS + 1))
 info "Test: Deleting FlowDefinition should succeed cleanly..."
@@ -282,7 +308,7 @@ else
 fi
 
 # -------------------------------------------------------------------
-# 12. Test: Delete LinkTarget — no errors
+# 13. Test: Delete LinkTarget — no errors
 # -------------------------------------------------------------------
 TESTS=$((TESTS + 1))
 info "Test: Deleting LinkTarget should succeed cleanly..."
@@ -294,7 +320,7 @@ else
 fi
 
 # -------------------------------------------------------------------
-# 13. Test: List CRDs via short names
+# 14. Test: List CRDs via short names
 # -------------------------------------------------------------------
 TESTS=$((TESTS + 1))
 info "Test: CRD short names (fd, lt) should work..."
