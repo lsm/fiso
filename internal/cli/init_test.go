@@ -507,6 +507,118 @@ func TestRunInit_DefaultsNoK8s(t *testing.T) {
 	}
 }
 
+func TestRunInit_KafkaSource(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Kafka(2), HTTP(1), None(1), no CloudEvents(n), no K8s(n)
+	input := strings.NewReader("2\n1\n1\nn\nn\n")
+	if err := RunInit(nil, input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify kafka-http-flow.yaml is generated
+	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "kafka-http-flow.yaml"))
+
+	flow, err := os.ReadFile(filepath.Join(dir, "fiso", "flows", "kafka-http-flow.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(flow), "type: kafka") {
+		t.Error("flow should contain kafka source")
+	}
+}
+
+func TestRunInit_TemporalSink(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// HTTP(1), Temporal(2), None(1), no CloudEvents(n), no K8s(n)
+	input := strings.NewReader("1\n2\n1\nn\nn\n")
+	if err := RunInit(nil, input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify temporal-worker directory is created
+	assertFileExists(t, filepath.Join(dir, "fiso", "temporal-worker", "main.go"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "temporal-worker", "workflow.go"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "temporal-worker", "activity.go"))
+}
+
+func TestRunInit_KubernetesDeployment(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// HTTP(1), HTTP(1), None(1), no CloudEvents(n), K8s=yes(y)
+	input := strings.NewReader("1\n1\n1\nn\ny\n")
+	if err := RunInit(nil, input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify deploy/ manifests exist
+	assertFileExists(t, filepath.Join(dir, "fiso", "deploy", "kustomization.yaml"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "deploy", "namespace.yaml"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "deploy", "flow-deployment.yaml"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "deploy", "link-deployment.yaml"))
+}
+
+func TestRunInit_AllCombinations(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Kafka(2), Temporal(2), None(1), no CloudEvents(n), K8s=yes(y)
+	input := strings.NewReader("2\n2\n1\nn\ny\n")
+	if err := RunInit(nil, input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify all expected files
+	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "kafka-temporal-flow.yaml"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "temporal-worker", "main.go"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "deploy", "kustomization.yaml"))
+
+	// Verify docker-compose includes kafka and temporal
+	dc, err := os.ReadFile(filepath.Join(dir, "fiso", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(dc)
+	if !strings.Contains(content, "kafka") {
+		t.Error("docker-compose should include kafka")
+	}
+	if !strings.Contains(content, "temporal") {
+		t.Error("docker-compose should include temporal")
+	}
+}
+
 func assertFileExists(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); os.IsNotExist(err) {

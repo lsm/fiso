@@ -206,6 +206,12 @@ jobs:
           $GITHUB_WORKSPACE/bin/fiso export | grep -q "apiVersion: fiso.io/v1alpha1"
           $GITHUB_WORKSPACE/bin/fiso export | grep -q "namespace: fiso-system"
 
+      - name: Doctor smoke test
+        run: |
+          cd $(mktemp -d)
+          $GITHUB_WORKSPACE/bin/fiso init --defaults
+          $GITHUB_WORKSPACE/bin/fiso doctor
+
   e2e:
     runs-on: ubuntu-latest
     needs: [build]

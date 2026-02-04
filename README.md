@@ -158,6 +158,14 @@ fiso validate
 
 Checks your flow definitions and link configuration for errors before running.
 
+### Check Environment Health
+
+```bash
+fiso doctor
+```
+
+Verifies Docker installation, project structure, config validity, and port availability.
+
 ## Architecture
 
 ```
@@ -349,6 +357,105 @@ targets:
 
 asyncBrokers:
   - kafka.infra.svc:9092
+```
+
+## WASM Interceptors
+
+WASM interceptors enable custom data transformations using WebAssembly modules. They operate as stdin-to-stdout JSON pipelines, reading CloudEvents from stdin and writing transformed CloudEvents to stdout.
+
+### How It Works
+
+1. Fiso-flow receives an event and applies standard transforms (CEL/mapping)
+2. Before sending to the sink, the event is piped to the WASM module via stdin
+3. The WASM module reads JSON from stdin, transforms it, and writes JSON to stdout
+4. Fiso-flow receives the transformed event and delivers it to the sink
+
+### Example: Go WASM Interceptor
+
+Create a simple uppercase transform:
+
+```go
+// transform.go
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "io"
+    "os"
+    "strings"
+)
+
+type Event struct {
+    Data map[string]interface{} `json:"data"`
+}
+
+func main() {
+    input, _ := io.ReadAll(os.Stdin)
+
+    var event Event
+    json.Unmarshal(input, &event)
+
+    // Transform: uppercase all string values
+    for k, v := range event.Data {
+        if s, ok := v.(string); ok {
+            event.Data[k] = strings.ToUpper(s)
+        }
+    }
+
+    output, _ := json.Marshal(event)
+    fmt.Println(string(output))
+}
+```
+
+Compile to WASM:
+
+```bash
+GOOS=wasip1 GOARCH=wasm go build -o transform.wasm .
+```
+
+### Flow Configuration
+
+Reference the WASM module in your flow definition:
+
+```yaml
+name: wasm-transform-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8081"
+    path: /ingest
+interceptors:
+  - type: wasm
+    config:
+      module: /etc/fiso/wasm/transform.wasm
+      timeout: "5s"
+sink:
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST
+```
+
+### Supported Languages
+
+- **Go** — Native support via `GOOS=wasip1 GOARCH=wasm`
+- **Rust** — Compile with `wasm32-wasi` target
+- **TinyGo** — Smaller binaries: `tinygo build -target=wasi -o transform.wasm .`
+- **C** — Compile with `wasi-sdk`
+
+### Local Testing
+
+Test your WASM module before deploying:
+
+```bash
+echo '{"data":{"key":"value"}}' | wasmtime transform.wasm
+```
+
+Expected output:
+
+```json
+{"data":{"key":"VALUE"}}
 ```
 
 ### Environment Variables
@@ -572,6 +679,121 @@ metadata:
 The webhook injects a `fiso-link` sidecar container with ports `3500` (proxy) and `9090` (metrics). Once injected, it sets `fiso.io/status: "injected"` to prevent duplicate injection.
 
 See `deploy/examples/` for complete examples.
+
+## Troubleshooting
+
+### Docker Not Found or Not Running
+
+**Symptom:** `fiso dev` fails with "Cannot connect to the Docker daemon" or "docker: command not found"
+
+**Solution:**
+
+- Install Docker Desktop: https://www.docker.com/products/docker-desktop
+- Start the Docker daemon (Docker Desktop application)
+- Verify Docker is running: `docker ps`
+
+### GHCR Permission Denied
+
+**Symptom:** `Error response from daemon: pull access denied for ghcr.io/lsm/fiso-flow`
+
+**Solution:**
+
+```bash
+docker logout ghcr.io
+```
+
+Fiso images are public and don't require authentication. Cached credentials may cause 403 errors.
+
+### Port Conflicts
+
+**Symptom:** `Bind for 0.0.0.0:8081 failed: port is already allocated`
+
+Common conflicting ports:
+
+- **8081** — fiso-flow HTTP ingestion
+- **3500** — fiso-link proxy
+- **9090** — fiso-flow metrics
+
+**Solution:**
+
+Find the process using the port:
+
+```bash
+lsof -i :8081
+```
+
+Kill the process or change the port in your flow/link config:
+
+```yaml
+source:
+  config:
+    listenAddr: ":8082"  # Use a different port
+```
+
+### Missing Project Structure
+
+**Symptom:** `fiso dev` fails with "No docker-compose.yml found" or "Config directory not found"
+
+**Solution:**
+
+Run `fiso init` to create the required project scaffold:
+
+```bash
+fiso init
+```
+
+This generates `fiso/docker-compose.yml`, `fiso/flows/`, and `fiso/link/` directories.
+
+### Config Validation Errors
+
+**Symptom:** `Invalid flow configuration: missing required field 'source.type'`
+
+**Solution:**
+
+Run `fiso validate` to check your flow and link configs:
+
+```bash
+fiso validate
+```
+
+Fix errors reported and re-run. The validator checks YAML syntax, required fields, and type constraints.
+
+### Service Connectivity Issues
+
+**Symptom:** Events aren't reaching your service, or link proxy fails to connect to external APIs
+
+**Solution:**
+
+1. Check Docker network connectivity:
+
+```bash
+docker compose -f fiso/docker-compose.yml logs fiso-flow
+docker compose -f fiso/docker-compose.yml logs fiso-link
+```
+
+2. Verify service endpoints in flow/link configs match Docker service names
+3. For host-based services (hybrid mode), use `host.docker.internal` instead of `localhost` in flow sink URLs
+4. Test connectivity from inside the container:
+
+```bash
+docker compose -f fiso/docker-compose.yml exec fiso-flow ping user-service
+```
+
+### Diagnostic Tool
+
+For automated environment checks, use `fiso doctor`:
+
+```bash
+fiso doctor
+```
+
+This command:
+
+- Verifies Docker is installed and running
+- Checks for required project structure (`fiso/` directory)
+- Validates all flow and link configurations
+- Detects port conflicts (8081, 3500, 9090)
+- Reports actionable error messages
 
 ## Development
 

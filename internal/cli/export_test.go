@@ -349,3 +349,88 @@ func TestRunExport_Help(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestRunExport_MalformedFlowYAML(t *testing.T) {
+	dir := t.TempDir()
+	fisoDir := filepath.Join(dir, "fiso")
+	flowsDir := filepath.Join(fisoDir, "flows")
+	if err := os.MkdirAll(flowsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(flowsDir, "bad.yaml"), []byte("{{{invalid"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected parse error for malformed flow YAML")
+	}
+	if !strings.Contains(err.Error(), "parse") {
+		t.Errorf("expected parse error, got: %v", err)
+	}
+}
+
+func TestRunExport_MalformedLinkYAML(t *testing.T) {
+	dir := t.TempDir()
+	fisoDir := filepath.Join(dir, "fiso")
+	linkDir := filepath.Join(fisoDir, "link")
+	if err := os.MkdirAll(linkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), []byte("{{{invalid"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected parse error for malformed link YAML")
+	}
+	if !strings.Contains(err.Error(), "parse") {
+		t.Errorf("expected parse error, got: %v", err)
+	}
+}
+
+func TestRunExport_NonYAMLFilesIgnored(t *testing.T) {
+	dir := t.TempDir()
+	fisoDir := filepath.Join(dir, "fiso")
+	flowsDir := filepath.Join(fisoDir, "flows")
+	if err := os.MkdirAll(flowsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a .txt file
+	if err := os.WriteFile(filepath.Join(flowsDir, "readme.txt"), []byte("not yaml"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a valid .yaml file
+	flowYAML := `name: test-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`
+	if err := os.WriteFile(filepath.Join(flowsDir, "test.yaml"), []byte(flowYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := RunExport([]string{fisoDir}, &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	// Should only export the .yaml file
+	if strings.Count(out, "kind: FlowDefinition") != 1 {
+		t.Errorf("expected exactly 1 FlowDefinition, output: %s", out)
+	}
+}
+

@@ -190,3 +190,60 @@ func TestWazeroRuntime_EndToEnd_WithInterceptor(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 }
+
+func TestCall_WASMExitError(t *testing.T) {
+	wasmPath := buildWASMModule(t, filepath.Join("testdata", "exit-error"))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	ctx := context.Background()
+	rt, err := NewWazeroRuntime(ctx, wasmBytes)
+	if err != nil {
+		t.Fatalf("new runtime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	input := wasmInput{
+		Payload:   json.RawMessage(`{"test":"data"}`),
+		Headers:   map[string]string{},
+		Direction: "inbound",
+	}
+	inputBytes, _ := json.Marshal(input)
+
+	_, err = rt.Call(ctx, inputBytes)
+	if err == nil {
+		t.Fatal("expected error when WASM module exits with error code")
+	}
+}
+
+func TestCall_EmptyOutput(t *testing.T) {
+	wasmPath := buildWASMModule(t, filepath.Join("testdata", "empty-output"))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	ctx := context.Background()
+	rt, err := NewWazeroRuntime(ctx, wasmBytes)
+	if err != nil {
+		t.Fatalf("new runtime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	input := wasmInput{
+		Payload:   json.RawMessage(`{"test":"data"}`),
+		Headers:   map[string]string{},
+		Direction: "inbound",
+	}
+	inputBytes, _ := json.Marshal(input)
+
+	result, err := rt.Call(ctx, inputBytes)
+	if err != nil {
+		t.Fatalf("expected no error for empty output module, got: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty result, got %d bytes: %s", len(result), result)
+	}
+}

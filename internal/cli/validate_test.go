@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -202,6 +203,94 @@ func TestInferField(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("inferField(%q) = %q, want %q", tt.msg, got, tt.want)
 		}
+	}
+}
+
+func TestRunValidate_NonExistentDir(t *testing.T) {
+	err := RunValidate([]string{"/nonexistent/path"})
+	if err == nil {
+		t.Fatal("expected error for non-existent directory")
+	}
+	if !strings.Contains(err.Error(), "scanning") {
+		t.Errorf("expected error to contain 'scanning', got: %v", err)
+	}
+}
+
+func TestRunValidate_InvalidLinkConfig(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "fiso", "flows"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "fiso", "flows"), "good.yaml", `
+name: test
+source:
+  type: http
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+
+	if err := os.MkdirAll(filepath.Join(dir, "fiso", "link"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "fiso", "link"), "config.yaml", `{{{`)
+
+	if err := RunValidate(nil); err == nil {
+		t.Fatal("expected error for invalid link config YAML")
+	}
+}
+
+func TestRunValidate_LinkValidationErrors(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "fiso", "flows"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "fiso", "flows"), "good.yaml", `
+name: test
+source:
+  type: http
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+
+	if err := os.MkdirAll(filepath.Join(dir, "fiso", "link"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "fiso", "link"), "config.yaml", `
+targets:
+  - protocol: http
+`)
+
+	if err := RunValidate(nil); err == nil {
+		t.Fatal("expected validation error for link config with missing required fields")
+	}
+}
+
+func TestRunValidate_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := RunValidate([]string{dir}); err != nil {
+		t.Errorf("expected no error for empty directory, got: %v", err)
 	}
 }
 

@@ -17,6 +17,7 @@ Commands:
   dev                   Start local development environment
   validate [path]       Validate flow and link configuration files
   export [path]         Export configs as Kubernetes CRDs
+  doctor                Check environment and project health
 
 Run 'fiso <command> -h' for help on a specific command.`
 
@@ -42,6 +43,8 @@ func run() error {
 		return cli.RunValidate(os.Args[2:])
 	case "export":
 		return cli.RunExport(os.Args[2:], nil)
+	case "doctor":
+		return cli.RunDoctor(os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Println(usage)
 		return nil
