@@ -433,4 +433,3 @@ sink:
 		t.Errorf("expected exactly 1 FlowDefinition, output: %s", out)
 	}
 }
-
