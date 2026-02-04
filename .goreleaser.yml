@@ -102,6 +102,7 @@ archives:
       - goos: windows
         formats:
           - zip
+    allow_different_binary_count: true
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 changelog:
