@@ -39,6 +39,35 @@ jobs:
           name: coverage
           path: coverage.out
 
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Run CLI tests
+        run: go test -race ./internal/cli/...
+
+      - name: Build fiso CLI
+        run: go build -o bin\fiso.exe ./cmd/fiso
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $tmpDir = Join-Path $env:RUNNER_TEMP "fiso-smoke"
+          New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+          Push-Location $tmpDir
+          & "$env:GITHUB_WORKSPACE\bin\fiso.exe" init --defaults
+          if (-not (Test-Path "fiso\docker-compose.yml")) { throw "docker-compose.yml missing" }
+          if (-not (Test-Path "fiso\flows\example-flow.yaml")) { throw "flow yaml missing" }
+          if (-not (Test-Path "fiso\link\config.yaml")) { throw "link config missing" }
+          if (-not (Test-Path "fiso\user-service\main.go")) { throw "user-service missing" }
+          & "$env:GITHUB_WORKSPACE\bin\fiso.exe" validate
+          Pop-Location
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -89,7 +118,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [test, lint, checks]
+    needs: [test, test-windows, lint, checks]
     steps:
       - uses: actions/checkout@v4
 

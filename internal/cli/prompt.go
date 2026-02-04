@@ -96,6 +96,7 @@ func (p *prompter) numberedChoose(question string, options []string, defaultIdx 
 
 // interactiveChoose is the TTY-aware arrow-key navigation path
 func (p *prompter) interactiveChoose(question string, options []string, defaultIdx int) int {
+	enableANSI()
 	oldState, err := term.MakeRaw(p.inFd)
 	if err != nil {
 		return p.numberedChoose(question, options, defaultIdx)

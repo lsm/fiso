@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
-	"syscall"
 )
 
 const overridePath = "fiso/docker-compose.override.yml"
@@ -40,7 +39,7 @@ Flags:
 		return fmt.Errorf("fiso/docker-compose.yml not found: run 'fiso init' first")
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := signal.NotifyContext(context.Background(), shutdownSignals...)
 	defer cancel()
 
 	if err := writeDevOverride(dockerMode); err != nil {
