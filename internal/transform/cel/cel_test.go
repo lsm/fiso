@@ -332,3 +332,48 @@ func TestTransform_StringOutput(t *testing.T) {
 		t.Errorf("expected 'hello world', got %q", out)
 	}
 }
+
+func TestTransform_TimestampOutput(t *testing.T) {
+	tr, err := NewTransformer(`timestamp("2024-01-01T00:00:00Z")`)
+	if err != nil {
+		t.Fatalf("failed to create transformer: %v", err)
+	}
+	result, err := tr.Transform(context.Background(), []byte(`{"data": {}}`))
+	if err != nil {
+		t.Fatalf("transform failed: %v", err)
+	}
+
+	// The timestamp should be converted to a value via Value() fallback
+	var out interface{}
+	if err := json.Unmarshal(result, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Timestamp converts to a time.Time which marshals as RFC3339 string
+	if out == nil {
+		t.Error("expected non-nil timestamp output")
+	}
+}
+
+func TestTransform_BytesOutput(t *testing.T) {
+	// CEL bytes literal
+	tr, err := NewTransformer(`b"hello"`)
+	if err != nil {
+		t.Fatalf("failed to create transformer: %v", err)
+	}
+	result, err := tr.Transform(context.Background(), []byte(`{"data": {}}`))
+	if err != nil {
+		t.Fatalf("transform failed: %v", err)
+	}
+
+	// Bytes should be converted via Value() fallback
+	var out interface{}
+	if err := json.Unmarshal(result, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// The output should be a string (base64 encoded bytes or similar)
+	if out == nil {
+		t.Error("expected non-nil bytes output")
+	}
+}

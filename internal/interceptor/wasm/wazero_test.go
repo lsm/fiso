@@ -247,3 +247,41 @@ func TestCall_EmptyOutput(t *testing.T) {
 		t.Errorf("expected empty result, got %d bytes: %s", len(result), result)
 	}
 }
+
+func TestCall_PartialOutputOnError(t *testing.T) {
+	// Use the pre-compiled partial-output module
+	wasmBytes, err := os.ReadFile(filepath.Join("testdata", "partial-output", "module.wasm"))
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	ctx := context.Background()
+	rt, err := NewWazeroRuntime(ctx, wasmBytes)
+	if err != nil {
+		t.Fatalf("new runtime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	input := wasmInput{
+		Payload:   json.RawMessage(`{"test":"data"}`),
+		Headers:   map[string]string{},
+		Direction: "inbound",
+	}
+	inputBytes, _ := json.Marshal(input)
+
+	output, err := rt.Call(ctx, inputBytes)
+
+	// Should return an error (non-zero exit)
+	if err == nil {
+		t.Fatal("expected error when WASM module exits with error code")
+	}
+
+	// But the output should contain the partial data that was written before exit
+	if len(output) == 0 {
+		t.Error("expected partial output even with error")
+	}
+
+	if !strings.Contains(string(output), "partial") {
+		t.Errorf("expected partial data in output, got: %s", string(output))
+	}
+}

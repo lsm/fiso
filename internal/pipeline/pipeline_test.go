@@ -750,6 +750,51 @@ func TestPipeline_Shutdown_PropagatesErrors(t *testing.T) {
 	}
 }
 
+func TestPipeline_Shutdown_WithInterceptorsAndAllErrors(t *testing.T) {
+	src := &mockSource{closeErr: errors.New("source close failed")}
+	sk := &mockSink{closeErr: errors.New("sink close failed")}
+	pub := &mockPublisher{closeErr: errors.New("dlq close failed")}
+	dlqHandler := dlq.NewHandler(pub)
+
+	// Create an interceptor that will fail on close
+	ic := &closingInterceptor{closeErr: errors.New("interceptor close failed")}
+	chain := interceptor.NewChain(ic)
+
+	p := New(Config{FlowName: "test-flow"}, src, nil, sk, dlqHandler, chain)
+
+	err := p.Shutdown(context.Background())
+	if err == nil {
+		t.Fatal("expected error from shutdown")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "source close failed") {
+		t.Errorf("expected source close error, got %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "interceptor close failed") {
+		t.Errorf("expected interceptor close error, got %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "sink close failed") {
+		t.Errorf("expected sink close error, got %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "dlq close failed") {
+		t.Errorf("expected dlq close error, got %s", errMsg)
+	}
+}
+
+// closingInterceptor is a mock interceptor that can fail on close
+type closingInterceptor struct {
+	closeErr error
+}
+
+func (c *closingInterceptor) Process(_ context.Context, req *interceptor.Request) (*interceptor.Request, error) {
+	return req, nil
+}
+
+func (c *closingInterceptor) Close() error {
+	return c.closeErr
+}
+
 // --- Interceptor Tests ---
 
 type pipelineInterceptor struct {

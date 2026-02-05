@@ -177,3 +177,42 @@ func TestInterceptor_NilHeaders(t *testing.T) {
 		t.Errorf("expected direction preserved")
 	}
 }
+
+func TestInterceptor_EmptyPayload(t *testing.T) {
+	resp, _ := json.Marshal(responsePayload{
+		Payload: json.RawMessage(`{}`),
+		Headers: map[string]string{},
+	})
+	mc := &mockClient{response: resp}
+	ic := New(mc, 5*time.Second)
+
+	// Test with empty JSON object
+	req := &interceptor.Request{
+		Payload:   []byte(`{}`),
+		Headers:   map[string]string{},
+		Direction: interceptor.Inbound,
+	}
+
+	result, err := ic.Process(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error with empty payload: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	// Test with null JSON
+	req2 := &interceptor.Request{
+		Payload:   []byte(`null`),
+		Headers:   map[string]string{},
+		Direction: interceptor.Outbound,
+	}
+
+	result2, err := ic.Process(context.Background(), req2)
+	if err != nil {
+		t.Fatalf("unexpected error with null payload: %v", err)
+	}
+	if result2 == nil {
+		t.Fatal("expected non-nil result")
+	}
+}

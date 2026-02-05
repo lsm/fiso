@@ -291,3 +291,47 @@ func TestSource_InvalidListenAddress(t *testing.T) {
 		t.Fatal("expected error for invalid listen address")
 	}
 }
+
+type errorReader struct {
+	err error
+}
+
+func (e *errorReader) Read(p []byte) (int, error) {
+	return 0, e.err
+}
+
+func (e *errorReader) Close() error {
+	return nil
+}
+
+func TestSource_ReadBodyError(t *testing.T) {
+	src, err := NewSource(Config{ListenAddr: "127.0.0.1:0"}, nil)
+	if err != nil {
+		t.Fatalf("new source: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- src.Start(ctx, func(_ context.Context, evt source.Event) error {
+			return nil
+		})
+	}()
+	<-src.ready
+
+	// Create a custom request with a body that returns an error on Read
+	client := &http.Client{}
+	req, _ := http.NewRequest(http.MethodPost, "http://"+src.ListenAddr+"/", &errorReader{err: errors.New("read error")})
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err == nil {
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", resp.StatusCode)
+		}
+	}
+
+	cancel()
+	<-errCh
+}

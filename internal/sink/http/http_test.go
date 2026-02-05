@@ -362,3 +362,40 @@ func TestStatusError_Error(t *testing.T) {
 		t.Errorf("expected 'http status 503', got %q", se.Error())
 	}
 }
+
+func TestBackoff(t *testing.T) {
+	s, err := NewSink(Config{
+		URL: "http://localhost:8080",
+		Retry: RetryConfig{
+			MaxAttempts:     5,
+			InitialInterval: 100 * time.Millisecond,
+			MaxInterval:     1 * time.Second,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	// Test attempt 0 should be 0 (no backoff before first attempt)
+	// Test attempt 1: base = 100ms * 2^0 = 100ms
+	delay1 := s.backoff(1)
+	if delay1 < 80*time.Millisecond || delay1 > 120*time.Millisecond {
+		t.Errorf("backoff(1) = %v, expected ~100ms ±20%%", delay1)
+	}
+
+	// Test attempt 2: base = 100ms * 2^1 = 200ms
+	delay2 := s.backoff(2)
+	if delay2 < 160*time.Millisecond || delay2 > 240*time.Millisecond {
+		t.Errorf("backoff(2) = %v, expected ~200ms ±20%%", delay2)
+	}
+
+	// Test capped at MaxInterval
+	delay10 := s.backoff(10)
+	if delay10 > 1200*time.Millisecond {
+		t.Errorf("backoff(10) = %v, expected <= 1200ms (MaxInterval 1s + 20%% jitter)", delay10)
+	}
+	if delay10 < 800*time.Millisecond {
+		t.Errorf("backoff(10) = %v, expected >= 800ms (MaxInterval 1s - 20%% jitter)", delay10)
+	}
+}

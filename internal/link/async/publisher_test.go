@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -109,5 +110,39 @@ func TestPublish_Close(t *testing.T) {
 	pub := NewPublisher(broker, "events")
 	if err := pub.Close(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGenerateID(t *testing.T) {
+	// Call generateID multiple times
+	id1 := generateID()
+	id2 := generateID()
+	id3 := generateID()
+
+	// IDs should be non-empty
+	if id1 == "" {
+		t.Error("expected non-empty ID")
+	}
+	if id2 == "" {
+		t.Error("expected non-empty ID")
+	}
+	if id3 == "" {
+		t.Error("expected non-empty ID")
+	}
+
+	// IDs should be different
+	if id1 == id2 {
+		t.Error("expected different IDs from consecutive calls")
+	}
+	if id2 == id3 {
+		t.Error("expected different IDs from consecutive calls")
+	}
+
+	// ID format should contain hyphens (UUID-like)
+	if !strings.Contains(id1, "-") {
+		t.Errorf("expected UUID-like format with hyphens, got %q", id1)
+	}
+	if !strings.Contains(id2, "-") {
+		t.Errorf("expected UUID-like format with hyphens, got %q", id2)
 	}
 }

@@ -353,3 +353,65 @@ func TestWebhook_InjectWithNilAnnotations(t *testing.T) {
 		t.Fatal("expected patch when inject annotation is true")
 	}
 }
+
+type failingResponseWriter struct {
+	httptest.ResponseRecorder
+	failOnWrite bool
+}
+
+func (f *failingResponseWriter) Write(b []byte) (int, error) {
+	if f.failOnWrite {
+		return 0, http.ErrContentLength
+	}
+	return f.ResponseRecorder.Write(b)
+}
+
+func TestWebhook_ResponseWriteError(t *testing.T) {
+	h := NewWebhookHandler(DefaultSidecarConfig())
+	review := makeReview(
+		map[string]string{AnnotationInject: "true"},
+		[]Container{{Name: "app", Image: "myapp:latest"}},
+	)
+	body, _ := json.Marshal(review)
+
+	req := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Use custom ResponseWriter that fails on Write
+	w := &failingResponseWriter{failOnWrite: true}
+
+	// Should not panic when response encoding fails
+	h.ServeHTTP(w, req)
+
+	// The handler writes an error response when encoding fails
+	// We can't easily verify the exact behavior since Write fails,
+	// but the key is that it doesn't panic
+}
+
+func TestBuildPatch_WithExistingAnnotations(t *testing.T) {
+	h := NewWebhookHandler(DefaultSidecarConfig())
+
+	// Create a pod with existing annotations
+	pod := PodPartial{}
+	pod.Metadata.Annotations = map[string]string{AnnotationInject: "true"}
+	pod.Spec.Containers = []Container{{Name: "app", Image: "myapp:latest"}}
+
+	patch := h.buildPatch(pod)
+
+	if len(patch) == 0 {
+		t.Fatal("expected non-empty patch")
+	}
+
+	// Verify patch includes annotation operation for adding status
+	foundAnnotationOp := false
+	for _, op := range patch {
+		if strings.Contains(op.Path, "/metadata/annotations/fiso.io~1status") {
+			foundAnnotationOp = true
+			break
+		}
+	}
+
+	if !foundAnnotationOp {
+		t.Error("expected patch to add status annotation to existing annotations map")
+	}
+}

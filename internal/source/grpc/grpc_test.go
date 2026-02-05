@@ -276,3 +276,51 @@ func TestSource_MultipleEvents(t *testing.T) {
 		t.Errorf("expected 5 events, got %d", count)
 	}
 }
+
+func TestSource_StreamRecvError(t *testing.T) {
+	src, err := NewSource(Config{ListenAddr: "127.0.0.1:0"}, nil)
+	if err != nil {
+		t.Fatalf("new source: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- src.Start(ctx, func(ctx context.Context, evt source.Event) error {
+			return nil
+		})
+	}()
+	<-src.ready
+
+	conn, err := grpc.NewClient(src.ListenAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	// Create a stream but cancel context immediately without sending
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	stream, err := conn.NewStream(streamCtx, &grpc.StreamDesc{
+		StreamName:    "TestMethod",
+		ServerStreams: true,
+		ClientStreams: true,
+	}, "/test/Method", grpc.ForceCodec(rawCodecForClient{}))
+	if err != nil {
+		t.Fatalf("create stream: %v", err)
+	}
+
+	// Cancel immediately to cause receive error
+	streamCancel()
+
+	// Try to send header to trigger the stream
+	_ = stream.SendMsg([]byte(`{}`))
+
+	// The server should handle the receive error gracefully
+	// Wait a bit for the server to process
+	// No assertion needed - just verify no panic occurs
+
+	cancel()
+	<-errCh
+}

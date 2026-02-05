@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -664,6 +665,115 @@ sink:
 	}
 	if flow.Transform.Mapping["order_id"] != "$.legacy_id" {
 		t.Errorf("expected mapping order_id='$.legacy_id', got %v", flow.Transform.Mapping["order_id"])
+	}
+}
+
+func TestWatch_NilOnChange(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "flow.yaml", `
+name: test-flow
+source:
+  type: kafka
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+	loader := NewLoader(dir, nil)
+	_, _ = loader.Load()
+
+	// Start Watch WITHOUT setting OnChange callback
+	done := make(chan struct{})
+	errCh := make(chan error, 1)
+	go func() { errCh <- loader.Watch(done) }()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Modify file to trigger watch event
+	writeFile(t, dir, "flow.yaml", `
+name: modified-flow
+source:
+  type: kafka
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+
+	// Let watch process the event
+	time.Sleep(100 * time.Millisecond)
+
+	// Should not panic - close cleanly
+	close(done)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("watch did not stop")
+	}
+}
+
+func TestWatch_LoadErrorRecovery(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "flow.yaml", `
+name: valid-flow
+source:
+  type: kafka
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+
+	loader := NewLoader(dir, nil)
+	_, _ = loader.Load()
+
+	var mu sync.Mutex
+	var changeCount int
+	loader.OnChange(func(flows map[string]*FlowDefinition) {
+		mu.Lock()
+		changeCount++
+		mu.Unlock()
+	})
+
+	done := make(chan struct{})
+	go func() { _ = loader.Watch(done) }()
+	time.Sleep(100 * time.Millisecond)
+
+	// Remove the file to cause Load() to return empty result
+	_ = os.Remove(filepath.Join(dir, "flow.yaml"))
+	time.Sleep(200 * time.Millisecond)
+
+	// Add a valid file back
+	writeFile(t, dir, "flow.yaml", `
+name: recovered-flow
+source:
+  type: kafka
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	count := changeCount
+	mu.Unlock()
+
+	if count < 2 {
+		t.Errorf("expected at least 2 change callbacks, got %d", count)
+	}
+
+	close(done)
+}
+
+func TestWatch_ErrorChannel(t *testing.T) {
+	loader := NewLoader("/nonexistent/watch/path", nil)
+	err := loader.Watch(make(chan struct{}))
+	if err == nil {
+		t.Fatal("expected error when watching invalid path")
 	}
 }
 
