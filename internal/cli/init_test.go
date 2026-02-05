@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -677,6 +678,10 @@ func TestWriteTemplate_Error(t *testing.T) {
 }
 
 func TestWriteTemplate_WriteError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only directory permissions not enforced on Windows")
+	}
+
 	dir := t.TempDir()
 
 	// Create a read-only directory to force write error
@@ -702,6 +707,10 @@ func TestWriteTemplate_WriteError(t *testing.T) {
 }
 
 func TestCopyEmbedded_WriteError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only directory permissions not enforced on Windows")
+	}
+
 	dir := t.TempDir()
 
 	// Create a read-only directory to force write error
