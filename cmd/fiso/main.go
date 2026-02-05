@@ -17,7 +17,11 @@ Commands:
   dev                   Start local development environment
   validate [path]       Validate flow and link configuration files
   export [path]         Export configs as Kubernetes CRDs
+  transform test        Test a transform configuration (dry-run)
   doctor                Check environment and project health
+  logs                  Show logs from fiso services
+  produce               Produce test events to Kafka
+  consume               Consume and display events from Kafka
 
 Run 'fiso <command> -h' for help on a specific command.`
 
@@ -36,15 +40,23 @@ func run() error {
 
 	switch os.Args[1] {
 	case "init":
-		return cli.RunInit(os.Args[2:], nil)
+		return cli.RunInit(os.Args[2:], os.Stdin)
 	case "dev":
 		return cli.RunDev(os.Args[2:])
 	case "validate":
 		return cli.RunValidate(os.Args[2:])
 	case "export":
 		return cli.RunExport(os.Args[2:], nil)
+	case "transform":
+		return cli.RunTransform(os.Args[2:])
 	case "doctor":
 		return cli.RunDoctor(os.Args[2:])
+	case "logs":
+		return cli.RunLogs(os.Args[2:])
+	case "produce":
+		return cli.RunProduce(os.Args[2:])
+	case "consume":
+		return cli.RunConsume(os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Println(usage)
 		return nil
