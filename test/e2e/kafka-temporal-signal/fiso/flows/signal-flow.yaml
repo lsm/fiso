@@ -8,10 +8,10 @@ source:
     consumerGroup: fiso-temporal-signal-e2e
     startOffset: earliest
 transform:
-  mapping:
-    order_id: "$.order_id"
-    status: "$.status"
-    updated_by: "$.updated_by"
+  fields:
+    order_id: data.order_id
+    status: data.status
+    updated_by: data.updated_by
 cloudevents:
   type: order.updated
   source: fiso-signal-e2e

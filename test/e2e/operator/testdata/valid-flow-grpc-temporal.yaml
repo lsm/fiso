@@ -9,7 +9,8 @@ spec:
     config:
       port: "50051"
   transform:
-    cel: "event.amount > 100"
+    fields:
+      amount_gt_100: event.amount > 100
   sink:
     type: temporal
     config:

@@ -21,14 +21,14 @@ import (
 	"github.com/lsm/fiso/internal/observability"
 	"github.com/lsm/fiso/internal/pipeline"
 	httpsink "github.com/lsm/fiso/internal/sink/http"
+	kafkasink "github.com/lsm/fiso/internal/sink/kafka"
 	temporalsink "github.com/lsm/fiso/internal/sink/temporal"
 	"github.com/lsm/fiso/internal/source"
 	grpcsource "github.com/lsm/fiso/internal/source/grpc"
 	httpsource "github.com/lsm/fiso/internal/source/http"
 	"github.com/lsm/fiso/internal/source/kafka"
 	"github.com/lsm/fiso/internal/transform"
-	celxform "github.com/lsm/fiso/internal/transform/cel"
-	mappingxform "github.com/lsm/fiso/internal/transform/mapping"
+	unifiedxform "github.com/lsm/fiso/internal/transform/unified"
 )
 
 func main() {
@@ -190,18 +190,10 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 	// Use the interface type so a nil value stays nil (avoids typed-nil gotcha).
 	var transformer transform.Transformer
 	var err error
-	if flowDef.Transform != nil {
-		switch {
-		case flowDef.Transform.CEL != "":
-			transformer, err = celxform.NewTransformer(flowDef.Transform.CEL)
-			if err != nil {
-				return nil, fmt.Errorf("cel transformer: %w", err)
-			}
-		case len(flowDef.Transform.Mapping) > 0:
-			transformer, err = mappingxform.NewTransformer(flowDef.Transform.Mapping)
-			if err != nil {
-				return nil, fmt.Errorf("mapping transformer: %w", err)
-			}
+	if flowDef.Transform != nil && len(flowDef.Transform.Fields) > 0 {
+		transformer, err = unifiedxform.NewTransformer(flowDef.Transform.Fields)
+		if err != nil {
+			return nil, fmt.Errorf("unified transformer: %w", err)
 		}
 	}
 
@@ -260,6 +252,22 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 			return nil, fmt.Errorf("temporal sink: %w", err)
 		}
 		sk = tSink
+
+	case "kafka":
+		brokers, err := getStringSlice(flowDef.Sink.Config, "brokers")
+		if err != nil {
+			return nil, fmt.Errorf("kafka sink config: %w", err)
+		}
+		topic, _ := flowDef.Sink.Config["topic"].(string)
+
+		kSink, err := kafkasink.NewSink(kafkasink.Config{
+			Brokers: brokers,
+			Topic:   topic,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("kafka sink: %w", err)
+		}
+		sk = kSink
 
 	default:
 		return nil, fmt.Errorf("unsupported sink type: %s", flowDef.Sink.Type)

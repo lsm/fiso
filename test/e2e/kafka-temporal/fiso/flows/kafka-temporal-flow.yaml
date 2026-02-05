@@ -8,10 +8,10 @@ source:
     consumerGroup: fiso-temporal-e2e
     startOffset: earliest
 transform:
-  mapping:
-    order_id: "$.order_id"
-    total: "$.amount"
-    customer_name: "$.customer"
+  fields:
+    order_id: data.order_id
+    total: data.amount
+    customer_name: data.customer
     status: "pending"
 cloudevents:
   type: order.created

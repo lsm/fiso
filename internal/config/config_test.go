@@ -21,7 +21,8 @@ source:
     topic: orders
     consumerGroup: fiso-order-flow
 transform:
-  cel: '{"id": data.legacy_id}'
+  fields:
+    id: data.legacy_id
 sink:
   type: http
   config:
@@ -50,8 +51,8 @@ errorHandling:
 	if flow.Source.Type != "kafka" {
 		t.Errorf("expected source type kafka, got %s", flow.Source.Type)
 	}
-	if flow.Transform == nil || flow.Transform.CEL != `{"id": data.legacy_id}` {
-		t.Error("transform CEL expression mismatch")
+	if flow.Transform == nil || flow.Transform.Fields["id"] != "data.legacy_id" {
+		t.Error("transform fields mismatch")
 	}
 	if flow.Sink.Type != "http" {
 		t.Errorf("expected sink type http, got %s", flow.Sink.Type)
@@ -442,22 +443,22 @@ func TestFlowDefinition_Validate(t *testing.T) {
 			wantErr: "name is required",
 		},
 		{
-			name: "cel and mapping mutually exclusive",
+			name: "empty transform fields should error",
 			flow: FlowDefinition{
 				Name:      "t",
 				Source:    SourceConfig{Type: "http"},
 				Sink:      SinkConfig{Type: "http"},
-				Transform: &TransformConfig{CEL: `{"a": data.b}`, Mapping: map[string]interface{}{"a": "$.b"}},
+				Transform: &TransformConfig{Fields: map[string]string{}},
 			},
-			wantErr: "mutually exclusive",
+			wantErr: "fields' is required",
 		},
 		{
-			name: "mapping only is valid",
+			name: "unified transform with fields is valid",
 			flow: FlowDefinition{
 				Name:      "t",
 				Source:    SourceConfig{Type: "http"},
 				Sink:      SinkConfig{Type: "http"},
-				Transform: &TransformConfig{Mapping: map[string]interface{}{"a": "$.b"}},
+				Transform: &TransformConfig{Fields: map[string]string{"a": "data.b", "status": `"processed"`}},
 			},
 		},
 		{
@@ -630,18 +631,18 @@ sink:
 	}
 }
 
-func TestLoad_WithMappingTransform(t *testing.T) {
+func TestLoad_WithUnifiedTransform(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "flow.yaml", `
-name: mapping-flow
+name: unified-flow
 source:
   type: http
   config: {}
 transform:
-  mapping:
-    order_id: "$.legacy_id"
-    customer:
-      name: "$.customer_name"
+  fields:
+    order_id: data.legacy_id
+    customer_name: data.customer_name
+    status: '"processed"'
 sink:
   type: http
   config: {}
@@ -653,18 +654,21 @@ sink:
 		t.Fatalf("load failed: %v", err)
 	}
 
-	flow := flows["mapping-flow"]
+	flow := flows["unified-flow"]
 	if flow == nil {
-		t.Fatal("expected flow 'mapping-flow'")
+		t.Fatal("expected flow 'unified-flow'")
 	}
 	if flow.Transform == nil {
 		t.Fatal("expected transform config")
 	}
-	if len(flow.Transform.Mapping) == 0 {
-		t.Fatal("expected non-empty mapping")
+	if len(flow.Transform.Fields) == 0 {
+		t.Fatal("expected non-empty fields")
 	}
-	if flow.Transform.Mapping["order_id"] != "$.legacy_id" {
-		t.Errorf("expected mapping order_id='$.legacy_id', got %v", flow.Transform.Mapping["order_id"])
+	if flow.Transform.Fields["order_id"] != "data.legacy_id" {
+		t.Errorf("expected field order_id='data.legacy_id', got %v", flow.Transform.Fields["order_id"])
+	}
+	if flow.Transform.Fields["status"] != `"processed"` {
+		t.Errorf("expected field status='\"processed\"', got %v", flow.Transform.Fields["status"])
 	}
 }
 

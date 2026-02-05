@@ -14,7 +14,7 @@ import (
 
 var (
 	validSourceTypes      = map[string]bool{"kafka": true, "grpc": true, "http": true}
-	validSinkTypes        = map[string]bool{"http": true, "grpc": true, "temporal": true}
+	validSinkTypes        = map[string]bool{"http": true, "grpc": true, "temporal": true, "kafka": true}
 	validInterceptorTypes = map[string]bool{"wasm": true, "grpc": true}
 )
 
@@ -36,12 +36,12 @@ func (f *FlowDefinition) Validate() error {
 	if f.Sink.Type == "" {
 		errs = append(errs, fmt.Errorf("sink.type is required"))
 	} else if !validSinkTypes[f.Sink.Type] {
-		errs = append(errs, fmt.Errorf("sink.type %q is not valid (must be one of: http, grpc, temporal)", f.Sink.Type))
+		errs = append(errs, fmt.Errorf("sink.type %q is not valid (must be one of: http, grpc, temporal, kafka)", f.Sink.Type))
 	}
 
-	// Transform: cel and mapping are mutually exclusive.
-	if f.Transform != nil && f.Transform.CEL != "" && len(f.Transform.Mapping) > 0 {
-		errs = append(errs, fmt.Errorf("transform: 'cel' and 'mapping' are mutually exclusive"))
+	// Transform validation
+	if f.Transform != nil && len(f.Transform.Fields) == 0 {
+		errs = append(errs, fmt.Errorf("transform: 'fields' is required when transform is defined"))
 	}
 
 	// Temporal sink validation.
@@ -116,11 +116,10 @@ type SourceConfig struct {
 	Config map[string]interface{} `yaml:"config"`
 }
 
-// TransformConfig holds transform configuration.
-// CEL and Mapping are mutually exclusive.
+// TransformConfig holds transform configuration using the unified fields syntax.
+// Each field value is a CEL expression that produces the output field value.
 type TransformConfig struct {
-	CEL     string                 `yaml:"cel"`
-	Mapping map[string]interface{} `yaml:"mapping,omitempty"`
+	Fields map[string]string `yaml:"fields,omitempty"`
 }
 
 // SinkConfig holds sink configuration.

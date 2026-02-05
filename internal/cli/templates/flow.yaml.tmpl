@@ -14,15 +14,11 @@ source:
     consumerGroup: fiso-{{.FlowName}}
     startOffset: latest
 {{- end}}
-{{- if eq .Transform "cel"}}
+{{- if eq .Transform "fields"}}
 transform:
-  cel: '{"id": data.id, "processed_at": time}'
-{{- else if eq .Transform "mapping"}}
-transform:
-  mapping:
-    order_id: "$.order_id"
-    total: "$.amount"
-    status: "pending"
+  fields:
+    id: data.id
+    processed_at: time
 {{- end}}
 {{- if .CloudEvents}}
 cloudevents:

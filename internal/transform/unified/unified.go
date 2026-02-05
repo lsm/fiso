@@ -1,9 +1,10 @@
-package cel
+package unified
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/cel-go/cel"
@@ -34,17 +35,31 @@ func WithMaxOutputBytes(n int) Option {
 	}
 }
 
-// Transformer applies a CEL expression to JSON event payloads.
+// Transformer applies a unified fields-based transform to JSON event payloads.
+// The fields map defines output fields as CEL expressions, compiled into a single
+// optimized CEL program for better performance than per-event goroutine evaluation.
 type Transformer struct {
 	program        cel.Program
+	fields         map[string]string
 	timeout        time.Duration
 	maxOutputBytes int
 }
 
-// NewTransformer compiles a CEL expression and returns a ready-to-use Transformer.
-// The expression receives the parsed JSON input as top-level variables.
-// For example, given input {"data": {"id": 1}}, the expression can reference data.id.
-func NewTransformer(expression string, opts ...Option) (*Transformer, error) {
+// NewTransformer creates a unified transformer from a fields map.
+// The fields map specifies output field names and their CEL expressions.
+// For example: {"order_id": "data.legacy_id", "total": "data.price * data.quantity"}
+func NewTransformer(fields map[string]string, opts ...Option) (*Transformer, error) {
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("fields cannot be empty")
+	}
+
+	// Build CEL expression from fields map
+	expr, err := buildCelExpression(fields)
+	if err != nil {
+		return nil, fmt.Errorf("build cel expression: %w", err)
+	}
+
+	// Create CEL environment with standard extensions
 	env, err := cel.NewEnv(
 		cel.Variable("data", cel.DynType),
 		cel.Variable("time", cel.DynType),
@@ -60,11 +75,13 @@ func NewTransformer(expression string, opts ...Option) (*Transformer, error) {
 		return nil, fmt.Errorf("cel env: %w", err)
 	}
 
-	ast, issues := env.Compile(expression)
+	// Compile the expression
+	ast, issues := env.Compile(expr)
 	if issues != nil && issues.Err() != nil {
 		return nil, fmt.Errorf("cel compile: %w", issues.Err())
 	}
 
+	// Create the program
 	prg, err := env.Program(ast)
 	if err != nil {
 		return nil, fmt.Errorf("cel program: %w", err)
@@ -72,6 +89,7 @@ func NewTransformer(expression string, opts ...Option) (*Transformer, error) {
 
 	t := &Transformer{
 		program:        prg,
+		fields:         fields,
 		timeout:        defaultTimeout,
 		maxOutputBytes: defaultMaxOutputBytes,
 	}
@@ -81,24 +99,56 @@ func NewTransformer(expression string, opts ...Option) (*Transformer, error) {
 	return t, nil
 }
 
-// Transform applies the CEL expression to the input JSON payload.
+// buildCelExpression converts a fields map to a CEL object literal expression.
+// For example: {"a": "data.x", "b": "42"} becomes {"a": data.x, "b": 42}
+func buildCelExpression(fields map[string]string) (string, error) {
+	if len(fields) == 0 {
+		return "", fmt.Errorf("fields map is empty")
+	}
+
+	var builder strings.Builder
+	builder.Grow(128) // Pre-allocate reasonable size
+
+	builder.WriteByte('{')
+
+	first := true
+	for key, expr := range fields {
+		if !first {
+			builder.WriteByte(',')
+		}
+		first = false
+
+		// Write key as JSON string (handles escaping)
+		jsonKey, _ := json.Marshal(key)
+		builder.Write(jsonKey)
+		builder.WriteByte(':')
+		builder.WriteString(expr)
+	}
+
+	builder.WriteByte('}')
+
+	return builder.String(), nil
+}
+
+// Transform applies the unified transform to the input JSON payload.
+// It uses direct CEL evaluation without per-event goroutines for better performance.
 func (t *Transformer) Transform(ctx context.Context, input []byte) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context error: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, t.timeout)
-	defer cancel()
-
+	// Parse input JSON
 	var parsed map[string]interface{}
 	if err := json.Unmarshal(input, &parsed); err != nil {
 		return nil, fmt.Errorf("unmarshal input: %w", err)
 	}
 
-	activation := make(map[string]interface{})
+	// Build activation with all input fields
+	activation := make(map[string]interface{}, len(parsed)+6)
 	for k, v := range parsed {
 		activation[k] = v
 	}
+
 	// Ensure all declared variables have a value to avoid runtime errors
 	// for expressions that don't reference all variables.
 	for _, name := range []string{"data", "time", "source", "type", "id", "subject"} {
@@ -107,45 +157,37 @@ func (t *Transformer) Transform(ctx context.Context, input []byte) ([]byte, erro
 		}
 	}
 
-	type result struct {
-		val interface{}
-		err error
+	// Direct CEL evaluation without goroutine (key performance optimization)
+	out, _, err := t.program.Eval(activation)
+	if err != nil {
+		return nil, fmt.Errorf("cel eval: %w", err)
 	}
-	ch := make(chan result, 1)
 
-	go func() {
-		out, _, err := t.program.Eval(activation)
-		if err != nil {
-			ch <- result{err: fmt.Errorf("cel eval: %w", err)}
-			return
-		}
-		ch <- result{val: toNative(out)}
-	}()
+	// Convert CEL types to native Go types
+	nativeVal := toNative(out)
 
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("transform timeout: %w", ctx.Err())
-	case r := <-ch:
-		if r.err != nil {
-			return nil, r.err
-		}
-
-		output, err := json.Marshal(r.val)
-		if err != nil {
-			return nil, fmt.Errorf("marshal output: %w", err)
-		}
-
-		if len(output) > t.maxOutputBytes {
-			return nil, fmt.Errorf("output size %d exceeds max %d bytes", len(output), t.maxOutputBytes)
-		}
-
-		return output, nil
+	// Marshal output
+	output, err := json.Marshal(nativeVal)
+	if err != nil {
+		return nil, fmt.Errorf("marshal output: %w", err)
 	}
+
+	// Check output size limit
+	if len(output) > t.maxOutputBytes {
+		return nil, fmt.Errorf("output size %d exceeds max %d bytes", len(output), t.maxOutputBytes)
+	}
+
+	return output, nil
 }
 
 // toNative recursively converts CEL ref.Val types to native Go types
 // that json.Marshal can handle.
 func toNative(val interface{}) interface{} {
+	// Handle null values first - return Go nil
+	if _, ok := val.(types.Null); ok {
+		return nil
+	}
+
 	switch v := val.(type) {
 	case traits.Mapper:
 		it := v.Iterator()

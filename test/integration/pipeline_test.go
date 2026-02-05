@@ -19,7 +19,7 @@ import (
 	"github.com/lsm/fiso/internal/pipeline"
 	httpsink "github.com/lsm/fiso/internal/sink/http"
 	"github.com/lsm/fiso/internal/source/kafka"
-	celxform "github.com/lsm/fiso/internal/transform/cel"
+	unifiedxform "github.com/lsm/fiso/internal/transform/unified"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
@@ -64,7 +64,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}))
 	defer sinkServer.Close()
 
-	// Build pipeline: Kafka source → CEL transform → HTTP sink
+	// Build pipeline: Kafka source → unified transform → HTTP sink
 	logger := slog.Default()
 
 	src, err := kafka.NewSource(kafka.Config{
@@ -77,9 +77,12 @@ func TestPipeline_EndToEnd(t *testing.T) {
 		t.Fatalf("kafka source: %v", err)
 	}
 
-	transformer, err := celxform.NewTransformer(`{"transformed": true, "original": data}`)
+	transformer, err := unifiedxform.NewTransformer(map[string]string{
+		"transformed": "true",
+		"original":   "data",
+	})
 	if err != nil {
-		t.Fatalf("cel transformer: %v", err)
+		t.Fatalf("unified transformer: %v", err)
 	}
 
 	sk, err := httpsink.NewSink(httpsink.Config{

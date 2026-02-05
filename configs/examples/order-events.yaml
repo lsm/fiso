@@ -8,7 +8,10 @@ source:
     consumerGroup: fiso-order-flow
     startOffset: latest
 transform:
-  cel: '{"order_id": data.legacy_id, "timestamp": time, "status": data.order_status}'
+  fields:
+    order_id: data.legacy_id
+    timestamp: time
+    status: data.order_status
 sink:
   type: http
   config:
