@@ -286,3 +286,83 @@ func TestTargetStore_GetAndUpdate(t *testing.T) {
 		t.Errorf("expected target c, got %v", c)
 	}
 }
+
+func TestLoadConfig_IntegerDurations(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    circuitBreaker:
+      enabled: true
+      resetTimeout: 30000
+    retry:
+      maxAttempts: 3
+      backoff: exponential
+      initialInterval: 200
+      maxInterval: 30000
+      jitter: 0.2
+    rateLimit:
+      requestsPerSecond: 100
+      burst: 50
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check that integer durations were converted to string with "ms" suffix
+	if cfg.Targets[0].CircuitBreaker.ResetTimeout != "30000ms" {
+		t.Errorf("expected resetTimeout \"30000ms\", got %q", cfg.Targets[0].CircuitBreaker.ResetTimeout)
+	}
+	if cfg.Targets[0].Retry.InitialInterval != "200ms" {
+		t.Errorf("expected initialInterval \"200ms\", got %q", cfg.Targets[0].Retry.InitialInterval)
+	}
+	if cfg.Targets[0].Retry.MaxInterval != "30000ms" {
+		t.Errorf("expected maxInterval \"30000ms\", got %q", cfg.Targets[0].Retry.MaxInterval)
+	}
+	// Check that int RequestsPerSecond was converted to float64
+	if cfg.Targets[0].RateLimit.RequestsPerSecond != 100.0 {
+		t.Errorf("expected requestsPerSecond 100.0, got %f", cfg.Targets[0].RateLimit.RequestsPerSecond)
+	}
+}
+
+func TestLoadConfig_FloatDurations(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    circuitBreaker:
+      enabled: true
+      resetTimeout: 30000.0
+    retry:
+      maxAttempts: 3
+      backoff: exponential
+      initialInterval: 200.5
+      maxInterval: 30000.0
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check that float durations were converted to string with "ms" suffix
+	if cfg.Targets[0].CircuitBreaker.ResetTimeout != "30000ms" {
+		t.Errorf("expected resetTimeout \"30000ms\", got %q", cfg.Targets[0].CircuitBreaker.ResetTimeout)
+	}
+	if cfg.Targets[0].Retry.InitialInterval != "200ms" {
+		t.Errorf("expected initialInterval \"200ms\", got %q", cfg.Targets[0].Retry.InitialInterval)
+	}
+}
+

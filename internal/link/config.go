@@ -52,6 +52,57 @@ type CircuitBreakerConfig struct {
 	ResetTimeout     string `yaml:"resetTimeout"` // e.g., "30s"
 }
 
+// UnmarshalYAML implements custom unmarshaling for CircuitBreakerConfig.
+// It handles both string and integer duration formats for ResetTimeout.
+func (c *CircuitBreakerConfig) UnmarshalYAML(value *yaml.Node) error {
+	// Decode into raw map to handle type flexibility
+	var raw map[string]interface{}
+	if err := value.Decode(&raw); err != nil {
+		return fmt.Errorf("decode circuitBreaker: %w", err)
+	}
+
+	// Set defaults
+	c.Enabled = false
+	c.FailureThreshold = 0
+	c.SuccessThreshold = 0
+	c.ResetTimeout = ""
+
+	// Parse each field
+	if v, ok := raw["enabled"]; ok {
+		if b, ok := v.(bool); ok {
+			c.Enabled = b
+		}
+	}
+	if v, ok := raw["failureThreshold"]; ok {
+		switch tv := v.(type) {
+		case int:
+			c.FailureThreshold = tv
+		case float64:
+			c.FailureThreshold = int(tv)
+		}
+	}
+	if v, ok := raw["successThreshold"]; ok {
+		switch tv := v.(type) {
+		case int:
+			c.SuccessThreshold = tv
+		case float64:
+			c.SuccessThreshold = int(tv)
+		}
+	}
+	if v, ok := raw["resetTimeout"]; ok {
+		switch tv := v.(type) {
+		case string:
+			c.ResetTimeout = tv
+		case int:
+			c.ResetTimeout = fmt.Sprintf("%dms", tv)
+		case float64:
+			c.ResetTimeout = fmt.Sprintf("%.0fms", tv)
+		}
+	}
+
+	return nil
+}
+
 // RetryConfig holds retry settings.
 type RetryConfig struct {
 	MaxAttempts     int     `yaml:"maxAttempts"`
@@ -61,10 +112,110 @@ type RetryConfig struct {
 	Jitter          float64 `yaml:"jitter"`
 }
 
+// UnmarshalYAML implements custom unmarshaling for RetryConfig.
+// It handles both string and integer formats for duration fields.
+func (r *RetryConfig) UnmarshalYAML(value *yaml.Node) error {
+	// Decode into raw map to handle type flexibility
+	var raw map[string]interface{}
+	if err := value.Decode(&raw); err != nil {
+		return fmt.Errorf("decode retry: %w", err)
+	}
+
+	// Set defaults
+	r.MaxAttempts = 0
+	r.Backoff = ""
+	r.InitialInterval = ""
+	r.MaxInterval = ""
+	r.Jitter = 0
+
+	// Parse each field
+	if v, ok := raw["maxAttempts"]; ok {
+		switch tv := v.(type) {
+		case int:
+			r.MaxAttempts = tv
+		case float64:
+			r.MaxAttempts = int(tv)
+		}
+	}
+	if v, ok := raw["backoff"]; ok {
+		if s, ok := v.(string); ok {
+			r.Backoff = s
+		}
+	}
+	if v, ok := raw["initialInterval"]; ok {
+		switch tv := v.(type) {
+		case string:
+			r.InitialInterval = tv
+		case int:
+			r.InitialInterval = fmt.Sprintf("%dms", tv)
+		case float64:
+			r.InitialInterval = fmt.Sprintf("%.0fms", tv)
+		}
+	}
+	if v, ok := raw["maxInterval"]; ok {
+		switch tv := v.(type) {
+		case string:
+			r.MaxInterval = tv
+		case int:
+			r.MaxInterval = fmt.Sprintf("%dms", tv)
+		case float64:
+			r.MaxInterval = fmt.Sprintf("%.0fms", tv)
+		}
+	}
+	if v, ok := raw["jitter"]; ok {
+		switch tv := v.(type) {
+		case float64:
+			r.Jitter = tv
+		case int:
+			r.Jitter = float64(tv)
+		}
+	}
+
+	return nil
+}
+
 // RateLimitConfig holds rate limiting settings.
 type RateLimitConfig struct {
 	RequestsPerSecond float64 `yaml:"requestsPerSecond"`
 	Burst             int     `yaml:"burst"`
+}
+
+// UnmarshalYAML implements custom unmarshaling for RateLimitConfig.
+// It handles numeric types flexibly and provides clear error messages.
+func (r *RateLimitConfig) UnmarshalYAML(value *yaml.Node) error {
+	// Decode into raw map to handle type flexibility
+	var raw map[string]interface{}
+	if err := value.Decode(&raw); err != nil {
+		return fmt.Errorf("decode rateLimit: %w", err)
+	}
+
+	// Set defaults
+	r.RequestsPerSecond = 0
+	r.Burst = 0
+
+	// Parse each field
+	if v, ok := raw["requestsPerSecond"]; ok {
+		switch tv := v.(type) {
+		case int:
+			r.RequestsPerSecond = float64(tv)
+		case float64:
+			r.RequestsPerSecond = tv
+		case int64:
+			r.RequestsPerSecond = float64(tv)
+		}
+	}
+	if v, ok := raw["burst"]; ok {
+		switch tv := v.(type) {
+		case int:
+			r.Burst = tv
+		case float64:
+			r.Burst = int(tv)
+		case int64:
+			r.Burst = int(tv)
+		}
+	}
+
+	return nil
 }
 
 // Config is the top-level Fiso-Link configuration.
