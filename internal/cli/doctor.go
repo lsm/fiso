@@ -104,16 +104,27 @@ Checks environment and project health:
 	return nil
 }
 
+// execOutputFunc runs a command and returns its combined output.
+// Tests can replace this to stub out exec.Command calls.
+var execOutputFunc = func(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).CombinedOutput()
+}
+
+// execRunFunc runs a command and returns its error status.
+// Tests can replace this to stub out exec.Command calls.
+var execRunFunc = func(name string, args ...string) error {
+	return exec.Command(name, args...).Run()
+}
+
 // checkDockerInstalled checks if docker is in PATH.
 func checkDockerInstalled() (bool, string) {
-	_, err := exec.LookPath("docker")
+	_, err := lookPathFunc("docker")
 	return err == nil, ""
 }
 
 // checkDockerDaemon checks if the Docker daemon is running and returns version info.
 func checkDockerDaemon() (bool, string) {
-	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
-	output, err := cmd.CombinedOutput()
+	output, err := execOutputFunc("docker", "version", "--format", "{{.Server.Version}}")
 	if err != nil {
 		return false, ""
 	}
@@ -126,8 +137,7 @@ func checkDockerDaemon() (bool, string) {
 
 // checkDockerCompose checks if Docker Compose is available.
 func checkDockerCompose() (bool, string) {
-	cmd := exec.Command("docker", "compose", "version")
-	err := cmd.Run()
+	err := execRunFunc("docker", "compose", "version")
 	return err == nil, ""
 }
 

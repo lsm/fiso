@@ -11,6 +11,10 @@ import (
 
 const overridePath = "fiso/docker-compose.override.yml"
 
+// lookPathFunc is the function used to find executables in PATH.
+// Tests can replace this to stub out exec.LookPath.
+var lookPathFunc = exec.LookPath
+
 // RunDev starts the local Fiso development environment.
 func RunDev(args []string) error {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
@@ -30,7 +34,7 @@ Flags:
 
 	dockerMode := hasFlag(args, "--docker")
 
-	if _, err := exec.LookPath("docker"); err != nil {
+	if _, err := lookPathFunc("docker"); err != nil {
 		return fmt.Errorf("docker not found in PATH: install Docker Desktop or Docker Engine")
 	}
 
@@ -59,19 +63,19 @@ Flags:
 
 	upDone := make(chan error, 1)
 	go func() {
-		upDone <- runCompose(ctx, upArgs...)
+		upDone <- runComposeFn(ctx, upArgs...)
 	}()
 
 	select {
 	case err := <-upDone:
-		composeDown(dockerMode)
+		composeDownFn(dockerMode)
 		if err != nil {
 			printGHCRHint(err)
 		}
 		return err
 	case <-ctx.Done():
 		fmt.Println("\nShutting down...")
-		composeDown(dockerMode)
+		composeDownFn(dockerMode)
 		return nil
 	}
 }
@@ -124,7 +128,9 @@ func buildComposeFileArgs() []string {
 	return args
 }
 
-func runCompose(ctx context.Context, args ...string) error {
+// runComposeFn executes docker compose with the given arguments.
+// Tests can replace this to stub out docker compose execution.
+var runComposeFn = func(ctx context.Context, args ...string) error {
 	fileArgs := buildComposeFileArgs()
 	fullArgs := append(append([]string{}, fileArgs...), args...)
 	cmd := exec.CommandContext(ctx, "docker", fullArgs...)
@@ -134,7 +140,9 @@ func runCompose(ctx context.Context, args ...string) error {
 	return cmd.Run()
 }
 
-func composeDown(dockerMode bool) {
+// composeDownFn runs docker compose down and removes the override file.
+// Tests can replace this to stub out docker compose execution.
+var composeDownFn = func(dockerMode bool) {
 	fileArgs := buildComposeFileArgs()
 	downArgs := append(append([]string{}, fileArgs...), "down", "--remove-orphans")
 	cmd := exec.Command("docker", downArgs...)
