@@ -21,8 +21,8 @@ jobs:
 
       - name: Run tests
         run: |
-          go test -race ./internal/cli/...
-          go test -race -coverprofile=coverage.out $(go list ./... | grep -v /cmd/ | grep -v /internal/cli | grep -v /test/e2e/)
+          go test -race -coverprofile=coverage.out -covermode=atomic \
+            $(go list ./... | grep -v /cmd/ | grep -v /test/e2e/)
 
       - name: Check coverage
         run: |

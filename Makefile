@@ -19,7 +19,7 @@ build-cli:
 build-all: build build-link build-operator build-cli
 
 test:
-	go test -race -coverprofile=coverage.out ./...
+	go test -race -coverprofile=coverage.out -covermode=atomic $$(go list ./... | grep -v /cmd/ | grep -v /test/e2e/)
 
 test-integration:
 	go test -tags integration -race -timeout 120s ./test/integration/...
