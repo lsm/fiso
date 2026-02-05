@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -291,5 +294,329 @@ errorHandling:
 	}
 	if detail != " (1 flow)" {
 		t.Errorf("expected detail ' (1 flow)', got: %s", detail)
+	}
+}
+
+func TestRunDoctor_AllChecksPass(t *testing.T) {
+	origLookPath := lookPathFunc
+	origExecOutput := execOutputFunc
+	origExecRun := execRunFunc
+	defer func() {
+		lookPathFunc = origLookPath
+		execOutputFunc = origExecOutput
+		execRunFunc = origExecRun
+	}()
+
+	lookPathFunc = func(file string) (string, error) {
+		return "/usr/local/bin/docker", nil
+	}
+	execOutputFunc = func(name string, args ...string) ([]byte, error) {
+		return []byte("27.5.1\n"), nil
+	}
+	execRunFunc = func(name string, args ...string) error {
+		return nil
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create valid project structure
+	if err := os.MkdirAll("fiso/flows", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("fiso/docker-compose.yml", []byte("services:\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	validFlow := `name: test-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://localhost:8082/process
+errorHandling:
+  maxRetries: 3
+`
+	if err := os.WriteFile("fiso/flows/test.yaml", []byte(validFlow), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = RunDoctor([]string{})
+	if err != nil {
+		t.Errorf("expected no error when all checks pass, got: %v", err)
+	}
+}
+
+func TestCheckDockerDaemon_VersionFormatting(t *testing.T) {
+	origExecOutput := execOutputFunc
+	defer func() { execOutputFunc = origExecOutput }()
+
+	// Test with version string
+	execOutputFunc = func(name string, args ...string) ([]byte, error) {
+		return []byte("27.5.1\n"), nil
+	}
+
+	ok, detail := checkDockerDaemon()
+	if !ok {
+		t.Error("expected checkDockerDaemon to succeed")
+	}
+	if detail != " (v27.5.1)" {
+		t.Errorf("expected detail ' (v27.5.1)', got: %s", detail)
+	}
+
+	// Test with empty version
+	execOutputFunc = func(name string, args ...string) ([]byte, error) {
+		return []byte("\n"), nil
+	}
+
+	ok, detail = checkDockerDaemon()
+	if !ok {
+		t.Error("expected checkDockerDaemon to succeed with empty version")
+	}
+	if detail != "" {
+		t.Errorf("expected empty detail, got: %s", detail)
+	}
+}
+
+func TestCheckConfigValidity_NonYAMLSkipped(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create fiso/flows directory
+	if err := os.MkdirAll("fiso/flows", 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a non-YAML file (should be skipped)
+	if err := os.WriteFile("fiso/flows/readme.txt", []byte("readme"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a subdirectory (should be skipped)
+	if err := os.MkdirAll("fiso/flows/subdir", 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a valid YAML file
+	validFlow := `name: test-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://localhost:8082/process
+errorHandling:
+  maxRetries: 3
+`
+	if err := os.WriteFile("fiso/flows/valid.yaml", []byte(validFlow), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, detail := checkConfigValidity()
+	if !ok {
+		t.Error("expected checkConfigValidity to succeed")
+	}
+	if detail != " (1 flow)" {
+		t.Errorf("expected detail ' (1 flow)', got: %s", detail)
+	}
+}
+
+func TestCheckDockerInstalled_NotFound(t *testing.T) {
+	origLookPath := lookPathFunc
+	defer func() { lookPathFunc = origLookPath }()
+
+	lookPathFunc = func(file string) (string, error) {
+		return "", fmt.Errorf("executable file not found in $PATH")
+	}
+
+	ok, _ := checkDockerInstalled()
+	if ok {
+		t.Error("expected checkDockerInstalled to fail when docker not found")
+	}
+}
+
+func TestRunDoctor_DockerNotRunning(t *testing.T) {
+	origLookPath := lookPathFunc
+	origExecOutput := execOutputFunc
+	origExecRun := execRunFunc
+	defer func() {
+		lookPathFunc = origLookPath
+		execOutputFunc = origExecOutput
+		execRunFunc = origExecRun
+	}()
+
+	lookPathFunc = func(file string) (string, error) {
+		return "/usr/local/bin/docker", nil
+	}
+	execOutputFunc = func(name string, args ...string) ([]byte, error) {
+		return nil, fmt.Errorf("Cannot connect to the Docker daemon")
+	}
+	execRunFunc = func(name string, args ...string) error {
+		return nil
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create valid project structure
+	if err := os.MkdirAll("fiso/flows", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("fiso/docker-compose.yml", []byte("services:\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = RunDoctor([]string{})
+	if err == nil {
+		t.Fatal("expected error when Docker daemon not running")
+	}
+	if !strings.Contains(err.Error(), "issue(s)") {
+		t.Errorf("expected error to contain 'issue(s)', got: %v", err)
+	}
+}
+
+func TestRunDoctor_ComposeNotAvailable(t *testing.T) {
+	origLookPath := lookPathFunc
+	origExecOutput := execOutputFunc
+	origExecRun := execRunFunc
+	defer func() {
+		lookPathFunc = origLookPath
+		execOutputFunc = origExecOutput
+		execRunFunc = origExecRun
+	}()
+
+	lookPathFunc = func(file string) (string, error) {
+		return "/usr/local/bin/docker", nil
+	}
+	execOutputFunc = func(name string, args ...string) ([]byte, error) {
+		return []byte("27.5.1\n"), nil
+	}
+	execRunFunc = func(name string, args ...string) error {
+		return fmt.Errorf("docker: 'compose' is not a docker command")
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create valid project structure
+	if err := os.MkdirAll("fiso/flows", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("fiso/docker-compose.yml", []byte("services:\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = RunDoctor([]string{})
+	if err == nil {
+		t.Fatal("expected error when Docker Compose not available")
+	}
+	if !strings.Contains(err.Error(), "issue(s)") {
+		t.Errorf("expected error to contain 'issue(s)', got: %v", err)
+	}
+}
+
+func TestRunDoctor_PortInUse(t *testing.T) {
+	origLookPath := lookPathFunc
+	origExecOutput := execOutputFunc
+	origExecRun := execRunFunc
+	defer func() {
+		lookPathFunc = origLookPath
+		execOutputFunc = origExecOutput
+		execRunFunc = origExecRun
+	}()
+
+	lookPathFunc = func(file string) (string, error) {
+		return "/usr/local/bin/docker", nil
+	}
+	execOutputFunc = func(name string, args ...string) ([]byte, error) {
+		return []byte("27.5.1\n"), nil
+	}
+	execRunFunc = func(name string, args ...string) error {
+		return nil
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create valid project structure
+	if err := os.MkdirAll("fiso/flows", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("fiso/docker-compose.yml", []byte("services:\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	validFlow := `name: test-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://localhost:8082/process
+errorHandling:
+  maxRetries: 3
+`
+	if err := os.WriteFile("fiso/flows/test.yaml", []byte(validFlow), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Listen on port 8081
+	listener, err := net.Listen("tcp", ":8081")
+	if err != nil {
+		t.Skipf("unable to bind port 8081: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	err = RunDoctor([]string{})
+	// Port warnings are informational, not fatal
+	if err != nil {
+		t.Errorf("expected no error with port warnings, got: %v", err)
 	}
 }

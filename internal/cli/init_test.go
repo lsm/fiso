@@ -625,3 +625,152 @@ func assertFileExists(t *testing.T, path string) {
 		t.Errorf("expected file %s to exist", path)
 	}
 }
+
+func TestScaffold_DirectoryCreationError(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a regular file named "fiso" so MkdirAll("fiso/...") will fail
+	if err := os.WriteFile("fiso", []byte("blocking file"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := initConfig{
+		ProjectName: "fiso",
+		Source:      "http",
+		Sink:        "http",
+		Transform:   "none",
+	}
+
+	err = scaffold(cfg)
+	if err == nil {
+		t.Fatal("expected error when creating directory over existing file")
+	}
+	if !strings.Contains(err.Error(), "create directory") {
+		t.Errorf("expected error about creating directory, got: %v", err)
+	}
+}
+
+func TestWriteTemplate_Error(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := initConfig{
+		ProjectName: "test",
+		Source:      "http",
+		Sink:        "http",
+	}
+
+	err := writeTemplate(dir, "test.yml", "templates/nonexistent-template.yml", cfg)
+	if err == nil {
+		t.Fatal("expected error for non-existent template")
+	}
+	if !strings.Contains(err.Error(), "read template") {
+		t.Errorf("expected error about reading template, got: %v", err)
+	}
+}
+
+func TestWriteTemplate_WriteError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a read-only directory to force write error
+	readOnlyDir := filepath.Join(dir, "readonly")
+	if err := os.Mkdir(readOnlyDir, 0444); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := initConfig{
+		ProjectName: "test",
+		Source:      "http",
+		Sink:        "http",
+	}
+
+	// Try to write to read-only directory
+	err := writeTemplate(readOnlyDir, "test.yml", "templates/prometheus.yml", cfg)
+	if err == nil {
+		t.Fatal("expected error for write to read-only directory")
+	}
+	if !strings.Contains(err.Error(), "write") {
+		t.Errorf("expected error about writing file, got: %v", err)
+	}
+}
+
+func TestCopyEmbedded_WriteError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a read-only directory to force write error
+	readOnlyDir := filepath.Join(dir, "readonly")
+	if err := os.Mkdir(readOnlyDir, 0444); err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to copy to read-only directory
+	err := copyEmbedded(readOnlyDir, "config.yaml", "templates/link-config.yaml")
+	if err == nil {
+		t.Fatal("expected error for write to read-only directory")
+	}
+	if !strings.Contains(err.Error(), "write") {
+		t.Errorf("expected error about writing file, got: %v", err)
+	}
+}
+
+func TestShouldPrompt_WithStdinProvided(t *testing.T) {
+	// When stdin is explicitly provided, shouldPrompt returns true
+	stdin := strings.NewReader("test")
+	if !shouldPrompt([]string{}, stdin) {
+		t.Error("expected shouldPrompt to return true when stdin is provided")
+	}
+}
+
+func TestShouldPrompt_WithDefaultsFlag(t *testing.T) {
+	// With --defaults flag, shouldPrompt returns false
+	if shouldPrompt([]string{"--defaults"}, strings.NewReader("test")) {
+		t.Error("expected shouldPrompt to return false with --defaults flag")
+	}
+}
+
+func TestShouldPrompt_NilStdin(t *testing.T) {
+	// With nil stdin, shouldPrompt checks if real stdin is a terminal
+	// This will vary depending on test environment, so we just verify it doesn't panic
+	_ = shouldPrompt([]string{}, nil)
+}
+
+func TestCopyEmbedded_Error(t *testing.T) {
+	dir := t.TempDir()
+
+	err := copyEmbedded(dir, "test.txt", "templates/invalid/path/file.txt")
+	if err == nil {
+		t.Fatal("expected error for non-existent embedded path")
+	}
+	if !strings.Contains(err.Error(), "read embedded") {
+		t.Errorf("expected error about reading embedded file, got: %v", err)
+	}
+}
+
+func TestDeriveFlowName_AllCombinations(t *testing.T) {
+	tests := []struct {
+		source   string
+		sink     string
+		expected string
+	}{
+		{"http", "http", "example-flow"},
+		{"http", "temporal", "http-temporal-flow"},
+		{"kafka", "http", "kafka-http-flow"},
+		{"kafka", "temporal", "kafka-temporal-flow"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.source+"-"+tt.sink, func(t *testing.T) {
+			got := deriveFlowName(tt.source, tt.sink)
+			if got != tt.expected {
+				t.Errorf("deriveFlowName(%q, %q) = %q, want %q", tt.source, tt.sink, got, tt.expected)
+			}
+		})
+	}
+}

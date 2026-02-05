@@ -197,6 +197,7 @@ func TestInferField(t *testing.T) {
 		{"source.type is required", "source.type"},
 		{`source.type "redis" is not valid`, "source.type"},
 		{`target[0] "crm": host is required`, "host"},
+		{"", "-"},
 	}
 	for _, tt := range tests {
 		got := inferField(tt.msg)
@@ -298,5 +299,84 @@ func writeTestFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestValidateFlowFile_ReadError(t *testing.T) {
+	nonExistentPath := filepath.Join(t.TempDir(), "nonexistent.yaml")
+
+	errs := validateFlowFile(nonExistentPath)
+	if len(errs) == 0 {
+		t.Fatal("expected validation errors for non-existent file")
+	}
+	if !strings.Contains(errs[0].Message, "read error") {
+		t.Errorf("expected read error, got: %v", errs[0].Message)
+	}
+}
+
+func TestValidateFlowFile_InvalidMapping(t *testing.T) {
+	dir := t.TempDir()
+	flowPath := filepath.Join(dir, "invalid-mapping.yaml")
+
+	// Create a flow with a non-empty mapping but missing name (to trigger validation error)
+	// Since mapping validation only checks if empty, we test with an invalid flow instead
+	flowYAML := `name: ""
+source:
+  type: http
+  config: {}
+transform:
+  mapping:
+    field1: value1
+sink:
+  type: http
+  config: {}
+`
+	if err := os.WriteFile(flowPath, []byte(flowYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	errs := validateFlowFile(flowPath)
+	if len(errs) == 0 {
+		t.Fatal("expected validation errors for invalid flow")
+	}
+
+	// Check that we got a validation error (in this case, for the empty name)
+	foundError := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "name is required") {
+			foundError = true
+			break
+		}
+	}
+	if !foundError {
+		t.Errorf("expected validation error, got: %v", errs)
+	}
+}
+
+func TestValidateFlowFile_ValidMapping(t *testing.T) {
+	dir := t.TempDir()
+	flowPath := filepath.Join(dir, "valid-mapping.yaml")
+
+	// Create a flow with a valid mapping
+	flowYAML := `name: mapping-test
+source:
+  type: http
+  config: {}
+transform:
+  mapping:
+    order_id: "$.data.user_id"
+    total: "$.data.amount"
+    status: "pending"
+sink:
+  type: http
+  config: {}
+`
+	if err := os.WriteFile(flowPath, []byte(flowYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	errs := validateFlowFile(flowPath)
+	if len(errs) > 0 {
+		t.Errorf("expected no validation errors for valid mapping, got: %v", errs)
 	}
 }

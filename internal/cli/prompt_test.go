@@ -251,3 +251,181 @@ func TestInteractiveChoose_NumberKey3(t *testing.T) {
 		t.Errorf("expected 2 (index of option 3), got %d", idx)
 	}
 }
+
+func TestNewPrompter_NonFile(t *testing.T) {
+	// Create a prompter with strings.NewReader (not an *os.File)
+	r := strings.NewReader("test input")
+	p := newPrompter(r, io.Discard)
+
+	if p.isTTY {
+		t.Error("expected isTTY to be false for non-file input")
+	}
+	if p.inFd != -1 {
+		t.Errorf("expected inFd to be -1 for non-file input, got %d", p.inFd)
+	}
+	if p.in != r {
+		t.Error("expected input reader to be set")
+	}
+}
+
+func TestInteractiveChoose_LoneEsc(t *testing.T) {
+	// Send ESC (0x1b) followed by Enter (0x0d) - should select default option
+	p, _ := testInteractivePrompter("\x1b\r")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 1)
+	if idx != 1 {
+		t.Errorf("expected 1 (default after lone ESC), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_EOF(t *testing.T) {
+	// Send empty input to cause EOF
+	p, _ := testInteractivePrompter("")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 2)
+	if idx != 2 {
+		t.Errorf("expected 2 (default on EOF), got %d", idx)
+	}
+}
+
+func TestInteractiveChoose_NewlineKey(t *testing.T) {
+	// Send \n instead of \r to trigger selection
+	p, _ := testInteractivePrompter("\n")
+	idx := p.interactiveChooseRaw("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 0 {
+		t.Errorf("expected 0 (newline should select), got %d", idx)
+	}
+}
+
+func TestChoose_NonTTY_UsesNumberedChoice(t *testing.T) {
+	// Create a non-TTY prompter (using strings.NewReader)
+	p := newPrompter(strings.NewReader("2\n"), io.Discard)
+	if p.isTTY {
+		t.Fatal("expected isTTY to be false")
+	}
+
+	idx := p.choose("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 1 {
+		t.Errorf("expected 1 (option 2), got %d", idx)
+	}
+}
+
+func TestChoose_TTY_UsesInteractiveChoice(t *testing.T) {
+	// Create a TTY prompter that should use interactive choice
+	r, w, _ := os.Pipe()
+	go func() {
+		_, _ = w.WriteString("2\n")
+		_ = w.Close()
+	}()
+	var out bytes.Buffer
+	p := &prompter{
+		in:      r,
+		scanner: bufio.NewScanner(r),
+		out:     &out,
+		isTTY:   true,
+		inFd:    -1, // Invalid fd will make it fall back to numberedChoose
+	}
+
+	// This should attempt interactive but fall back to numbered
+	idx := p.choose("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 1 {
+		t.Errorf("expected 1 (option 2), got %d", idx)
+	}
+}
+
+func TestConfirm_TTY_Formatting(t *testing.T) {
+	// Create a TTY prompter
+	r, w, _ := os.Pipe()
+	go func() {
+		_, _ = w.WriteString("y\n")
+		_ = w.Close()
+	}()
+	var out bytes.Buffer
+	p := &prompter{
+		in:      r,
+		scanner: bufio.NewScanner(r),
+		out:     &out,
+		isTTY:   true,
+		inFd:    -1,
+	}
+
+	result := p.confirm("Enable?", false)
+	if !result {
+		t.Error("expected true for 'y' input")
+	}
+
+	// Verify output contains ANSI codes for TTY
+	if !strings.Contains(out.String(), ansiBold) {
+		t.Error("expected output to contain bold ANSI code for TTY")
+	}
+}
+
+func TestConfirm_NonTTY_NoFormatting(t *testing.T) {
+	p := newPrompter(strings.NewReader("n\n"), io.Discard)
+	if p.isTTY {
+		t.Fatal("expected isTTY to be false")
+	}
+
+	result := p.confirm("Enable?", true)
+	if result {
+		t.Error("expected false for 'n' input")
+	}
+}
+
+func TestNewPrompter_NilInputOutput(t *testing.T) {
+	// Test that nil input/output defaults to stdin/stdout
+	p := newPrompter(nil, nil)
+	if p.in != os.Stdin {
+		t.Error("expected in to be os.Stdin when nil is passed")
+	}
+	if p.out != os.Stdout {
+		t.Error("expected out to be os.Stdout when nil is passed")
+	}
+}
+
+func TestInteractiveChoose_FallbackOnRawError(t *testing.T) {
+	// Create a prompter with an invalid file descriptor to trigger the MakeRaw error path
+	// This tests the fallback to numberedChoose when interactive mode can't be established
+	r, w, _ := os.Pipe()
+	go func() {
+		_, _ = w.WriteString("2\n")
+		_ = w.Close()
+	}()
+	var out bytes.Buffer
+	p := &prompter{
+		in:      r,
+		scanner: bufio.NewScanner(r),
+		out:     &out,
+		isTTY:   true,
+		inFd:    -1, // Invalid fd to force MakeRaw to fail
+	}
+
+	// This should fall back to numberedChoose
+	idx := p.interactiveChoose("Pick:", []string{"A", "B", "C"}, 0)
+	if idx != 1 {
+		t.Errorf("expected 1 (option 2), got %d", idx)
+	}
+}
+
+func TestRenderOptions(t *testing.T) {
+	var out bytes.Buffer
+	p := &prompter{out: &out}
+	p.renderOptions([]string{"Option A", "Option B", "Option C"}, 1)
+
+	output := out.String()
+	if !strings.Contains(output, "Option A") || !strings.Contains(output, "Option B") || !strings.Contains(output, "Option C") {
+		t.Error("expected all options to be rendered")
+	}
+	if !strings.Contains(output, ansiCyan) {
+		t.Error("expected selected option to have cyan color")
+	}
+}
+
+func TestClearOptions(t *testing.T) {
+	var out bytes.Buffer
+	p := &prompter{out: &out}
+	p.clearOptions(3)
+
+	output := out.String()
+	if !strings.Contains(output, "\033[A") {
+		t.Error("expected cursor movement ANSI codes")
+	}
+}
