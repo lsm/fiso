@@ -28,9 +28,9 @@ type SourceSpec struct {
 	Config map[string]string `json:"config,omitempty"`
 }
 
-// TransformSpec defines the event transform.
+// TransformSpec defines the event transform using unified fields syntax.
 type TransformSpec struct {
-	CEL string `json:"cel"`
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 // SinkSpec defines the event sink.

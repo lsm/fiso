@@ -59,8 +59,11 @@ spec:
                 transform:
                   type: object
                   properties:
-                    cel:
-                      type: string
+                    fields:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      x-kubernetes-preserve-unknown-fields: true
                 sink:
                   type: object
                   required:
@@ -72,6 +75,7 @@ spec:
                         - http
                         - grpc
                         - temporal
+                        - kafka
                     config:
                       type: object
                       x-kubernetes-preserve-unknown-fields: true

@@ -65,7 +65,7 @@ func TestFlowDefinitionCR_DeepCopy(t *testing.T) {
 				Type:   "kafka",
 				Config: map[string]string{"brokers": "kafka:9092"},
 			},
-			Transform:     &TransformSpec{CEL: "message.value"},
+			Transform:     &TransformSpec{Fields: map[string]string{"value": "message.value"}},
 			Sink:          SinkSpec{Type: "http", Config: map[string]string{"url": "http://svc"}},
 			ErrorHandling: ErrorHandlingSpec{MaxRetries: 3, DeadLetterTopic: "dlq"},
 		},

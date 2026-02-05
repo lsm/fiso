@@ -80,7 +80,7 @@ func ValidateFlowSpec(spec *v1alpha1.FlowDefinitionSpec) error {
 	if !validSourceTypes[spec.Source.Type] {
 		return fmt.Errorf("unsupported source type: %s", spec.Source.Type)
 	}
-	validSinkTypes := map[string]bool{"http": true, "grpc": true, "temporal": true}
+	validSinkTypes := map[string]bool{"http": true, "grpc": true, "temporal": true, "kafka": true}
 	if !validSinkTypes[spec.Sink.Type] {
 		return fmt.Errorf("unsupported sink type: %s", spec.Sink.Type)
 	}
