@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -29,34 +30,175 @@ type flowTemplateData struct {
 // RunInit scaffolds Fiso infrastructure under a "fiso/" subdirectory.
 // When running interactively (TTY), prompts for source, sink, transform,
 // and CloudEvents options. Use --defaults to skip prompts.
+// Supports flags for non-interactive mode: --source, --sink, --transform, --cloudevents, --k8s
 func RunInit(args []string, stdin io.Reader) error {
+	// Check for help flags before parsing
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		fmt.Println("Usage: fiso init [--defaults]\n\nScaffolds Fiso infrastructure in a fiso/ subdirectory.\nUse --defaults to skip interactive prompts and use HTTP defaults.")
+		fmt.Println("Usage: fiso init [options]\n\n" +
+			"Scaffolds Fiso infrastructure in a fiso/ subdirectory.\n\n" +
+			"Options:\n" +
+			"  --source <type>      Source type (http, kafka)\n" +
+			"  --sink <type>        Sink type (http, temporal)\n" +
+			"  --transform <type>   Transform type (none, fields)\n" +
+			"  --cloudevents        Customize CloudEvents envelope\n" +
+			"  --k8s                Include Kubernetes deployment manifests\n" +
+			"  --defaults           Use default HTTP configuration (equivalent to --source=http --sink=http --transform=none)\n" +
+			"\n" +
+			"Flags override all other settings. If some flags are provided, prompts will only\n" +
+			"be asked for the remaining unset values. Use --defaults or pipe input for fully\n" +
+			"non-interactive operation.")
 		return nil
 	}
 
-	cfg := initConfig{ProjectName: "fiso"}
+	flags := flag.NewFlagSet("init", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
 
-	if shouldPrompt(args, stdin) {
-		p := newPrompter(stdin, os.Stdout)
-		promptChoices(p, &cfg)
-	} else {
-		cfg.Source = "http"
-		cfg.Sink = "http"
-		cfg.Transform = "none"
-		cfg.CloudEvents = false
-		cfg.IncludeK8s = false
+	var (
+		flagSource      string
+		flagSink        string
+		flagTransform   string
+		flagCloudEvents bool
+		flagK8s         bool
+		flagDefaults    bool
+	)
+
+	flags.StringVar(&flagSource, "source", "", "Source type (http, kafka)")
+	flags.StringVar(&flagSink, "sink", "", "Sink type (http, temporal)")
+	flags.StringVar(&flagTransform, "transform", "", "Transform type (none, fields)")
+	flags.BoolVar(&flagCloudEvents, "cloudevents", false, "Customize CloudEvents envelope")
+	flags.BoolVar(&flagK8s, "k8s", false, "Include Kubernetes deployment manifests")
+	flags.BoolVar(&flagDefaults, "defaults", false, "Use default HTTP configuration")
+
+	if err := flags.Parse(args); err != nil {
+		return fmt.Errorf("parse flags: %w", err)
+	}
+
+	cfg, err := buildConfig(stdin, flagSource, flagSink, flagTransform, flagCloudEvents, flagK8s, flagDefaults, args)
+	if err != nil {
+		return err
 	}
 
 	cfg.IncludeKafka = cfg.Source == "kafka"
 	cfg.IncludeTemporal = cfg.Sink == "temporal"
 
-	return scaffold(cfg)
+	return scaffold(*cfg)
+}
+
+// buildConfig consolidates configuration logic from flags, prompts, and defaults.
+// Priority: flags > prompts > defaults
+func buildConfig(stdin io.Reader, flagSource, flagSink, flagTransform string, flagCloudEvents, flagK8s, flagDefaults bool, rawArgs []string) (*initConfig, error) {
+	cfg := &initConfig{ProjectName: "fiso"}
+
+	// Check if --defaults flag was passed
+	useDefaults := false
+	for _, arg := range rawArgs {
+		if arg == "--defaults" {
+			useDefaults = true
+			break
+		}
+	}
+
+	// Determine which values need prompting
+	needSource := flagSource == ""
+	needSink := flagSink == ""
+	needTransform := flagTransform == ""
+	needCloudEvents := !flagCloudEvents && !useDefaults
+	needK8s := !flagK8s && !useDefaults
+
+	// Apply flags if provided
+	if flagSource != "" {
+		cfg.Source = flagSource
+	}
+	if flagSink != "" {
+		cfg.Sink = flagSink
+	}
+	if flagTransform != "" {
+		cfg.Transform = flagTransform
+	}
+	if flagCloudEvents {
+		cfg.CloudEvents = true
+	}
+	if flagK8s {
+		cfg.IncludeK8s = true
+	}
+
+	// Apply defaults if no flags and not prompting
+	if useDefaults || (!shouldPromptForValues(needSource, needSink, needTransform, needCloudEvents, needK8s, stdin)) {
+		if cfg.Source == "" {
+			cfg.Source = "http"
+		}
+		if cfg.Sink == "" {
+			cfg.Sink = "http"
+		}
+		if cfg.Transform == "" {
+			cfg.Transform = "none"
+		}
+		if !flagCloudEvents {
+			cfg.CloudEvents = false
+		}
+		if !flagK8s {
+			cfg.IncludeK8s = false
+		}
+		return cfg, nil
+	}
+
+	// Prompt for missing values
+	p := newPrompter(stdin, os.Stdout)
+	promptForChoices(p, cfg, needSource, needSink, needTransform, needCloudEvents, needK8s)
+
+	return cfg, nil
+}
+
+// shouldPromptForValues determines if we should prompt based on what's needed and stdin availability
+func shouldPromptForValues(needSource, needSink, needTransform, needCloudEvents, needK8s bool, stdin io.Reader) bool {
+	// If nothing needs prompting, don't prompt
+	if !needSource && !needSink && !needTransform && !needCloudEvents && !needK8s {
+		return false
+	}
+
+	// If stdin was explicitly provided (non-nil), we're in test/pipe mode - prompt
+	if stdin != nil {
+		return true
+	}
+
+	// Check if real stdin is a terminal
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// promptForChoices prompts only for the values that haven't been set via flags
+func promptForChoices(p *prompter, cfg *initConfig, needSource, needSink, needTransform, needCloudEvents, needK8s bool) {
+	if needSource {
+		sourceIdx := p.choose("Source type:", []string{"HTTP", "Kafka"}, 0)
+		cfg.Source = []string{"http", "kafka"}[sourceIdx]
+	}
+
+	if needSink {
+		sinkIdx := p.choose("Sink type:", []string{"HTTP", "Temporal"}, 0)
+		cfg.Sink = []string{"http", "temporal"}[sinkIdx]
+	}
+
+	if needTransform {
+		transformIdx := p.choose("Transform:", []string{"None", "Field-based transform (CEL expressions)"}, 0)
+		cfg.Transform = []string{"none", "fields"}[transformIdx]
+	}
+
+	if needCloudEvents {
+		cfg.CloudEvents = p.confirm("Customize CloudEvents envelope fields?", false)
+	}
+
+	if needK8s {
+		cfg.IncludeK8s = p.confirm("Include Kubernetes deployment manifests?", false)
+	}
 }
 
 // shouldPrompt returns true when interactive prompts should be shown.
 // Returns false when --defaults is passed, when stdin is provided explicitly
 // (indicating programmatic/test usage), or when stdin is not a terminal.
+// DEPRECATED: Use buildConfig instead.
 func shouldPrompt(args []string, stdin io.Reader) bool {
 	for _, a := range args {
 		if a == "--defaults" {
@@ -76,18 +218,7 @@ func shouldPrompt(args []string, stdin io.Reader) bool {
 }
 
 func promptChoices(p *prompter, cfg *initConfig) {
-	sourceIdx := p.choose("Source type:", []string{"HTTP", "Kafka"}, 0)
-	cfg.Source = []string{"http", "kafka"}[sourceIdx]
-
-	sinkIdx := p.choose("Sink type:", []string{"HTTP", "Temporal"}, 0)
-	cfg.Sink = []string{"http", "temporal"}[sinkIdx]
-
-	transformIdx := p.choose("Transform:", []string{"None", "CEL expression", "YAML field mapping"}, 0)
-	cfg.Transform = []string{"none", "cel", "mapping"}[transformIdx]
-
-	cfg.CloudEvents = p.confirm("Customize CloudEvents envelope fields?", false)
-
-	cfg.IncludeK8s = p.confirm("Include Kubernetes deployment manifests?", false)
+	promptForChoices(p, cfg, true, true, true, true, true)
 }
 
 func scaffold(cfg initConfig) error {

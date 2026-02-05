@@ -1,0 +1,73 @@
+# Example unified transform configuration for fiso
+# This demonstrates the new unified fields-based transform syntax
+# that replaces the old CEL and mapping dual system.
+
+name: unified-transform-example
+
+source:
+  type: kafka
+  config:
+    brokers:
+      - localhost:9092
+    topic: events
+    consumerGroup: fiso-transformer
+    startOffset: earliest
+
+# Unified transform using the new fields syntax
+# Each field value is a CEL expression that produces the output value
+transform:
+  fields:
+    # Simple field mapping - reference input fields directly
+    order_id: data.legacy_id
+    customer_id: data.customer.id
+    timestamp: data.time
+
+    # Static literals - use quoted strings for string literals
+    event_type: '"order.created"'
+    processing_status: '"processed"'
+    version: '"1.0"'
+
+    # Computation - CEL supports arithmetic operations
+    total_amount: data.subtotal + data.tax
+    discounted_total: data.subtotal * 0.9
+
+    # Conditionals - ternary expressions
+    customer_tier: data.customer.level > 5 ? '"premium"' : '"standard"'
+    discount_applied: data.has_discount ? 'true' : 'false'
+
+    # String concatenation
+    full_name: data.customer.first_name + " " + data.customer.last_name
+    email_address: data.customer.username + "@" + data.customer.domain
+
+    # Boolean logic
+    is_eligible: data.age >= 18 && data.verified == true
+    has_priority: data.member == true && data.tier >= 3
+
+    # Nested structures - create nested output objects
+    order:
+      id: data.order_id
+      total: data.subtotal + data.tax
+      items_count: size(data.items)
+      status: '"complete"'
+
+    customer:
+      id: data.customer.id
+      name: data.customer.first_name + " " + data.customer.last_name
+      email: data.customer.email
+      segment: data.customer.segment
+
+    # Array construction
+    tags: '[data.type, data.category, data.region]'
+
+# Sink configuration
+sink:
+  type: http
+  config:
+    url: http://localhost:8080/events
+    method: POST
+
+# Error handling configuration
+errorHandling:
+  maxRetries: 3
+  backoff: exponential
+  deadLetterTopic: dlq-events

@@ -86,7 +86,7 @@ source:
     topic: events
     consumerGroup: fiso-cel
 transform:
-  cel: '{"id": data.legacy_id}'
+  fields: {id: data.legacy_id}
 sink:
   type: http
   config:
@@ -109,8 +109,8 @@ errorHandling:
 	if !strings.Contains(out, "kind: FlowDefinition") {
 		t.Error("output should contain kind: FlowDefinition")
 	}
-	if !strings.Contains(out, `cel:`) {
-		t.Error("output should contain CEL transform")
+	if !strings.Contains(out, `fields:`) {
+		t.Error("output should contain fields transform")
 	}
 	// Kafka brokers list should be comma-separated
 	if !strings.Contains(out, "broker1:9092,broker2:9092") {

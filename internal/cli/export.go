@@ -188,9 +188,9 @@ func convertFlowToCRD(flow *config.FlowDefinition, namespace string) *v1alpha1.F
 		},
 	}
 
-	if flow.Transform != nil && flow.Transform.CEL != "" {
+	if flow.Transform != nil && len(flow.Transform.Fields) > 0 {
 		crd.Spec.Transform = &v1alpha1.TransformSpec{
-			CEL: flow.Transform.CEL,
+			Fields: flow.Transform.Fields,
 		}
 	}
 

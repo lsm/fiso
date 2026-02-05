@@ -37,15 +37,16 @@ sink:
 	}
 }
 
-func TestRunValidate_InvalidCEL(t *testing.T) {
+func TestRunValidate_InvalidFields(t *testing.T) {
 	dir := t.TempDir()
-	writeTestFile(t, dir, "cel-bad.yaml", `
-name: cel-test
+	writeTestFile(t, dir, "fields-bad.yaml", `
+name: fields-test
 source:
   type: kafka
   config: {}
 transform:
-  cel: 'this is not valid CEL {{{'
+  fields:
+    invalid_field: 'this is not valid CEL {{{'
 sink:
   type: http
   config: {}
@@ -55,15 +56,15 @@ sink:
 	}
 }
 
-func TestRunValidate_ValidCEL(t *testing.T) {
+func TestRunValidate_ValidFields(t *testing.T) {
 	dir := t.TempDir()
-	writeTestFile(t, dir, "cel-good.yaml", `
-name: cel-test
+	writeTestFile(t, dir, "fields-good.yaml", `
+name: fields-test
 source:
   type: kafka
   config: {}
 transform:
-  cel: '{"id": data.id}'
+  fields: {id: data.id}
 sink:
   type: http
   config: {}
@@ -325,7 +326,7 @@ source:
   type: http
   config: {}
 transform:
-  mapping:
+  fields:
     field1: value1
 sink:
   type: http
@@ -363,10 +364,10 @@ source:
   type: http
   config: {}
 transform:
-  mapping:
-    order_id: "$.data.user_id"
-    total: "$.data.amount"
-    status: "pending"
+  fields:
+    order_id: data.user_id
+    total: data.amount
+    status: '"pending"'
 sink:
   type: http
   config: {}

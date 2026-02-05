@@ -75,8 +75,7 @@ Checks environment and project health:
 		if ok {
 			fmt.Printf("  ✓ Configuration valid%s\n", detail)
 		} else {
-			fmt.Fprintf(os.Stderr, "  ✗ Configuration invalid\n")
-			fmt.Fprintf(os.Stderr, "    Hint: Run 'fiso validate' for details\n")
+			fmt.Fprintf(os.Stderr, "  ✗ Configuration invalid%s\n", detail)
 			criticalFailures++
 		}
 	}
@@ -190,7 +189,12 @@ func checkConfigValidity() (bool, string) {
 	}
 
 	if len(flowErrors) > 0 {
-		return false, ""
+		// Build detailed error message
+		var errDetails []string
+		for _, ve := range flowErrors {
+			errDetails = append(errDetails, fmt.Sprintf("    %s\n      field: %s\n      error: %s", ve.File, ve.Field, ve.Message))
+		}
+		return false, "\n" + strings.Join(errDetails, "\n")
 	}
 
 	if flowCount == 0 {

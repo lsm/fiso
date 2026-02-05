@@ -224,8 +224,8 @@ func TestRunInit_InteractiveKafkaTemporalMapping(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Kafka(2), Temporal(2), Mapping(3), CloudEvents=yes(y)
-	input := strings.NewReader("2\n2\n3\ny\n")
+	// Kafka(2), Temporal(2), Fields(2), CloudEvents=yes(y)
+	input := strings.NewReader("2\n2\n2\ny\n")
 	if err := RunInit(nil, input); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -270,8 +270,8 @@ func TestRunInit_InteractiveKafkaTemporalMapping(t *testing.T) {
 	if !strings.Contains(flowContent, "type: temporal") {
 		t.Error("flow should contain temporal sink")
 	}
-	if !strings.Contains(flowContent, "mapping:") {
-		t.Error("flow should contain mapping transform")
+	if !strings.Contains(flowContent, "fields:") {
+		t.Error("flow should contain fields transform")
 	}
 	if !strings.Contains(flowContent, "cloudevents:") {
 		t.Error("flow should contain cloudevents section")
@@ -319,7 +319,7 @@ func TestRunInit_InteractiveKafkaHTTPCEL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Kafka(2), HTTP(1), CEL(2), no CloudEvents(n)
+	// Kafka(2), HTTP(1), Fields(2), no CloudEvents(n)
 	input := strings.NewReader("2\n1\n2\nn\n")
 	if err := RunInit(nil, input); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -338,8 +338,8 @@ func TestRunInit_InteractiveKafkaHTTPCEL(t *testing.T) {
 	if !strings.Contains(flowContent, "type: http") {
 		t.Error("flow should contain http sink")
 	}
-	if !strings.Contains(flowContent, "cel:") {
-		t.Error("flow should contain cel transform")
+	if !strings.Contains(flowContent, "fields:") {
+		t.Error("flow should contain fields transform")
 	}
 	if strings.Contains(flowContent, "cloudevents:") {
 		t.Error("flow should NOT contain cloudevents section")
@@ -783,3 +783,229 @@ func TestDeriveFlowName_AllCombinations(t *testing.T) {
 		})
 	}
 }
+
+// --- Flag-based init tests ---
+
+func TestRunInit_FlagBasedFullConfig(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test with all flags specified - non-interactive
+	args := []string{"--source=kafka", "--sink=temporal", "--transform=fields", "--cloudevents", "--k8s"}
+	if err := RunInit(args, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify kafka-temporal-flow.yaml exists
+	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "kafka-temporal-flow.yaml"))
+
+	// Verify temporal-worker scaffold
+	assertFileExists(t, filepath.Join(dir, "fiso", "temporal-worker", "main.go"))
+
+	// Verify K8s manifests
+	assertFileExists(t, filepath.Join(dir, "fiso", "deploy", "kustomization.yaml"))
+
+	// Verify docker-compose includes kafka and temporal
+	dc, err := os.ReadFile(filepath.Join(dir, "fiso", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(dc)
+	if !strings.Contains(content, "kafka") {
+		t.Error("docker-compose should include kafka")
+	}
+	if !strings.Contains(content, "temporal") {
+		t.Error("docker-compose should include temporal")
+	}
+}
+
+func TestRunInit_FlagBasedPartialConfig(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test with partial flags - should prompt for remaining values
+	args := []string{"--source=kafka"}
+	input := strings.NewReader("2\n2\nn\n") // sink: temporal(2), transform: none(2), no k8s(n)
+	if err := RunInit(args, input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify kafka-temporal-flow.yaml exists
+	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "kafka-temporal-flow.yaml"))
+
+	// Verify docker-compose includes kafka and temporal
+	dc, err := os.ReadFile(filepath.Join(dir, "fiso", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(dc)
+	if !strings.Contains(content, "kafka") {
+		t.Error("docker-compose should include kafka")
+	}
+	if !strings.Contains(content, "temporal") {
+		t.Error("docker-compose should include temporal")
+	}
+
+	// Verify K8s was NOT included (prompted with "n")
+	if _, err := os.Stat(filepath.Join(dir, "fiso", "deploy")); !os.IsNotExist(err) {
+		t.Error("fiso/deploy/ should not exist when k8s prompt was answered 'no'")
+	}
+}
+
+func TestRunInit_FlagBasedSinkOnly(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test with only sink specified - should prompt for source, transform, etc.
+	args := []string{"--sink=temporal"}
+	input := strings.NewReader("2\n2\nn\n") // source: kafka(2), transform: none(2), no k8s(n)
+	if err := RunInit(args, input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify kafka-temporal-flow.yaml exists
+	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "kafka-temporal-flow.yaml"))
+
+	// Verify temporal-worker scaffold
+	assertFileExists(t, filepath.Join(dir, "fiso", "temporal-worker", "main.go"))
+}
+
+func TestRunInit_FlagBasedWithDefaults(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test with --source=http --sink=http --transform=none
+	args := []string{"--source=http", "--sink=http", "--transform=none"}
+	if err := RunInit(args, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should produce same result as --defaults
+	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "example-flow.yaml"))
+	assertFileExists(t, filepath.Join(dir, "fiso", "user-service", "main.go"))
+
+	// Verify no kafka or temporal
+	dc, err := os.ReadFile(filepath.Join(dir, "fiso", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(dc), "kafka:") {
+		t.Error("docker-compose should not include kafka")
+	}
+	if strings.Contains(string(dc), "temporal:") {
+		t.Error("docker-compose should not include temporal")
+	}
+}
+
+func TestRunInit_FlagBasedHTTPTemporal(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test HTTP -> Temporal with flags
+	args := []string{"--source=http", "--sink=temporal", "--transform=none"}
+	if err := RunInit(args, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify http-temporal-flow.yaml exists
+	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "http-temporal-flow.yaml"))
+
+	// Verify temporal-worker scaffold
+	assertFileExists(t, filepath.Join(dir, "fiso", "temporal-worker", "main.go"))
+
+	// Verify docker-compose includes temporal but not kafka
+	dc, err := os.ReadFile(filepath.Join(dir, "fiso", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(dc)
+	if strings.Contains(content, "kafka:") {
+		t.Error("docker-compose should not include kafka")
+	}
+	if !strings.Contains(content, "temporal:") {
+		t.Error("docker-compose should include temporal")
+	}
+}
+
+func TestRunInit_PipedInput(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test piped input simulating: echo "2\n2\n2\ny\n" | fiso init
+	// This is the exact test case from the issue
+	input := strings.NewReader("2\n2\n2\ny\n")
+	if err := RunInit([]string{}, input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify kafka-temporal-flow.yaml exists
+	assertFileExists(t, filepath.Join(dir, "fiso", "flows", "kafka-temporal-flow.yaml"))
+
+	// Verify docker-compose includes kafka and temporal
+	dc, err := os.ReadFile(filepath.Join(dir, "fiso", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(dc)
+	if !strings.Contains(content, "kafka") {
+		t.Error("docker-compose should include kafka")
+	}
+	if !strings.Contains(content, "temporal") {
+		t.Error("docker-compose should include temporal")
+	}
+
+	// Verify temporal-worker scaffold
+	assertFileExists(t, filepath.Join(dir, "fiso", "temporal-worker", "main.go"))
+}
+
+func TestRunInit_HelpWithFlags(t *testing.T) {
+	if err := RunInit([]string{"-h"}, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := RunInit([]string{"--help"}, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+

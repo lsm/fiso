@@ -10,8 +10,7 @@ import (
 
 	"github.com/lsm/fiso/internal/config"
 	"github.com/lsm/fiso/internal/link"
-	celxform "github.com/lsm/fiso/internal/transform/cel"
-	mappingxform "github.com/lsm/fiso/internal/transform/mapping"
+	unifiedxform "github.com/lsm/fiso/internal/transform/unified"
 )
 
 // RunValidate validates flow and link configuration files.
@@ -109,6 +108,13 @@ func validateFlowFile(path string) []validationError {
 
 	var flow config.FlowDefinition
 	if err := yaml.Unmarshal(data, &flow); err != nil {
+		// Check if the error is related to YAML mapping values (often caused by unquoted ternary operators)
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "mapping values") || strings.Contains(errMsg, "did not find expected key") {
+			hint := "\n\nHint: If using CEL expressions with ':' or '?', quote the entire expression as a string.\n" +
+				"Example: change `priority: data.urgent ? 1 : 2` to `priority: \"data.urgent ? 1 : 2\"`"
+			return []validationError{{File: path, Field: "-", Message: fmt.Sprintf("YAML parse error: %v%s", err, hint)}}
+		}
 		return []validationError{{File: path, Field: "-", Message: fmt.Sprintf("YAML parse error: %v", err)}}
 	}
 
@@ -118,21 +124,11 @@ func validateFlowFile(path string) []validationError {
 		}
 	}
 
-	if flow.Transform != nil && flow.Transform.CEL != "" {
-		if _, err := celxform.NewTransformer(flow.Transform.CEL); err != nil {
+	if flow.Transform != nil && len(flow.Transform.Fields) > 0 {
+		if _, err := unifiedxform.NewTransformer(flow.Transform.Fields); err != nil {
 			errs = append(errs, validationError{
 				File:    path,
-				Field:   "transform.cel",
-				Message: err.Error(),
-			})
-		}
-	}
-
-	if flow.Transform != nil && len(flow.Transform.Mapping) > 0 {
-		if _, err := mappingxform.NewTransformer(flow.Transform.Mapping); err != nil {
-			errs = append(errs, validationError{
-				File:    path,
-				Field:   "transform.mapping",
+				Field:   "transform.fields",
 				Message: err.Error(),
 			})
 		}
@@ -151,6 +147,13 @@ func validateLinkConfig(path string) []validationError {
 
 	var cfg link.Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		// Check if the error is related to YAML mapping values
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "mapping values") || strings.Contains(errMsg, "did not find expected key") {
+			hint := "\n\nHint: If using values with ':' in YAML (e.g., durations, URLs), quote them as strings.\n" +
+				"Example: change `timeout: 30s` to `timeout: \"30s\"` if it contains special characters"
+			return []validationError{{File: path, Field: "-", Message: fmt.Sprintf("YAML parse error: %v%s", err, hint)}}
+		}
 		return []validationError{{File: path, Field: "-", Message: fmt.Sprintf("YAML parse error: %v", err)}}
 	}
 
