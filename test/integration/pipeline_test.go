@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lsm/fiso/internal/dlq"
+	intkafka "github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/pipeline"
 	httpsink "github.com/lsm/fiso/internal/sink/http"
 	"github.com/lsm/fiso/internal/source/kafka"
@@ -30,6 +31,10 @@ func brokers() []string {
 		b = "localhost:9092"
 	}
 	return strings.Split(b, ",")
+}
+
+func testCluster() *intkafka.ClusterConfig {
+	return &intkafka.ClusterConfig{Brokers: brokers()}
 }
 
 func TestPipeline_EndToEnd(t *testing.T) {
@@ -68,7 +73,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	logger := slog.Default()
 
 	src, err := kafka.NewSource(kafka.Config{
-		Brokers:       brokers(),
+		Cluster:       testCluster(),
 		Topic:         topic,
 		ConsumerGroup: fmt.Sprintf("test-cg-%d", time.Now().UnixNano()),
 		StartOffset:   "earliest",
@@ -93,7 +98,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 		t.Fatalf("http sink: %v", err)
 	}
 
-	pub, err := kafka.NewPublisher(brokers())
+	pub, err := kafka.NewPublisher(testCluster())
 	if err != nil {
 		t.Fatalf("dlq publisher: %v", err)
 	}

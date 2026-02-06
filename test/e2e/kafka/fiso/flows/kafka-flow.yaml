@@ -1,9 +1,13 @@
 name: kafka-flow
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka:9092
 source:
   type: kafka
   config:
-    brokers:
-      - kafka:9092
+    cluster: main
     topic: test-events
     consumerGroup: fiso-kafka-e2e
     startOffset: earliest

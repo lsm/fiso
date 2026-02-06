@@ -1,9 +1,13 @@
 name: kafka-temporal-flow
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka:9092
 source:
   type: kafka
   config:
-    brokers:
-      - kafka:9092
+    cluster: main
     topic: order-events
     consumerGroup: fiso-temporal-e2e
     startOffset: earliest
