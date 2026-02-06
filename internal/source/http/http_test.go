@@ -364,7 +364,7 @@ func TestSource_MultipleHeaders(t *testing.T) {
 	client := &http.Client{}
 	req, _ := http.NewRequest(http.MethodPost, "http://"+src.ListenAddr+"/", bytes.NewReader([]byte(`test`)))
 	req.Header.Add("X-Custom", "value1")
-	req.Header.Add("X-Custom", "value2")  // Second value will be ignored, only first is taken
+	req.Header.Add("X-Custom", "value2") // Second value will be ignored, only first is taken
 
 	resp, err := client.Do(req)
 	if err != nil {

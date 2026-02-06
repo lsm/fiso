@@ -550,7 +550,7 @@ func TestKafkaHandler_RateLimitWithMetrics(t *testing.T) {
 
 	rateLimiter := ratelimit.New()
 	rateLimiter.Set("rl-test", 0.0001, 1) // Very low rate
-	rateLimiter.Allow("rl-test")         // Consume the burst
+	rateLimiter.Allow("rl-test")          // Consume the burst
 
 	reg := prometheus.NewRegistry()
 	metrics := link.NewMetrics(reg)
@@ -607,7 +607,7 @@ func TestNormalizeHeaderKey(t *testing.T) {
 		{"X-Forwarded-For", "X-Forwarded-For"},
 		{"X-Forwarded-Proto", "X-Forwarded-Proto"},
 		{"X-Forwarded-Host", "X-Forwarded-Host"},
-		{"Content-Type", "Content-Type"}, // Not in map, unchanged
+		{"Content-Type", "Content-Type"},       // Not in map, unchanged
 		{"X-Custom-Header", "X-Custom-Header"}, // Not in map, unchanged
 	}
 

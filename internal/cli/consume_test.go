@@ -44,6 +44,7 @@ source:
 		}
 
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		// Test that loadKafkaConfig picks up the custom brokers
 		cfg, err := loadKafkaConfig("test-topic")
@@ -62,6 +63,7 @@ source:
 		tmpDir := t.TempDir()
 		// Don't create fiso/flows directory
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -136,6 +138,7 @@ source:
 
 				// Change to tmpDir so loadKafkaConfig finds the flow files
 				_ = os.Chdir(tmpDir)
+				defer func() { _ = os.Chdir(origWd) }()
 
 				cfg, err := loadKafkaConfig("test-topic")
 				if err != nil {
@@ -177,6 +180,7 @@ source:
 		}
 
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		// RunConsume should try to connect and fail gracefully when Kafka is unavailable
 		err := RunConsume([]string{"--topic", "test-topic", "--max-messages", "1"})
@@ -482,6 +486,7 @@ func TestLoadKafkaConfig(t *testing.T) {
 		// Change to a temp directory where fiso/flows doesn't exist
 		tmpDir := t.TempDir()
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -507,6 +512,7 @@ func TestLoadKafkaConfig(t *testing.T) {
 			t.Fatalf("Failed to create flow directory: %v", err)
 		}
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -543,6 +549,7 @@ source:
 		}
 
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -592,6 +599,7 @@ source:
 		}
 
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -624,6 +632,7 @@ source:
 		}
 
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -653,6 +662,7 @@ source:
 		}
 
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -689,6 +699,7 @@ source:
 		}
 
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -723,6 +734,7 @@ source:
 		}
 
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -749,6 +761,7 @@ source:
 		}
 
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		// Should return default config instead of error
 		cfg, err := loadKafkaConfig("test-topic")
@@ -786,6 +799,7 @@ source:
 		}
 
 		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(origWd) }()
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {

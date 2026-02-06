@@ -1137,7 +1137,7 @@ func TestTransform_BytesType(t *testing.T) {
 func TestTransform_DurationAndTimestampTypes(t *testing.T) {
 	// Test CEL duration and timestamp types which use Value() method
 	fields := map[string]string{
-		"duration": `duration("1h")`,
+		"duration":  `duration("1h")`,
 		"timestamp": `timestamp(data.time)`,
 	}
 	tr, err := NewTransformer(fields)
@@ -1194,7 +1194,7 @@ func TestTransform_UintType(t *testing.T) {
 
 func TestTransform_ArrayWithNested(t *testing.T) {
 	fields := map[string]string{
-		"items": `[data.a, data.b]`,
+		"items":  `[data.a, data.b]`,
 		"nested": `[[1, 2], [3, 4], []]`,
 	}
 	tr, err := NewTransformer(fields)

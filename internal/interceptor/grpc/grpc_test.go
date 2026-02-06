@@ -221,7 +221,6 @@ func TestInterceptor_EmptyPayload(t *testing.T) {
 	}
 }
 
-
 func TestInterceptor_LargePayload(t *testing.T) {
 	// Test with a large payload to ensure marshaling works correctly
 	largePayload := make([]byte, 10*1024) // 10KB
