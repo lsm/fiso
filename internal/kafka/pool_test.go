@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -81,7 +82,7 @@ func TestPublisherPool_Get(t *testing.T) {
 	})
 
 	pool := NewPublisherPool(registry)
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	// Note: This will fail to connect since there's no actual Kafka
 	// but it tests the registry lookup path
@@ -98,7 +99,7 @@ func TestPublisherPool_Get(t *testing.T) {
 func TestPublisherPool_GetNotFound(t *testing.T) {
 	registry := NewRegistry()
 	pool := NewPublisherPool(registry)
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	_, err := pool.Get("nonexistent")
 	if err == nil {
@@ -112,7 +113,7 @@ func TestPublisherPool_GetNotFound(t *testing.T) {
 func TestPublisherPool_GetForConfig(t *testing.T) {
 	registry := NewRegistry()
 	pool := NewPublisherPool(registry)
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	cfg := &ClusterConfig{
 		Brokers: []string{"localhost:9092"},
@@ -135,5 +136,47 @@ func TestPublisherPool_Close(t *testing.T) {
 	err := pool.Close()
 	if err != nil {
 		t.Errorf("Close() error = %v", err)
+	}
+}
+
+// errorProducer is a mock that returns errors from ProduceSync.
+type errorProducer struct {
+	err error
+}
+
+func (e *errorProducer) ProduceSync(_ context.Context, _ ...*kgo.Record) kgo.ProduceResults {
+	return kgo.ProduceResults{{Err: e.err}}
+}
+
+func (e *errorProducer) Close() {}
+
+func TestPooledPublisher_PublishError(t *testing.T) {
+	mock := &errorProducer{err: fmt.Errorf("broker unavailable")}
+	pub := &PooledPublisher{client: mock, name: "test"}
+
+	err := pub.Publish(context.Background(), "test-topic", []byte("key"), []byte("value"), nil)
+	if err == nil {
+		t.Fatal("expected error from Publish")
+	}
+	if !strings.Contains(err.Error(), "broker unavailable") {
+		t.Errorf("error = %v, want error containing 'broker unavailable'", err)
+	}
+}
+
+func TestPooledPublisher_PublishNoHeaders(t *testing.T) {
+	mock := &mockProducer{}
+	pub := &PooledPublisher{client: mock, name: "test"}
+
+	err := pub.Publish(context.Background(), "test-topic", []byte("key"), []byte("value"), nil)
+	if err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	if len(mock.records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(mock.records))
+	}
+
+	if len(mock.records[0].Headers) != 0 {
+		t.Errorf("expected no headers, got %d", len(mock.records[0].Headers))
 	}
 }
