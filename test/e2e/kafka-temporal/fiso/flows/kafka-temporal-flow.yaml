@@ -9,10 +9,10 @@ source:
     startOffset: earliest
 transform:
   fields:
-    order_id: data.order_id
-    total: data.amount
-    customer_name: data.customer
-    status: "pending"
+    order_id: order_id
+    total: amount
+    customer_name: customer
+    status: '"pending"'
 cloudevents:
   type: order.created
   source: fiso-e2e

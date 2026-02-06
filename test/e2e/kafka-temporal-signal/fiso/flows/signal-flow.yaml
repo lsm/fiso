@@ -9,9 +9,9 @@ source:
     startOffset: earliest
 transform:
   fields:
-    order_id: data.order_id
-    status: data.status
-    updated_by: data.updated_by
+    order_id: order_id
+    status: status
+    updated_by: updated_by
 cloudevents:
   type: order.updated
   source: fiso-signal-e2e
