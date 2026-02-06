@@ -144,20 +144,27 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 
 	switch flowDef.Source.Type {
 	case "kafka":
-		brokers, err := getStringSlice(flowDef.Source.Config, "brokers")
-		if err != nil {
-			return nil, fmt.Errorf("source config: %w", err)
-		}
 		topic, _ := flowDef.Source.Config["topic"].(string)
 		consumerGroup, _ := flowDef.Source.Config["consumerGroup"].(string)
 		startOffset, _ := flowDef.Source.Config["startOffset"].(string)
 
-		s, err := kafka.NewSource(kafka.Config{
-			Brokers:       brokers,
+		clusterName, ok := flowDef.Source.Config["cluster"].(string)
+		if !ok || clusterName == "" {
+			return nil, fmt.Errorf("source config: cluster name is required")
+		}
+		cluster, found := flowDef.Kafka.Clusters[clusterName]
+		if !found {
+			return nil, fmt.Errorf("source config: cluster %q not found in kafka.clusters", clusterName)
+		}
+
+		kafkaCfg := kafka.Config{
+			Cluster:       &cluster,
 			Topic:         topic,
 			ConsumerGroup: consumerGroup,
 			StartOffset:   startOffset,
-		}, logger)
+		}
+
+		s, err := kafka.NewSource(kafkaCfg, logger)
 		if err != nil {
 			return nil, fmt.Errorf("kafka source: %w", err)
 		}
@@ -254,16 +261,23 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 		sk = tSink
 
 	case "kafka":
-		brokers, err := getStringSlice(flowDef.Sink.Config, "brokers")
-		if err != nil {
-			return nil, fmt.Errorf("kafka sink config: %w", err)
-		}
 		topic, _ := flowDef.Sink.Config["topic"].(string)
 
-		kSink, err := kafkasink.NewSink(kafkasink.Config{
-			Brokers: brokers,
+		clusterName, ok := flowDef.Sink.Config["cluster"].(string)
+		if !ok || clusterName == "" {
+			return nil, fmt.Errorf("sink config: cluster name is required")
+		}
+		cluster, found := flowDef.Kafka.Clusters[clusterName]
+		if !found {
+			return nil, fmt.Errorf("sink config: cluster %q not found in kafka.clusters", clusterName)
+		}
+
+		kafkaSinkCfg := kafkasink.Config{
+			Cluster: &cluster,
 			Topic:   topic,
-		})
+		}
+
+		kSink, err := kafkasink.NewSink(kafkaSinkCfg)
 		if err != nil {
 			return nil, fmt.Errorf("kafka sink: %w", err)
 		}
@@ -273,11 +287,15 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 		return nil, fmt.Errorf("unsupported sink type: %s", flowDef.Sink.Type)
 	}
 
-	// Build DLQ handler — use Kafka publisher when brokers available, noop otherwise
+	// Build DLQ handler — use Kafka publisher when source is Kafka, noop otherwise
 	var dlqHandler *dlq.Handler
 	if flowDef.Source.Type == "kafka" {
-		brokers, _ := getStringSlice(flowDef.Source.Config, "brokers")
-		pub, err := kafka.NewPublisher(brokers)
+		clusterName, _ := flowDef.Source.Config["cluster"].(string)
+		cluster, found := flowDef.Kafka.Clusters[clusterName]
+		if !found {
+			return nil, fmt.Errorf("dlq publisher: cluster %q not found", clusterName)
+		}
+		pub, err := kafka.NewPublisher(&cluster)
 		if err != nil {
 			return nil, fmt.Errorf("dlq publisher: %w", err)
 		}
@@ -336,28 +354,4 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 func getString(m map[string]interface{}, key string) string {
 	v, _ := m[key].(string)
 	return v
-}
-
-func getStringSlice(m map[string]interface{}, key string) ([]string, error) {
-	val, ok := m[key]
-	if !ok {
-		return nil, fmt.Errorf("missing key %q", key)
-	}
-
-	switch v := val.(type) {
-	case []interface{}:
-		result := make([]string, len(v))
-		for i, item := range v {
-			s, ok := item.(string)
-			if !ok {
-				return nil, fmt.Errorf("key %q: element %d is not a string", key, i)
-			}
-			result[i] = s
-		}
-		return result, nil
-	case []string:
-		return v, nil
-	default:
-		return nil, fmt.Errorf("key %q: expected string slice, got %T", key, val)
-	}
 }

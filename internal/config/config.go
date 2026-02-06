@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/lsm/fiso/internal/kafka"
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,18 +83,24 @@ func (f *FlowDefinition) Validate() error {
 		errs = append(errs, fmt.Errorf("errorHandling.maxRetries must be >= 0, got %d", f.ErrorHandling.MaxRetries))
 	}
 
+	// Validate Kafka clusters if defined
+	if err := f.Kafka.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("kafka: %w", err))
+	}
+
 	return errors.Join(errs...)
 }
 
 // FlowDefinition represents a complete inbound pipeline configuration.
 type FlowDefinition struct {
-	Name          string              `yaml:"name"`
-	Source        SourceConfig        `yaml:"source"`
-	CloudEvents   *CloudEventsConfig  `yaml:"cloudevents,omitempty"`
-	Transform     *TransformConfig    `yaml:"transform,omitempty"`
-	Interceptors  []InterceptorConfig `yaml:"interceptors,omitempty"`
-	Sink          SinkConfig          `yaml:"sink"`
-	ErrorHandling ErrorHandlingConfig `yaml:"errorHandling"`
+	Name          string                  `yaml:"name"`
+	Kafka         kafka.KafkaGlobalConfig `yaml:"kafka,omitempty"` // Named Kafka clusters
+	Source        SourceConfig            `yaml:"source"`
+	CloudEvents   *CloudEventsConfig      `yaml:"cloudevents,omitempty"`
+	Transform     *TransformConfig        `yaml:"transform,omitempty"`
+	Interceptors  []InterceptorConfig     `yaml:"interceptors,omitempty"`
+	Sink          SinkConfig              `yaml:"sink"`
+	ErrorHandling ErrorHandlingConfig     `yaml:"errorHandling"`
 }
 
 // InterceptorConfig holds configuration for a pipeline interceptor.
