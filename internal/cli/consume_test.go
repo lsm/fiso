@@ -1240,13 +1240,14 @@ func equalStringSlices(a, b []string) bool {
 
 // mockKafkaConsumer implements kafkaConsumer for testing
 type mockKafkaConsumer struct {
-	mu          sync.Mutex
-	records     []*kgo.Record
-	fetchCount  int
-	commitError error
-	closed      bool
-	maxFetches  int
-	fetchIndex  int
+	mu           sync.Mutex
+	records      []*kgo.Record
+	fetchCount   int
+	commitError  error
+	closed       bool
+	maxFetches   int
+	fetchIndex   int
+	blockOnEmpty bool // if true, block instead of returning empty fetches after maxFetches
 }
 
 func (m *mockKafkaConsumer) PollFetches(ctx context.Context) kgo.Fetches {
@@ -1255,18 +1256,32 @@ func (m *mockKafkaConsumer) PollFetches(ctx context.Context) kgo.Fetches {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	fetchCount := m.fetchCount
 	m.fetchCount++
+	maxFetches := m.maxFetches
+	fetchIndex := m.fetchIndex
+	blockOnEmpty := m.blockOnEmpty
+	var record *kgo.Record
+	if fetchIndex < len(m.records) {
+		record = m.records[fetchIndex]
+		m.fetchIndex++
+	}
+	m.mu.Unlock()
 
-	// If we've returned all records, return empty fetches
-	if m.fetchIndex >= len(m.records) || (m.maxFetches > 0 && m.fetchCount > m.maxFetches) {
+	// If we've exceeded maxFetches, either block or return empty
+	if maxFetches > 0 && fetchCount >= maxFetches {
+		if blockOnEmpty {
+			// Block forever (or until context cancelled) to prevent tight loop
+			<-ctx.Done()
+			return kgo.Fetches{}
+		}
 		return kgo.Fetches{}
 	}
 
-	// Return next record
-	record := m.records[m.fetchIndex]
-	m.fetchIndex++
+	// If we've returned all records, return empty fetches
+	if record == nil {
+		return kgo.Fetches{}
+	}
 
 	return kgo.Fetches{
 		{
@@ -1444,11 +1459,12 @@ func TestConsumeFollow_WithMock(t *testing.T) {
 }
 
 func TestRunConsume_WithMockClient(t *testing.T) {
-	// Save original and restore after test
-	origCreateClient := createKafkaClientFunc
-	defer func() { createKafkaClientFunc = origCreateClient }()
-
+	// These tests must run sequentially to avoid races on createKafkaClientFunc
 	t.Run("successful batch consume", func(t *testing.T) {
+		// Save and restore for each subtest to avoid races
+		origCreateClient := createKafkaClientFunc
+		defer func() { createKafkaClientFunc = origCreateClient }()
+
 		mock := &mockKafkaConsumer{
 			records: []*kgo.Record{
 				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k1"), Value: []byte(`{"order":"123"}`)},
@@ -1458,11 +1474,6 @@ func TestRunConsume_WithMockClient(t *testing.T) {
 		createKafkaClientFunc = func(cfg consumeConfig) (kafkaConsumer, error) {
 			return mock, nil
 		}
-
-		// Use a timeout context since we have limited records
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-		}()
 
 		err := RunConsume([]string{"--topic", "test", "--max-messages", "1"})
 		if err != nil && !strings.Contains(err.Error(), "context") {
@@ -1475,6 +1486,9 @@ func TestRunConsume_WithMockClient(t *testing.T) {
 	})
 
 	t.Run("client creation error", func(t *testing.T) {
+		origCreateClient := createKafkaClientFunc
+		defer func() { createKafkaClientFunc = origCreateClient }()
+
 		createKafkaClientFunc = func(cfg consumeConfig) (kafkaConsumer, error) {
 			return nil, fmt.Errorf("cannot connect to kafka")
 		}
@@ -1489,52 +1503,74 @@ func TestRunConsume_WithMockClient(t *testing.T) {
 	})
 
 	t.Run("from-beginning flag", func(t *testing.T) {
+		origCreateClient := createKafkaClientFunc
+		defer func() { createKafkaClientFunc = origCreateClient }()
+
 		var capturedCfg consumeConfig
-		mock := &mockKafkaConsumer{
-			records:    []*kgo.Record{},
-			maxFetches: 2,
-		}
-		createKafkaClientFunc = func(cfg consumeConfig) (kafkaConsumer, error) {
-			capturedCfg = cfg
-			return mock, nil
-		}
-
-		// Run with timeout to prevent hanging
-		done := make(chan error, 1)
-		go func() {
-			done <- RunConsume([]string{"--topic", "test", "--from-beginning", "--max-messages", "1"})
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(1 * time.Second):
-		}
-
-		if capturedCfg.StartOffset != "earliest" {
-			t.Errorf("expected StartOffset='earliest', got %q", capturedCfg.StartOffset)
-		}
-	})
-
-	t.Run("follow mode", func(t *testing.T) {
+		var cfgMu sync.Mutex
 		mock := &mockKafkaConsumer{
 			records: []*kgo.Record{
 				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k1"), Value: []byte(`{"data":"test"}`)},
 			},
-			maxFetches: 3,
+			maxFetches: 5,
 		}
 		createKafkaClientFunc = func(cfg consumeConfig) (kafkaConsumer, error) {
+			cfgMu.Lock()
+			capturedCfg = cfg
+			cfgMu.Unlock()
 			return mock, nil
 		}
 
-		// Run with timeout
+		// Run with max-messages=1 so it exits after consuming one record
+		_ = RunConsume([]string{"--topic", "test", "--from-beginning", "--max-messages", "1"})
+
+		cfgMu.Lock()
+		offset := capturedCfg.StartOffset
+		cfgMu.Unlock()
+
+		if offset != "earliest" {
+			t.Errorf("expected StartOffset='earliest', got %q", offset)
+		}
+	})
+
+	t.Run("follow mode", func(t *testing.T) {
+		// Test consumeFollow directly with a controlled context instead of
+		// going through RunConsume, which manages its own context internally.
+		// This avoids issues with signal-based shutdown in tests.
+		mock := &mockKafkaConsumer{
+			records: []*kgo.Record{
+				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k1"), Value: []byte(`{"data":"test"}`)},
+			},
+			maxFetches:   3,
+			blockOnEmpty: true,
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
 		done := make(chan error, 1)
 		go func() {
-			done <- RunConsume([]string{"--topic", "test", "--follow"})
+			done <- consumeFollow(ctx, mock, "test-topic")
 		}()
 
+		// Wait for fetches to happen
+		for i := 0; i < 50; i++ {
+			if mock.getFetchCount() >= 2 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		// Cancel context to stop the follow loop
+		cancel()
+
+		// Wait for consumeFollow to finish
 		select {
-		case <-done:
-		case <-time.After(500 * time.Millisecond):
+		case err := <-done:
+			if err != nil && err != context.Canceled {
+				t.Errorf("unexpected error: %v", err)
+			}
+		case <-time.After(1 * time.Second):
+			t.Error("timeout waiting for consumeFollow to finish")
 		}
 
 		if mock.getFetchCount() == 0 {
