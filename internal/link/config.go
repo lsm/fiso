@@ -11,18 +11,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var validProtocols = map[string]bool{"http": true, "https": true, "grpc": true}
+var validProtocols = map[string]bool{"http": true, "https": true, "grpc": true, "kafka": true}
 
 // LinkTarget defines an outbound target endpoint.
 type LinkTarget struct {
 	Name           string               `yaml:"name"`
-	Protocol       string               `yaml:"protocol"` // http, https, grpc
+	Protocol       string               `yaml:"protocol"` // http, https, grpc, kafka
 	Host           string               `yaml:"host"`
 	Auth           AuthConfig           `yaml:"auth"`
 	CircuitBreaker CircuitBreakerConfig `yaml:"circuitBreaker"`
 	Retry          RetryConfig          `yaml:"retry"`
 	RateLimit      RateLimitConfig      `yaml:"rateLimit"`
 	AllowedPaths   []string             `yaml:"allowedPaths"`
+	Kafka          *KafkaConfig         `yaml:"kafka,omitempty"` // Kafka-specific settings
 }
 
 // AuthConfig defines authentication settings for a target.
@@ -42,6 +43,21 @@ type SecretRef struct {
 type VaultRef struct {
 	Path string `yaml:"path"`
 	Role string `yaml:"role"`
+}
+
+// KafkaConfig defines Kafka-specific settings for a target.
+type KafkaConfig struct {
+	Topic        string            `yaml:"topic"`                  // Required: Kafka topic
+	Key          KeyStrategy       `yaml:"key"`                    // Optional: Key generation strategy
+	Headers      map[string]string `yaml:"headers,omitempty"`      // Optional: Static Kafka headers
+	RequiredAcks string            `yaml:"requiredAcks,omitempty"` // Optional: "all", "1" (default)
+}
+
+// KeyStrategy defines how to generate Kafka message keys.
+type KeyStrategy struct {
+	Type  string `yaml:"type"`  // uuid, header, payload, static, random
+	Field string `yaml:"field"` // For "header" or "payload" types
+	Value string `yaml:"value"` // For "static" type
 }
 
 // CircuitBreakerConfig holds circuit breaker settings.
@@ -270,12 +286,35 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("target[%d]: name is required", i))
 			continue
 		}
-		if t.Host == "" {
-			errs = append(errs, fmt.Errorf("%s: host is required", prefix))
+		if t.Host == "" && t.Protocol != "kafka" {
+			errs = append(errs, fmt.Errorf("%s: host is required (except for kafka protocol)", prefix))
 		}
 
 		if t.Protocol != "" && !validProtocols[t.Protocol] {
-			errs = append(errs, fmt.Errorf("%s: protocol %q is not valid (must be one of: http, https, grpc)", prefix, t.Protocol))
+			errs = append(errs, fmt.Errorf("%s: protocol %q is not valid (must be one of: http, https, grpc, kafka)", prefix, t.Protocol))
+		}
+
+		// Kafka-specific validation
+		if t.Protocol == "kafka" {
+			if t.Kafka == nil || t.Kafka.Topic == "" {
+				errs = append(errs, fmt.Errorf("%s: kafka protocol requires topic in kafka.topic field", prefix))
+			}
+			if t.Host != "" {
+				errs = append(errs, fmt.Errorf("%s: kafka protocol does not use host field (use asyncBrokers in config)", prefix))
+			}
+			// Validate key strategy
+			if t.Kafka != nil && t.Kafka.Key.Type != "" {
+				validKeyTypes := map[string]bool{"uuid": true, "header": true, "payload": true, "static": true, "random": true}
+				if !validKeyTypes[t.Kafka.Key.Type] {
+					errs = append(errs, fmt.Errorf("%s: invalid key type %q (must be one of: uuid, header, payload, static, random)", prefix, t.Kafka.Key.Type))
+				}
+				if (t.Kafka.Key.Type == "header" || t.Kafka.Key.Type == "payload") && t.Kafka.Key.Field == "" {
+					errs = append(errs, fmt.Errorf("%s: key type %q requires field parameter", prefix, t.Kafka.Key.Type))
+				}
+				if t.Kafka.Key.Type == "static" && t.Kafka.Key.Value == "" {
+					errs = append(errs, fmt.Errorf("%s: key type static requires value parameter", prefix))
+				}
+			}
 		}
 
 		if t.CircuitBreaker.ResetTimeout != "" {

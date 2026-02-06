@@ -465,6 +465,359 @@ asyncBrokers:
   - kafka.infra.svc:9092
 ```
 
+### Kafka Targets
+
+Fiso-Link supports Kafka as a target protocol, enabling applications to publish events to Kafka topics through a simple HTTP API. All resilience features (circuit breaker, retry, rate limiting, metrics) work identically to HTTP targets.
+
+#### Overview
+
+Kafka targets allow your application to publish messages to Kafka topics without embedding a Kafka client library. Instead, your application makes an HTTP POST request to `localhost:3500/link/{targetName}`, and Fiso-Link handles the Kafka publishing with built-in resilience patterns.
+
+**Use Kafka targets when:**
+- Your application needs to produce events to Kafka but you want to avoid embedding Kafka client libraries
+- You want consistent retry, circuit breaker, and rate limiting behavior across all external dependencies
+- You need to control message keys for partitioning but want to keep key generation logic in configuration
+- You want to add static headers to all Kafka messages from a specific target
+
+#### Configuration
+
+A Kafka target is defined in your `link/config.yaml`:
+
+```yaml
+targets:
+  - name: orders-publisher
+    protocol: kafka
+    kafka:
+      topic: orders
+      key:
+        type: uuid
+      headers:
+        source: order-service
+        version: "1.0"
+      requiredAcks: all
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      resetTimeout: "30s"
+    retry:
+      maxAttempts: 3
+      backoff: exponential
+      initialInterval: "100ms"
+      maxInterval: "1s"
+    rateLimit:
+      requestsPerSecond: 1000
+      burst: 100
+```
+
+**Required fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `protocol` | string | Must be `kafka` |
+| `kafka.topic` | string | Kafka topic to publish to |
+
+**Optional fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kafka.key` | KeyStrategy | Message key generation strategy (see below) |
+| `kafka.headers` | map[string]string | Static headers added to all messages |
+| `kafka.requiredAcks` | string | Acknowledgment level: `all` or `1` (default) |
+
+**Important:** Kafka targets require `asyncBrokers` to be configured at the top level of your `link/config.yaml`:
+
+```yaml
+asyncBrokers:
+  - kafka.infra.svc:9092
+  - kafka2.infra.svc:9092
+```
+
+#### Key Strategies
+
+Fiso-Link supports 5 key generation strategies to control Kafka message partitioning:
+
+| Strategy | Description | Example Configuration | Result |
+|----------|-------------|----------------------|--------|
+| `uuid` | Generate a random UUID v4 | `type: uuid` | `"a1b2c3d4-e5f6-7890-abcd-ef1234567890"` |
+| `header` | Extract from HTTP header | `type: header`<br>`field: X-Message-Id` | Value of `X-Message-Id` header |
+| `payload` | Extract from JSON payload | `type: payload`<br>`field: user_id` | Value of `user_id` field in request body |
+| `static` | Use a fixed value | `type: static`<br>`value: my-app` | `"my-app"` (all messages get same key) |
+| `random` | Generate random nanosecond timestamp | `type: random` | `"1738799123456789000"` |
+
+**Key strategy configuration examples:**
+
+```yaml
+# UUID key - evenly distributes messages across partitions
+kafka:
+  key:
+    type: uuid
+
+# Header-based key - preserve correlation ID
+kafka:
+  key:
+    type: header
+    field: X-Correlation-ID
+
+# Payload-based key - use business entity ID
+kafka:
+  key:
+    type: payload
+    field: customer_id
+
+# Static key - all messages to same partition (ordered processing)
+kafka:
+  key:
+    type: static
+    value: order-processor-1
+
+# Random key - distribute without UUID overhead
+kafka:
+  key:
+    type: random
+
+# No key - let Kafka choose partition (null key)
+kafka:
+  topic: events
+  # omit key field entirely
+```
+
+**Partitioning behavior:**
+- **No key (`null`)**: Kafka uses round-robin partitioning
+- **Same key**: All messages go to the same partition (ordered processing)
+- **Different keys**: Messages distributed across partitions (parallel processing)
+
+#### Common Use Cases
+
+**1. High-throughput event publishing**
+
+```yaml
+targets:
+  - name: events-publisher
+    protocol: kafka
+    kafka:
+      topic: application-events
+      key:
+        type: uuid  # Distribute load across partitions
+    rateLimit:
+      requestsPerSecond: 10000
+      burst: 1000
+```
+
+**2. Ordered command processing**
+
+```yaml
+targets:
+  - name: commands-publisher
+    protocol: kafka
+    kafka:
+      topic: user-commands
+      key:
+        type: payload
+        field: user_id  # All commands for same user go to same partition
+      headers:
+        source: command-service
+```
+
+**3. Correlation tracking**
+
+```yaml
+targets:
+  - name: orders-publisher
+    protocol: kafka
+    kafka:
+      topic: orders
+      key:
+        type: header
+        field: X-Correlation-ID  # Trace request through system
+      requiredAcks: all
+```
+
+**4. Single partition processing**
+
+```yaml
+targets:
+  - name: ledger-publisher
+    protocol: kafka
+    kafka:
+      topic: ledger-updates
+      key:
+        type: static
+        value: "ledger-1"  # All messages to same partition for strict ordering
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 3
+      resetTimeout: "60s"
+```
+
+#### API Usage
+
+**Endpoint:** `POST /link/{targetName}`
+
+**Request:** JSON payload in request body
+
+**Response:** `{"status":"published","topic":"{topic}"}`
+
+**Example with curl:**
+
+```bash
+curl -X POST http://localhost:3500/link/orders-publisher \
+  -H "Content-Type: application/json" \
+  -H "X-Correlation-ID: order-12345" \
+  -d '{
+    "order_id": "12345",
+    "customer_id": "cust-67890",
+    "amount": 99.99,
+    "items": ["item-1", "item-2"]
+  }'
+```
+
+**Response:**
+
+```json
+{"status":"published","topic":"orders"}
+```
+
+#### Usage from Temporal Activities
+
+```go
+package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
+)
+
+func PublishOrderActivity(ctx context.Context, order Order) error {
+    payload, _ := json.Marshal(order)
+
+    req, _ := http.NewRequestWithContext(
+        ctx,
+        "POST",
+        "http://localhost:3500/link/orders-publisher",
+        bytes.NewReader(payload),
+    )
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("X-Correlation-ID", order.ID)
+
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Errorf("kafka publish failed: %s", resp.Status)
+    }
+
+    return nil
+}
+```
+
+#### Resilience Features
+
+Kafka targets inherit all Fiso-Link resilience features:
+
+**Circuit Breaker:**
+- Opens after consecutive failures (configurable threshold)
+- Returns `503 Service Unavailable` when open
+- Automatically closes after reset timeout
+- Per-target configuration
+
+**Retry:**
+- Automatic retries on publish failures
+- Exponential, constant, or linear backoff
+- Configurable max attempts and intervals
+- Jitter support to prevent thundering herd
+
+**Rate Limiting:**
+- Token bucket rate limiting per target
+- Configurable requests-per-second and burst
+- Returns `429 Too Many Requests` when limit exceeded
+- Protects downstream Kafka cluster
+
+**Metrics:**
+All Kafka targets emit Prometheus metrics:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `fiso_link_requests_total` | Counter | `target`, `method`, `status`, `mode` | Total requests (mode=`kafka`) |
+| `fiso_link_request_duration_seconds` | Histogram | `target`, `method` | Request duration |
+| `fiso_link_circuit_state` | Gauge | `target` | Circuit breaker state (0=closed, 1=half-open, 2=open) |
+| `fiso_link_retries_total` | Counter | `target`, `attempt` | Total retries per target |
+| `fiso_link_rate_limited_total` | Counter | `target` | Rate limit rejections |
+
+#### Headers
+
+Kafka messages include headers from two sources:
+
+1. **HTTP headers from the request:** All headers from the incoming HTTP request are passed as Kafka headers
+2. **Static headers from config:** Headers defined in `kafka.headers` are added to every message
+
+If both sources define the same header, the static header value takes precedence.
+
+**Example:**
+
+```yaml
+targets:
+  - name: analytics-publisher
+    protocol: kafka
+    kafka:
+      topic: events
+      headers:
+        environment: production
+        version: "2.0"
+```
+
+Request with headers:
+```bash
+curl -X POST http://localhost:3500/link/analytics-publisher \
+  -H "X-Request-ID: req-123" \
+  -H "X-User-ID: user-456" \
+  -d '{"event":"click"}'
+```
+
+Resulting Kafka headers:
+```
+environment: production
+version: 2.0
+X-Request-ID: req-123
+X-User-ID: user-456
+```
+
+#### Error Handling
+
+| HTTP Status | Description | Retryable |
+|-------------|-------------|-----------|
+| `200 OK` | Message published successfully | - |
+| `400 Bad Request` | Invalid key strategy or missing field | No |
+| `404 Not Found` | Target not configured | No |
+| `429 Too Many Requests` | Rate limit exceeded | Yes (client-side) |
+| `502 Bad Gateway` | Kafka publish failed after retries | Yes (automatic) |
+| `503 Service Unavailable` | Circuit breaker open | Yes (after timeout) |
+
+#### Best Practices
+
+1. **Choose the right key strategy:**
+   - Use `uuid` or `random` for high-throughput, unordered events
+   - Use `payload` with an entity ID for per-entity ordering
+   - Use `static` for single-partition topics requiring strict ordering
+   - Use `header` to preserve correlation IDs from upstream systems
+
+2. **Configure resilience appropriately:**
+   - Set circuit breaker threshold based on your Kafka cluster's tolerance
+   - Use exponential backoff with jitter for retries
+   - Enable rate limiting to prevent overwhelming the cluster
+
+3. **Use acknowledgments correctly:**
+   - Use `requiredAcks: all` for critical data (slower but safer)
+   - Use `requiredAcks: 1` (default) for high-volume ephemeral events
+
+4. **Monitor metrics:**
+   - Track `fiso_link_requests_total` to monitor publish rates
+   - Monitor `fiso_link_circuit_state` for circuit breaker activity
+   - Watch `fiso_link_retries_total` to detect Kafka cluster issues
+
 ## WASM Interceptors
 
 WASM interceptors enable custom data transformations using WebAssembly modules. They operate as stdin-to-stdout JSON pipelines, reading CloudEvents from stdin and writing transformed CloudEvents to stdout.

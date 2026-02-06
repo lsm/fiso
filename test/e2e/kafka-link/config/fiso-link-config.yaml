@@ -1,0 +1,205 @@
+# Fiso-Link Configuration for Kafka E2E Testing
+# This configuration defines multiple Kafka targets with different key strategies
+# for comprehensive end-to-end testing.
+
+listenAddr: "0.0.0.0:3500"
+metricsAddr: ":9090"
+
+# Kafka brokers for async publishing
+asyncBrokers:
+  - "kafka:9092"
+
+# Link targets - each represents a different Kafka configuration scenario
+targets:
+  # Target 1: UUID key strategy (most common)
+  - name: kafka-uuid
+    protocol: kafka
+    kafka:
+      topic: test-events-uuid
+      key:
+        type: uuid
+      headers:
+        source: "fiso-link"
+        env: "e2e-test"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 2
+      resetTimeout: "10s"
+    retry:
+      maxAttempts: 3
+      backoff: exponential
+      initialInterval: "100ms"
+      maxInterval: "1s"
+      jitter: 0.1
+
+  # Target 2: Header-based key extraction
+  - name: kafka-header-key
+    protocol: kafka
+    kafka:
+      topic: test-events-header
+      key:
+        type: header
+        field: X-Message-Id
+      headers:
+        source: "fiso-link"
+        keyStrategy: "header"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 3
+      successThreshold: 2
+      resetTimeout: "5s"
+    retry:
+      maxAttempts: 2
+      backoff: constant
+      initialInterval: "200ms"
+
+  # Target 3: Payload-based key extraction
+  - name: kafka-payload-key
+    protocol: kafka
+    kafka:
+      topic: test-events-payload
+      key:
+        type: payload
+        field: user_id
+      headers:
+        source: "fiso-link"
+        keyStrategy: "payload"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 2
+      resetTimeout: "10s"
+    retry:
+      maxAttempts: 3
+
+  # Target 4: Static key
+  - name: kafka-static-key
+    protocol: kafka
+    kafka:
+      topic: test-events-static
+      key:
+        type: static
+        value: "fixed-key-12345"
+      headers:
+        source: "fiso-link"
+        keyStrategy: "static"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 2
+      resetTimeout: "10s"
+    retry:
+      maxAttempts: 3
+
+  # Target 5: Random key (timestamp-based)
+  - name: kafka-random-key
+    protocol: kafka
+    kafka:
+      topic: test-events-random
+      key:
+        type: random
+      headers:
+        source: "fiso-link"
+        keyStrategy: "random"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 2
+      resetTimeout: "10s"
+    retry:
+      maxAttempts: 3
+
+  # Target 6: No key (nil key)
+  - name: kafka-no-key
+    protocol: kafka
+    kafka:
+      topic: test-events-no-key
+      # No key strategy specified - will use nil key
+      headers:
+        source: "fiso-link"
+        keyStrategy: "none"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 2
+      resetTimeout: "10s"
+    retry:
+      maxAttempts: 3
+
+  # Target 7: Rate limited target
+  - name: kafka-rate-limited
+    protocol: kafka
+    kafka:
+      topic: test-events-rate-limited
+      key:
+        type: uuid
+      headers:
+        source: "fiso-link"
+        test: "rate-limit"
+    rateLimit:
+      requestsPerSecond: 10.0
+      burst: 5
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 2
+      resetTimeout: "10s"
+
+  # Target 8: Sensitive circuit breaker for testing
+  - name: kafka-cb-test
+    protocol: kafka
+    kafka:
+      topic: test-events-cb-test
+      key:
+        type: uuid
+      headers:
+        source: "fiso-link"
+        test: "circuit-breaker"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 2
+      successThreshold: 1
+      resetTimeout: "5s"
+    retry:
+      maxAttempts: 1
+
+  # Target 9: High retry count for testing retry logic
+  - name: kafka-retry-test
+    protocol: kafka
+    kafka:
+      topic: test-events-retry
+      key:
+        type: uuid
+      headers:
+        source: "fiso-link"
+        test: "retry"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 2
+      resetTimeout: "10s"
+    retry:
+      maxAttempts: 5
+      backoff: exponential
+      initialInterval: "100ms"
+      maxInterval: "2s"
+      jitter: 0.2
+
+  # Target 10: Headers propagation test
+  - name: kafka-headers-test
+    protocol: kafka
+    kafka:
+      topic: test-events-headers
+      key:
+        type: uuid
+      headers:
+        static-header-1: "static-value-1"
+        static-header-2: "static-value-2"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 2
+      resetTimeout: "10s"
+    retry:
+      maxAttempts: 3

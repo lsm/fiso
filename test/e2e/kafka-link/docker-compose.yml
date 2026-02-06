@@ -1,0 +1,111 @@
+version: '3.8'
+
+services:
+  # Zookeeper required by Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.7.1
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka broker
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    hostname: kafka
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # Fiso-Link service
+  fiso-link:
+    image: fiso-link:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.link
+    hostname: fiso-link
+    container_name: fiso-link
+    ports:
+      - "3500:3500"
+      - "9090:9090"
+    volumes:
+      - ./config:/etc/fiso/link:ro
+    environment:
+      FISO_LINK_CONFIG: /etc/fiso/link/fiso-link-config.yaml
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Test runner
+  test-runner:
+    image: golang:1.23-alpine
+    hostname: test-runner
+    container_name: test-runner
+    volumes:
+      - ../../..:/workspace
+      - ./config:/etc/fiso/link:ro
+    working_dir: /workspace/test/e2e/kafka-link
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      FISO_LINK_ADDR: http://fiso-link:3500
+      GOMODCACHE: /go/pkg/mod
+    depends_on:
+      kafka:
+        condition: service_healthy
+      fiso-link:
+        condition: service_healthy
+    command: tail -f /dev/null
+
+  # Simple test client for manual testing
+  test-client:
+    image: curlimages/curl:latest
+    hostname: test-client
+    container_name: test-client
+    volumes:
+      - ./scripts:/scripts:ro
+    working_dir: /scripts
+    environment:
+      FISO_LINK_ADDR: http://fiso-link:3500
+    depends_on:
+      fiso-link:
+        condition: service_healthy
+    command: tail -f /dev/null
+
+networks:
+  default:
+    name: kafka-link-test
+    driver: bridge

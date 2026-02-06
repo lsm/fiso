@@ -21,6 +21,7 @@ import (
 	"github.com/lsm/fiso/internal/link/proxy"
 	"github.com/lsm/fiso/internal/link/ratelimit"
 	"github.com/lsm/fiso/internal/observability"
+	"github.com/lsm/fiso/internal/source/kafka"
 )
 
 func main() {
@@ -45,6 +46,18 @@ func run() error {
 	}
 
 	logger.Info("loaded config", "targets", len(cfg.Targets), "listenAddr", cfg.ListenAddr)
+
+	// Initialize Kafka publisher if async brokers configured
+	var kafkaPublisher *kafka.Publisher
+	if len(cfg.AsyncBrokers) > 0 {
+		pub, err := kafka.NewPublisher(cfg.AsyncBrokers)
+		if err != nil {
+			return fmt.Errorf("kafka publisher: %w", err)
+		}
+		kafkaPublisher = pub
+		logger.Info("initialized kafka publisher", "brokers", cfg.AsyncBrokers)
+		defer pub.Close()
+	}
 
 	// Setup metrics
 	reg := prometheus.NewRegistry()
@@ -101,7 +114,7 @@ func run() error {
 	store := link.NewTargetStore(cfg.Targets)
 
 	// Build proxy handler
-	handler := proxy.NewHandler(proxy.Config{
+	handlerCfg := proxy.Config{
 		Targets:     store,
 		Breakers:    breakers,
 		RateLimiter: rateLimiter,
@@ -109,7 +122,12 @@ func run() error {
 		Resolver:    discovery.NewDNSResolver(),
 		Metrics:     metrics,
 		Logger:      logger,
-	})
+	}
+	// Add Kafka publisher if available
+	if kafkaPublisher != nil {
+		handlerCfg.KafkaPublisher = kafkaPublisher
+	}
+	handler := proxy.NewHandler(handlerCfg)
 
 	// Health server
 	health := observability.NewHealthServer()

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/auth"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
@@ -28,17 +29,19 @@ type Handler struct {
 	metrics     *link.Metrics
 	client      *http.Client
 	logger      *slog.Logger
+	kafkaHandler *KafkaHandler // Optional: For Kafka targets
 }
 
 // Config configures the proxy handler.
 type Config struct {
-	Targets     *link.TargetStore
-	Breakers    map[string]*circuitbreaker.Breaker
-	RateLimiter *ratelimit.Limiter
-	Auth        auth.Provider
-	Resolver    discovery.Resolver
-	Metrics     *link.Metrics
-	Logger      *slog.Logger
+	Targets        *link.TargetStore
+	Breakers       map[string]*circuitbreaker.Breaker
+	RateLimiter    *ratelimit.Limiter
+	Auth           auth.Provider
+	Resolver       discovery.Resolver
+	Metrics        *link.Metrics
+	Logger         *slog.Logger
+	KafkaPublisher dlq.Publisher // Optional: For Kafka targets
 }
 
 // NewHandler creates a new HTTP proxy handler.
@@ -52,7 +55,8 @@ func NewHandler(cfg Config) *Handler {
 	if cfg.Auth == nil {
 		cfg.Auth = &auth.NoopProvider{}
 	}
-	return &Handler{
+
+	h := &Handler{
 		targets:     cfg.Targets,
 		breakers:    cfg.Breakers,
 		rateLimiter: cfg.RateLimiter,
@@ -64,6 +68,20 @@ func NewHandler(cfg Config) *Handler {
 		},
 		logger: cfg.Logger,
 	}
+
+	// Initialize Kafka handler if publisher provided
+	if cfg.KafkaPublisher != nil {
+		h.kafkaHandler = NewKafkaHandler(
+			cfg.KafkaPublisher,
+			cfg.Targets,
+			cfg.Breakers,
+			cfg.RateLimiter,
+			cfg.Metrics,
+			cfg.Logger,
+		)
+	}
+
+	return h
 }
 
 // ServeHTTP handles proxy requests. Routes:
@@ -88,6 +106,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	target := h.targets.Get(targetName)
 	if target == nil {
 		http.Error(w, fmt.Sprintf("target %q not found", targetName), http.StatusNotFound)
+		return
+	}
+
+	// Protocol-based routing: Kafka targets use special handler
+	if target.Protocol == "kafka" {
+		if h.kafkaHandler == nil {
+			http.Error(w, "kafka targets not supported (no publisher configured)", http.StatusNotImplemented)
+			return
+		}
+		h.kafkaHandler.ServeHTTP(w, r)
 		return
 	}
 
