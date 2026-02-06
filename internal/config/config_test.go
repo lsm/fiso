@@ -839,7 +839,7 @@ func TestLoadFile_ReadError(t *testing.T) {
 	if err := os.WriteFile(path, []byte("test"), 0000); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
-	defer os.Chmod(path, 0644) // cleanup
+	defer func() { _ = os.Chmod(path, 0644) }() // cleanup
 
 	loader := NewLoader(dir, nil)
 	_, err := loader.loadFile(path)
@@ -897,7 +897,7 @@ sink:
 	mu.Unlock()
 
 	// Since invalid config should be skipped, flows should be empty or still valid
-	if flows != nil && len(flows) > 0 {
+	if len(flows) > 0 {
 		if _, ok := flows["invalid-flow"]; ok {
 			t.Error("invalid-flow should not be loaded")
 		}
@@ -947,7 +947,7 @@ sink:
 	if err := os.Chmod(configDir, 0000); err != nil {
 		t.Skipf("cannot change directory permissions: %v", err)
 	}
-	defer os.Chmod(configDir, 0755) // Restore for cleanup
+	defer func() { _ = os.Chmod(configDir, 0755) }() // Restore for cleanup
 
 	// Create a new file in the parent directory to trigger some activity
 	// We can't write to configDir since it's unreadable, but we can

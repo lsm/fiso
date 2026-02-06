@@ -104,7 +104,7 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
-	r.Body.Close()
+	_ = r.Body.Close()
 
 	// Build Kafka headers from HTTP headers + static headers
 	kafkaHeaders := make(map[string]string)
@@ -164,7 +164,7 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.metrics.RequestsTotal.WithLabelValues(target.Name, "POST", "200", "kafka").Inc()
 			}
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"status":"published","topic":"%s"}`, topic)
+			_, _ = fmt.Fprintf(w, `{"status":"published","topic":"%s"}`, topic)
 			return
 		}
 

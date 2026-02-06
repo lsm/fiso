@@ -276,7 +276,7 @@ func TestInterceptor_MultipleDirections(t *testing.T) {
 
 	// Verify the sent direction was "outbound"
 	var sentOut requestPayload
-	json.Unmarshal(mc.lastData, &sentOut)
+	_ = json.Unmarshal(mc.lastData, &sentOut)
 	if sentOut.Direction != "outbound" {
 		t.Errorf("expected sent direction 'outbound', got %q", sentOut.Direction)
 	}
@@ -298,7 +298,7 @@ func TestInterceptor_MultipleDirections(t *testing.T) {
 
 	// Verify the sent direction was "inbound"
 	var sentIn requestPayload
-	json.Unmarshal(mc.lastData, &sentIn)
+	_ = json.Unmarshal(mc.lastData, &sentIn)
 	if sentIn.Direction != "inbound" {
 		t.Errorf("expected sent direction 'inbound', got %q", sentIn.Direction)
 	}
@@ -426,7 +426,7 @@ func TestInterceptor_ComplexNestedJSON(t *testing.T) {
 
 	// Verify that the nested JSON was properly sent
 	var sent requestPayload
-	json.Unmarshal(mc.lastData, &sent)
+	_ = json.Unmarshal(mc.lastData, &sent)
 
 	// Verify the sent payload contains the nested structure
 	var sentPayloadMap map[string]interface{}

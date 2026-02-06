@@ -635,7 +635,7 @@ func (c *customWebhookHandler) handleAdmission(req *AdmissionRequest) *Admission
 	if c.customBuildPatch != nil {
 		patch = c.customBuildPatch(pod)
 	} else {
-		patch = c.WebhookHandler.buildPatch(pod)
+		patch = c.buildPatch(pod)
 	}
 
 	if len(patch) == 0 {
