@@ -365,3 +365,723 @@ targets:
 		t.Errorf("expected initialInterval \"200ms\", got %q", cfg.Targets[0].Retry.InitialInterval)
 	}
 }
+
+func TestRateLimitConfig_UnmarshalYAML_Int64(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test with very large numbers that would be int64
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    rateLimit:
+      requestsPerSecond: 9223372036854775807
+      burst: 9223372036854775807
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify int64 values were handled correctly
+	if cfg.Targets[0].RateLimit.RequestsPerSecond == 0 {
+		t.Error("expected non-zero requestsPerSecond")
+	}
+	if cfg.Targets[0].RateLimit.Burst == 0 {
+		t.Error("expected non-zero burst")
+	}
+}
+
+func TestCircuitBreakerConfig_UnmarshalYAML_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Invalid YAML structure for circuitBreaker
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    circuitBreaker: "invalid-string-value"
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadConfig(cfgFile)
+	if err == nil {
+		t.Fatal("expected error for invalid circuitBreaker YAML")
+	}
+	if !strings.Contains(err.Error(), "decode circuitBreaker") {
+		t.Errorf("expected decode error, got: %v", err)
+	}
+}
+
+func TestRetryConfig_UnmarshalYAML_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Invalid YAML structure for retry
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    retry: "invalid-string-value"
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadConfig(cfgFile)
+	if err == nil {
+		t.Fatal("expected error for invalid retry YAML")
+	}
+	if !strings.Contains(err.Error(), "decode retry") {
+		t.Errorf("expected decode error, got: %v", err)
+	}
+}
+
+func TestRateLimitConfig_UnmarshalYAML_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Invalid YAML structure for rateLimit
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    rateLimit: "invalid-string-value"
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadConfig(cfgFile)
+	if err == nil {
+		t.Fatal("expected error for invalid rateLimit YAML")
+	}
+	if !strings.Contains(err.Error(), "decode rateLimit") {
+		t.Errorf("expected decode error, got: %v", err)
+	}
+}
+
+func TestConfig_Validate_KafkaProtocol(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantErr string
+	}{
+		{
+			name: "kafka without topic",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+			}}},
+			wantErr: "requires topic",
+		},
+		{
+			name: "kafka with empty topic",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka:    &KafkaConfig{Topic: ""},
+			}}},
+			wantErr: "requires topic",
+		},
+		{
+			name: "kafka with host specified",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Host:     "kafka.example.com",
+				Kafka:    &KafkaConfig{Topic: "events"},
+			}}},
+			wantErr: "does not use host field",
+		},
+		{
+			name: "kafka valid config",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka:    &KafkaConfig{Topic: "events"},
+			}}},
+		},
+		{
+			name: "kafka with invalid key type",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka: &KafkaConfig{
+					Topic: "events",
+					Key:   KeyStrategy{Type: "invalid"},
+				},
+			}}},
+			wantErr: "invalid key type",
+		},
+		{
+			name: "kafka with header key type missing field",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka: &KafkaConfig{
+					Topic: "events",
+					Key:   KeyStrategy{Type: "header"},
+				},
+			}}},
+			wantErr: "requires field parameter",
+		},
+		{
+			name: "kafka with payload key type missing field",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka: &KafkaConfig{
+					Topic: "events",
+					Key:   KeyStrategy{Type: "payload"},
+				},
+			}}},
+			wantErr: "requires field parameter",
+		},
+		{
+			name: "kafka with static key type missing value",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka: &KafkaConfig{
+					Topic: "events",
+					Key:   KeyStrategy{Type: "static"},
+				},
+			}}},
+			wantErr: "requires value parameter",
+		},
+		{
+			name: "kafka with valid uuid key type",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka: &KafkaConfig{
+					Topic: "events",
+					Key:   KeyStrategy{Type: "uuid"},
+				},
+			}}},
+		},
+		{
+			name: "kafka with valid header key type",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka: &KafkaConfig{
+					Topic: "events",
+					Key:   KeyStrategy{Type: "header", Field: "X-Request-ID"},
+				},
+			}}},
+		},
+		{
+			name: "kafka with valid payload key type",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka: &KafkaConfig{
+					Topic: "events",
+					Key:   KeyStrategy{Type: "payload", Field: "userId"},
+				},
+			}}},
+		},
+		{
+			name: "kafka with valid static key type",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka: &KafkaConfig{
+					Topic: "events",
+					Key:   KeyStrategy{Type: "static", Value: "partition-key"},
+				},
+			}}},
+		},
+		{
+			name: "kafka with valid random key type",
+			cfg: Config{Targets: []LinkTarget{{
+				Name:     "kafka-target",
+				Protocol: "kafka",
+				Kafka: &KafkaConfig{
+					Topic: "events",
+					Key:   KeyStrategy{Type: "random"},
+				},
+			}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_KafkaProtocol(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	data := `
+listenAddr: "127.0.0.1:4000"
+metricsAddr: ":9091"
+asyncBrokers:
+  - kafka.infra.svc:9092
+targets:
+  - name: events
+    protocol: kafka
+    kafka:
+      topic: user-events
+      key:
+        type: uuid
+      headers:
+        source: fiso-link
+        version: "1.0"
+      requiredAcks: all
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Targets) != 1 {
+		t.Fatalf("expected 1 target, got %d", len(cfg.Targets))
+	}
+	if cfg.Targets[0].Protocol != "kafka" {
+		t.Errorf("expected protocol kafka, got %s", cfg.Targets[0].Protocol)
+	}
+	if cfg.Targets[0].Kafka == nil {
+		t.Fatal("expected kafka config to be set")
+	}
+	if cfg.Targets[0].Kafka.Topic != "user-events" {
+		t.Errorf("expected topic user-events, got %s", cfg.Targets[0].Kafka.Topic)
+	}
+	if cfg.Targets[0].Kafka.Key.Type != "uuid" {
+		t.Errorf("expected key type uuid, got %s", cfg.Targets[0].Kafka.Key.Type)
+	}
+	if cfg.Targets[0].Kafka.RequiredAcks != "all" {
+		t.Errorf("expected requiredAcks all, got %s", cfg.Targets[0].Kafka.RequiredAcks)
+	}
+	if len(cfg.AsyncBrokers) != 1 {
+		t.Errorf("expected 1 async broker, got %d", len(cfg.AsyncBrokers))
+	}
+}
+
+func TestCircuitBreakerConfig_UnmarshalYAML_NonBoolEnabled(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test non-bool value for enabled field (should be ignored)
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    circuitBreaker:
+      enabled: 123
+      failureThreshold: 5
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Non-bool enabled should default to false
+	if cfg.Targets[0].CircuitBreaker.Enabled {
+		t.Error("expected enabled to be false for non-bool value")
+	}
+	if cfg.Targets[0].CircuitBreaker.FailureThreshold != 5 {
+		t.Errorf("expected failureThreshold 5, got %d", cfg.Targets[0].CircuitBreaker.FailureThreshold)
+	}
+}
+
+func TestRetryConfig_UnmarshalYAML_IntJitter(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test int value for jitter (should be converted to float64)
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    retry:
+      maxAttempts: 3
+      jitter: 1
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Targets[0].Retry.Jitter != 1.0 {
+		t.Errorf("expected jitter 1.0, got %f", cfg.Targets[0].Retry.Jitter)
+	}
+}
+
+func TestRetryConfig_UnmarshalYAML_NonStringBackoff(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test non-string value for backoff (should be ignored)
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    retry:
+      maxAttempts: 3
+      backoff: 123
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Non-string backoff should remain empty
+	if cfg.Targets[0].Retry.Backoff != "" {
+		t.Errorf("expected empty backoff for non-string value, got %q", cfg.Targets[0].Retry.Backoff)
+	}
+}
+
+func TestCircuitBreakerConfig_UnmarshalYAML_AllTypes(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test all field types for circuit breaker
+	data := `
+targets:
+  - name: svc1
+    host: api.example.com
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5.0
+      successThreshold: 3.0
+      resetTimeout: 30000.0
+  - name: svc2
+    host: api2.example.com
+    circuitBreaker:
+      enabled: false
+      failureThreshold: 10
+      successThreshold: 2
+      resetTimeout: 5000
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check float64 conversions for thresholds
+	if cfg.Targets[0].CircuitBreaker.FailureThreshold != 5 {
+		t.Errorf("expected failureThreshold 5, got %d", cfg.Targets[0].CircuitBreaker.FailureThreshold)
+	}
+	if cfg.Targets[0].CircuitBreaker.SuccessThreshold != 3 {
+		t.Errorf("expected successThreshold 3, got %d", cfg.Targets[0].CircuitBreaker.SuccessThreshold)
+	}
+	if cfg.Targets[0].CircuitBreaker.ResetTimeout != "30000ms" {
+		t.Errorf("expected resetTimeout \"30000ms\", got %q", cfg.Targets[0].CircuitBreaker.ResetTimeout)
+	}
+
+	// Check int conversions
+	if cfg.Targets[1].CircuitBreaker.FailureThreshold != 10 {
+		t.Errorf("expected failureThreshold 10, got %d", cfg.Targets[1].CircuitBreaker.FailureThreshold)
+	}
+	if cfg.Targets[1].CircuitBreaker.SuccessThreshold != 2 {
+		t.Errorf("expected successThreshold 2, got %d", cfg.Targets[1].CircuitBreaker.SuccessThreshold)
+	}
+	if cfg.Targets[1].CircuitBreaker.ResetTimeout != "5000ms" {
+		t.Errorf("expected resetTimeout \"5000ms\", got %q", cfg.Targets[1].CircuitBreaker.ResetTimeout)
+	}
+}
+
+func TestCircuitBreakerConfig_UnmarshalYAML_NonNumericThresholds(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test non-numeric values for thresholds (should default to 0)
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    circuitBreaker:
+      enabled: true
+      failureThreshold: "invalid"
+      successThreshold: "invalid"
+      resetTimeout: "30s"
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Non-numeric thresholds should default to 0
+	if cfg.Targets[0].CircuitBreaker.FailureThreshold != 0 {
+		t.Errorf("expected failureThreshold 0 for non-numeric value, got %d", cfg.Targets[0].CircuitBreaker.FailureThreshold)
+	}
+	if cfg.Targets[0].CircuitBreaker.SuccessThreshold != 0 {
+		t.Errorf("expected successThreshold 0 for non-numeric value, got %d", cfg.Targets[0].CircuitBreaker.SuccessThreshold)
+	}
+}
+
+func TestCircuitBreakerConfig_UnmarshalYAML_NonStringResetTimeout(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test non-string, non-numeric resetTimeout (should default to empty)
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    circuitBreaker:
+      enabled: true
+      resetTimeout: []
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Non-string, non-numeric resetTimeout should remain empty
+	if cfg.Targets[0].CircuitBreaker.ResetTimeout != "" {
+		t.Errorf("expected empty resetTimeout for invalid type, got %q", cfg.Targets[0].CircuitBreaker.ResetTimeout)
+	}
+}
+
+func TestRateLimitConfig_UnmarshalYAML_AllTypes(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test all field types for rate limit
+	data := `
+targets:
+  - name: svc1
+    host: api.example.com
+    rateLimit:
+      requestsPerSecond: 100
+      burst: 50
+  - name: svc2
+    host: api2.example.com
+    rateLimit:
+      requestsPerSecond: 100.5
+      burst: 50.8
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check int conversions
+	if cfg.Targets[0].RateLimit.RequestsPerSecond != 100.0 {
+		t.Errorf("expected requestsPerSecond 100.0, got %f", cfg.Targets[0].RateLimit.RequestsPerSecond)
+	}
+	if cfg.Targets[0].RateLimit.Burst != 50 {
+		t.Errorf("expected burst 50, got %d", cfg.Targets[0].RateLimit.Burst)
+	}
+
+	// Check float64 conversions
+	if cfg.Targets[1].RateLimit.RequestsPerSecond != 100.5 {
+		t.Errorf("expected requestsPerSecond 100.5, got %f", cfg.Targets[1].RateLimit.RequestsPerSecond)
+	}
+	if cfg.Targets[1].RateLimit.Burst != 50 {
+		t.Errorf("expected burst 50, got %d", cfg.Targets[1].RateLimit.Burst)
+	}
+}
+
+func TestRateLimitConfig_UnmarshalYAML_NonNumericValues(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test non-numeric values (should default to 0)
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    rateLimit:
+      requestsPerSecond: "invalid"
+      burst: "invalid"
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Non-numeric values should default to 0
+	if cfg.Targets[0].RateLimit.RequestsPerSecond != 0 {
+		t.Errorf("expected requestsPerSecond 0 for non-numeric value, got %f", cfg.Targets[0].RateLimit.RequestsPerSecond)
+	}
+	if cfg.Targets[0].RateLimit.Burst != 0 {
+		t.Errorf("expected burst 0 for non-numeric value, got %d", cfg.Targets[0].RateLimit.Burst)
+	}
+}
+
+func TestRetryConfig_UnmarshalYAML_AllTypes(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test all field types for retry
+	data := `
+targets:
+  - name: svc1
+    host: api.example.com
+    retry:
+      maxAttempts: 3.0
+      backoff: exponential
+      initialInterval: "200ms"
+      maxInterval: 30000
+      jitter: 0.2
+  - name: svc2
+    host: api2.example.com
+    retry:
+      maxAttempts: 5
+      backoff: constant
+      initialInterval: 100.5
+      maxInterval: "5s"
+      jitter: 1
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check float64 conversion for maxAttempts
+	if cfg.Targets[0].Retry.MaxAttempts != 3 {
+		t.Errorf("expected maxAttempts 3, got %d", cfg.Targets[0].Retry.MaxAttempts)
+	}
+	if cfg.Targets[0].Retry.MaxInterval != "30000ms" {
+		t.Errorf("expected maxInterval \"30000ms\", got %q", cfg.Targets[0].Retry.MaxInterval)
+	}
+
+	// Check int conversion for maxAttempts
+	if cfg.Targets[1].Retry.MaxAttempts != 5 {
+		t.Errorf("expected maxAttempts 5, got %d", cfg.Targets[1].Retry.MaxAttempts)
+	}
+	if cfg.Targets[1].Retry.InitialInterval != "100ms" {
+		t.Errorf("expected initialInterval \"100ms\", got %q", cfg.Targets[1].Retry.InitialInterval)
+	}
+	if cfg.Targets[1].Retry.Jitter != 1.0 {
+		t.Errorf("expected jitter 1.0, got %f", cfg.Targets[1].Retry.Jitter)
+	}
+}
+
+func TestRetryConfig_UnmarshalYAML_NonNumericMaxAttempts(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test non-numeric value for maxAttempts (should default to 0)
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    retry:
+      maxAttempts: "invalid"
+      backoff: exponential
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Non-numeric maxAttempts should default to 0
+	if cfg.Targets[0].Retry.MaxAttempts != 0 {
+		t.Errorf("expected maxAttempts 0 for non-numeric value, got %d", cfg.Targets[0].Retry.MaxAttempts)
+	}
+}
+
+func TestRetryConfig_UnmarshalYAML_NonNumericIntervals(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test non-numeric, non-string intervals (should default to empty)
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    retry:
+      maxAttempts: 3
+      initialInterval: []
+      maxInterval: []
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Non-numeric, non-string intervals should remain empty
+	if cfg.Targets[0].Retry.InitialInterval != "" {
+		t.Errorf("expected empty initialInterval for invalid type, got %q", cfg.Targets[0].Retry.InitialInterval)
+	}
+	if cfg.Targets[0].Retry.MaxInterval != "" {
+		t.Errorf("expected empty maxInterval for invalid type, got %q", cfg.Targets[0].Retry.MaxInterval)
+	}
+}
+
+func TestRetryConfig_UnmarshalYAML_NonNumericJitter(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	// Test non-numeric value for jitter (should default to 0)
+	data := `
+targets:
+  - name: svc
+    host: api.example.com
+    retry:
+      maxAttempts: 3
+      jitter: "invalid"
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Non-numeric jitter should default to 0
+	if cfg.Targets[0].Retry.Jitter != 0.0 {
+		t.Errorf("expected jitter 0.0 for non-numeric value, got %f", cfg.Targets[0].Retry.Jitter)
+	}
+}
