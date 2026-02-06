@@ -350,11 +350,15 @@ Kafka source example:
 
 ```yaml
 name: order-events
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.infra.svc:9092
 source:
   type: kafka
   config:
-    brokers:
-      - kafka.infra.svc:9092
+    cluster: main
     topic: orders
     consumerGroup: fiso-order-flow
     startOffset: latest
@@ -380,6 +384,11 @@ Kafka sink example:
 
 ```yaml
 name: order-results
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.infra.svc:9092
 source:
   type: http
   config:
@@ -393,8 +402,7 @@ transform:
 sink:
   type: kafka
   config:
-    brokers:
-      - kafka.infra.svc:9092
+    cluster: main
     topic: order-results
 errorHandling:
   deadLetterTopic: fiso-dlq-order-results
@@ -405,11 +413,15 @@ Transform with CloudEvents customization:
 
 ```yaml
 name: order-pipeline
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.infra.svc:9092
 source:
   type: kafka
   config:
-    brokers:
-      - kafka.infra.svc:9092
+    cluster: main
     topic: orders
     consumerGroup: fiso-order-flow
     startOffset: latest
@@ -440,6 +452,12 @@ errorHandling:
 listenAddr: ":3500"
 metricsAddr: ":9091"
 
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.infra.svc:9092
+
 targets:
   - name: crm
     protocol: https
@@ -460,9 +478,6 @@ targets:
       jitter: 0.2
     allowedPaths:
       - /api/v2/**
-
-asyncBrokers:
-  - kafka.infra.svc:9092
 ```
 
 ### Kafka Targets
@@ -484,10 +499,17 @@ Kafka targets allow your application to publish messages to Kafka topics without
 A Kafka target is defined in your `link/config.yaml`:
 
 ```yaml
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.infra.svc:9092
+
 targets:
   - name: orders-publisher
     protocol: kafka
     kafka:
+      cluster: main
       topic: orders
       key:
         type: uuid
@@ -514,6 +536,7 @@ targets:
 | Field | Type | Description |
 |-------|------|-------------|
 | `protocol` | string | Must be `kafka` |
+| `kafka.cluster` | string | Name of cluster defined in `kafka.clusters` |
 | `kafka.topic` | string | Kafka topic to publish to |
 
 **Optional fields:**
@@ -524,12 +547,22 @@ targets:
 | `kafka.headers` | map[string]string | Static headers added to all messages |
 | `kafka.requiredAcks` | string | Acknowledgment level: `all` or `1` (default) |
 
-**Important:** Kafka targets require `asyncBrokers` to be configured at the top level of your `link/config.yaml`:
+**Important:** Kafka targets require a cluster to be defined in `kafka.clusters` at the top level of your `link/config.yaml`. Kafka targets reference clusters by name via the `cluster` field:
 
 ```yaml
-asyncBrokers:
-  - kafka.infra.svc:9092
-  - kafka2.infra.svc:9092
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.infra.svc:9092
+        - kafka2.infra.svc:9092
+
+targets:
+  - name: orders-publisher
+    protocol: kafka
+    kafka:
+      cluster: main
+      topic: orders
 ```
 
 #### Key Strategies
@@ -595,6 +628,7 @@ targets:
   - name: events-publisher
     protocol: kafka
     kafka:
+      cluster: main
       topic: application-events
       key:
         type: uuid  # Distribute load across partitions
@@ -610,6 +644,7 @@ targets:
   - name: commands-publisher
     protocol: kafka
     kafka:
+      cluster: main
       topic: user-commands
       key:
         type: payload
@@ -625,6 +660,7 @@ targets:
   - name: orders-publisher
     protocol: kafka
     kafka:
+      cluster: main
       topic: orders
       key:
         type: header
@@ -639,6 +675,7 @@ targets:
   - name: ledger-publisher
     protocol: kafka
     kafka:
+      cluster: main
       topic: ledger-updates
       key:
         type: static
@@ -763,6 +800,7 @@ targets:
   - name: analytics-publisher
     protocol: kafka
     kafka:
+      cluster: main
       topic: events
       headers:
         environment: production
@@ -1088,10 +1126,15 @@ kind: FlowDefinition
 metadata:
   name: order-events
 spec:
+  kafka:
+    clusters:
+      main:
+        brokers:
+          - kafka.infra.svc:9092
   source:
     type: kafka
     config:
-      brokers: "kafka.infra.svc:9092"
+      cluster: main
       topic: orders
       consumerGroup: fiso-order-flow
   sink:
