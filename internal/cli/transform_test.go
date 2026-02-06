@@ -46,11 +46,11 @@ sink:
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 	err := RunTransformTest([]string{"--flow", flowPath, "--input", input})
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 
 	var buf strings.Builder
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := buf.String()
 
 	if err != nil {
@@ -102,11 +102,11 @@ sink:
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 	err := RunTransformTest([]string{"--flow", flowPath, "--input", inputPath})
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 
 	var buf strings.Builder
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := buf.String()
 
 	if err != nil {
@@ -153,11 +153,11 @@ sink:
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 	err := RunTransformTest([]string{"--flow", flowPath, "--input", inputPath})
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 
 	var buf strings.Builder
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := buf.String()
 
 	if err != nil {
@@ -336,11 +336,11 @@ sink:
 		"--flow=" + flowPath,
 		"--input=" + `{"data":{"value":"test"}}`,
 	})
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 
 	var buf strings.Builder
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := buf.String()
 
 	if err != nil {

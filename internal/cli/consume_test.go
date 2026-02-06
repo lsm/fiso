@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +18,7 @@ func TestRunConsume_ConfigLoading(t *testing.T) {
 	// Save current working directory
 	origWd, _ := os.Getwd()
 	defer func() {
-		os.Chdir(origWd)
+		_ = os.Chdir(origWd)
 	}()
 
 	t.Run("config from fiso/flows when available", func(t *testing.T) {
@@ -41,7 +43,7 @@ source:
 			t.Fatalf("Failed to write flow file: %v", err)
 		}
 
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		// Test that loadKafkaConfig picks up the custom brokers
 		cfg, err := loadKafkaConfig("test-topic")
@@ -59,7 +61,7 @@ source:
 	t.Run("config defaults to localhost when fiso/flows missing", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		// Don't create fiso/flows directory
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -110,7 +112,7 @@ source:
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				// Clean and recreate flow dir for each test
-				os.RemoveAll(flowDir)
+				_ = os.RemoveAll(flowDir)
 				if err := os.MkdirAll(flowDir, 0755); err != nil {
 					t.Fatalf("Failed to create flow directory: %v", err)
 				}
@@ -133,7 +135,7 @@ source:
 				}
 
 				// Change to tmpDir so loadKafkaConfig finds the flow files
-				os.Chdir(tmpDir)
+				_ = os.Chdir(tmpDir)
 
 				cfg, err := loadKafkaConfig("test-topic")
 				if err != nil {
@@ -174,7 +176,7 @@ source:
 			t.Fatalf("Failed to write flow file: %v", err)
 		}
 
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		// RunConsume should try to connect and fail gracefully when Kafka is unavailable
 		err := RunConsume([]string{"--topic", "test-topic", "--max-messages", "1"})
@@ -473,13 +475,13 @@ func TestLoadKafkaConfig(t *testing.T) {
 	// Save current working directory to restore later
 	origWd, _ := os.Getwd()
 	defer func() {
-		os.Chdir(origWd)
+		_ = os.Chdir(origWd)
 	}()
 
 	t.Run("non-existent flow directory returns default", func(t *testing.T) {
 		// Change to a temp directory where fiso/flows doesn't exist
 		tmpDir := t.TempDir()
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -504,7 +506,7 @@ func TestLoadKafkaConfig(t *testing.T) {
 		if err := os.MkdirAll(flowDir, 0755); err != nil {
 			t.Fatalf("Failed to create flow directory: %v", err)
 		}
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -540,7 +542,7 @@ source:
 			t.Fatalf("Failed to write flow file: %v", err)
 		}
 
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -589,7 +591,7 @@ source:
 			t.Fatalf("Failed to write second flow file: %v", err)
 		}
 
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -621,7 +623,7 @@ source:
 			t.Fatalf("Failed to write flow file: %v", err)
 		}
 
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -650,7 +652,7 @@ source:
 			t.Fatalf("Failed to write json file: %v", err)
 		}
 
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -686,7 +688,7 @@ source:
 			t.Fatalf("Failed to write flow file: %v", err)
 		}
 
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -720,7 +722,7 @@ source:
 			t.Fatalf("Failed to write flow file: %v", err)
 		}
 
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -746,7 +748,7 @@ source:
 			t.Fatalf("Failed to write invalid yaml: %v", err)
 		}
 
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		// Should return default config instead of error
 		cfg, err := loadKafkaConfig("test-topic")
@@ -783,7 +785,7 @@ source:
 			t.Fatalf("Failed to write flow file: %v", err)
 		}
 
-		os.Chdir(tmpDir)
+		_ = os.Chdir(tmpDir)
 
 		cfg, err := loadKafkaConfig("test-topic")
 		if err != nil {
@@ -887,9 +889,9 @@ func TestPrintMessage(t *testing.T) {
 
 			printMessage(tt.record)
 
-			w.Close()
+			_ = w.Close()
 			os.Stdout = oldStdout
-			r.Close()
+			_ = r.Close()
 		})
 	}
 }
@@ -1181,4 +1183,309 @@ func equalStringSlices(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// mockKafkaConsumer implements kafkaConsumer for testing
+type mockKafkaConsumer struct {
+	mu          sync.Mutex
+	records     []*kgo.Record
+	fetchCount  int
+	commitError error
+	closed      bool
+	maxFetches  int
+	fetchIndex  int
+}
+
+func (m *mockKafkaConsumer) PollFetches(ctx context.Context) kgo.Fetches {
+	if ctx.Err() != nil {
+		return kgo.Fetches{}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.fetchCount++
+
+	// If we've returned all records, return empty fetches
+	if m.fetchIndex >= len(m.records) || (m.maxFetches > 0 && m.fetchCount > m.maxFetches) {
+		return kgo.Fetches{}
+	}
+
+	// Return next record
+	record := m.records[m.fetchIndex]
+	m.fetchIndex++
+
+	return kgo.Fetches{
+		{
+			Topics: []kgo.FetchTopic{
+				{
+					Topic: record.Topic,
+					Partitions: []kgo.FetchPartition{
+						{
+							Partition: record.Partition,
+							Records:   []*kgo.Record{record},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func (m *mockKafkaConsumer) getFetchCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.fetchCount
+}
+
+func (m *mockKafkaConsumer) MarkCommitRecords(rs ...*kgo.Record) {
+	// no-op for mock
+}
+
+func (m *mockKafkaConsumer) CommitMarkedOffsets(ctx context.Context) error {
+	return m.commitError
+}
+
+func (m *mockKafkaConsumer) Close() {
+	m.closed = true
+}
+
+func TestConsumeBatch_WithMock(t *testing.T) {
+	tests := []struct {
+		name           string
+		records        []*kgo.Record
+		maxMessages    int
+		commitError    error
+		expectError    bool
+		expectConsumed int
+	}{
+		{
+			name: "consume single message",
+			records: []*kgo.Record{
+				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k"), Value: []byte(`{"data":"test"}`)},
+			},
+			maxMessages:    1,
+			expectConsumed: 1,
+		},
+		{
+			name: "consume multiple messages",
+			records: []*kgo.Record{
+				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k1"), Value: []byte(`{"data":"test1"}`)},
+				{Topic: "test", Partition: 0, Offset: 1, Key: []byte("k2"), Value: []byte(`{"data":"test2"}`)},
+				{Topic: "test", Partition: 0, Offset: 2, Key: []byte("k3"), Value: []byte(`{"data":"test3"}`)},
+			},
+			maxMessages:    3,
+			expectConsumed: 3,
+		},
+		{
+			name: "max messages limits consumption",
+			records: []*kgo.Record{
+				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k1"), Value: []byte(`{"data":"test1"}`)},
+				{Topic: "test", Partition: 0, Offset: 1, Key: []byte("k2"), Value: []byte(`{"data":"test2"}`)},
+				{Topic: "test", Partition: 0, Offset: 2, Key: []byte("k3"), Value: []byte(`{"data":"test3"}`)},
+			},
+			maxMessages:    2,
+			expectConsumed: 2,
+		},
+		{
+			name:           "no messages available",
+			records:        []*kgo.Record{},
+			maxMessages:    5,
+			expectConsumed: 0,
+		},
+		{
+			name: "commit error logged but continues",
+			records: []*kgo.Record{
+				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k"), Value: []byte(`{"data":"test"}`)},
+			},
+			maxMessages:    1,
+			commitError:    fmt.Errorf("commit failed"),
+			expectConsumed: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockKafkaConsumer{
+				records:     tt.records,
+				commitError: tt.commitError,
+				maxFetches:  tt.maxMessages + 5, // Allow some extra fetches
+			}
+
+			// If no records, use cancelled context to exit loop
+			ctx := context.Background()
+			if len(tt.records) == 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 200*time.Millisecond)
+				defer cancel()
+			}
+
+			messageCount := 0
+			err := consumeBatch(ctx, mock, "test-topic", tt.maxMessages, &messageCount)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error but got nil")
+				}
+			} else {
+				// Context timeout is expected for empty records case
+				if err != nil && err != context.DeadlineExceeded {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if messageCount != tt.expectConsumed {
+					t.Errorf("expected %d messages consumed, got %d", tt.expectConsumed, messageCount)
+				}
+			}
+		})
+	}
+}
+
+func TestConsumeFollow_WithMock(t *testing.T) {
+	tests := []struct {
+		name        string
+		records     []*kgo.Record
+		maxFetches  int
+		commitError error
+	}{
+		{
+			name: "consume messages until context cancelled",
+			records: []*kgo.Record{
+				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k1"), Value: []byte(`{"data":"test1"}`)},
+				{Topic: "test", Partition: 0, Offset: 1, Key: []byte("k2"), Value: []byte(`{"data":"test2"}`)},
+			},
+			maxFetches: 5,
+		},
+		{
+			name: "handles commit error",
+			records: []*kgo.Record{
+				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k"), Value: []byte(`{"data":"test"}`)},
+			},
+			maxFetches:  3,
+			commitError: fmt.Errorf("commit failed"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockKafkaConsumer{
+				records:     tt.records,
+				commitError: tt.commitError,
+				maxFetches:  tt.maxFetches,
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+
+			err := consumeFollow(ctx, mock, "test-topic")
+
+			// Context timeout or cancellation is expected
+			if err != nil && err != context.DeadlineExceeded && err != context.Canceled {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			if mock.fetchCount == 0 {
+				t.Error("expected at least one fetch call")
+			}
+		})
+	}
+}
+
+func TestRunConsume_WithMockClient(t *testing.T) {
+	// Save original and restore after test
+	origCreateClient := createKafkaClientFunc
+	defer func() { createKafkaClientFunc = origCreateClient }()
+
+	t.Run("successful batch consume", func(t *testing.T) {
+		mock := &mockKafkaConsumer{
+			records: []*kgo.Record{
+				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k1"), Value: []byte(`{"order":"123"}`)},
+			},
+			maxFetches: 5,
+		}
+		createKafkaClientFunc = func(cfg kafka.Config) (kafkaConsumer, error) {
+			return mock, nil
+		}
+
+		// Use a timeout context since we have limited records
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+		}()
+
+		err := RunConsume([]string{"--topic", "test", "--max-messages", "1"})
+		if err != nil && !strings.Contains(err.Error(), "context") {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if !mock.closed {
+			t.Error("expected client to be closed")
+		}
+	})
+
+	t.Run("client creation error", func(t *testing.T) {
+		createKafkaClientFunc = func(cfg kafka.Config) (kafkaConsumer, error) {
+			return nil, fmt.Errorf("cannot connect to kafka")
+		}
+
+		err := RunConsume([]string{"--topic", "test", "--max-messages", "1"})
+		if err == nil {
+			t.Error("expected error but got nil")
+		}
+		if !strings.Contains(err.Error(), "create kafka client") {
+			t.Errorf("expected 'create kafka client' in error, got: %v", err)
+		}
+	})
+
+	t.Run("from-beginning flag", func(t *testing.T) {
+		var capturedCfg kafka.Config
+		mock := &mockKafkaConsumer{
+			records:    []*kgo.Record{},
+			maxFetches: 2,
+		}
+		createKafkaClientFunc = func(cfg kafka.Config) (kafkaConsumer, error) {
+			capturedCfg = cfg
+			return mock, nil
+		}
+
+		// Run with timeout to prevent hanging
+		done := make(chan error, 1)
+		go func() {
+			done <- RunConsume([]string{"--topic", "test", "--from-beginning", "--max-messages", "1"})
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(1 * time.Second):
+		}
+
+		if capturedCfg.StartOffset != "earliest" {
+			t.Errorf("expected StartOffset='earliest', got %q", capturedCfg.StartOffset)
+		}
+	})
+
+	t.Run("follow mode", func(t *testing.T) {
+		mock := &mockKafkaConsumer{
+			records: []*kgo.Record{
+				{Topic: "test", Partition: 0, Offset: 0, Key: []byte("k1"), Value: []byte(`{"data":"test"}`)},
+			},
+			maxFetches: 3,
+		}
+		createKafkaClientFunc = func(cfg kafka.Config) (kafkaConsumer, error) {
+			return mock, nil
+		}
+
+		// Run with timeout
+		done := make(chan error, 1)
+		go func() {
+			done <- RunConsume([]string{"--topic", "test", "--follow"})
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
+		}
+
+		if mock.getFetchCount() == 0 {
+			t.Error("expected fetch calls in follow mode")
+		}
+	})
 }
