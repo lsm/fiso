@@ -24,6 +24,9 @@ func TestNewMetrics_RegistersWithoutPanic(t *testing.T) {
 	if m.AuthRefreshTotal == nil {
 		t.Error("AuthRefreshTotal not initialized")
 	}
+	if m.RateLimitedTotal == nil {
+		t.Error("RateLimitedTotal not initialized")
+	}
 }
 
 func TestMetrics_IncrementCounters(t *testing.T) {
@@ -33,6 +36,7 @@ func TestMetrics_IncrementCounters(t *testing.T) {
 	m.RequestsTotal.WithLabelValues("crm", "GET", "200", "sync").Inc()
 	m.RetriesTotal.WithLabelValues("crm", "1").Inc()
 	m.AuthRefreshTotal.WithLabelValues("crm", "success").Inc()
+	m.RateLimitedTotal.WithLabelValues("crm").Inc()
 	m.CircuitState.WithLabelValues("crm").Set(0)
 	m.RequestDuration.WithLabelValues("crm", "GET").Observe(0.5)
 
@@ -41,7 +45,7 @@ func TestMetrics_IncrementCounters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(mfs) != 5 {
-		t.Errorf("expected 5 metric families, got %d", len(mfs))
+	if len(mfs) != 6 {
+		t.Errorf("expected 6 metric families, got %d", len(mfs))
 	}
 }

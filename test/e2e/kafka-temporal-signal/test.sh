@@ -38,7 +38,7 @@ echo "Workflow started, ready for signals."
 
 echo ""
 echo "Producing test message to Kafka..."
-echo '{"order_id":"e2e-signal-123","status":"shipped","updated_by":"e2e-test"}' | \
+echo '{"data":{"order_id":"e2e-signal-123","status":"shipped","updated_by":"e2e-test"}}' | \
     docker compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh \
     --bootstrap-server localhost:9092 \
     --topic order-signal-events

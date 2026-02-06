@@ -3,11 +3,13 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
-	"fmt"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
@@ -370,4 +372,359 @@ func TestKafkaHandler_StaticHeaders(t *testing.T) {
 	if capturedHeaders["X-Request-ID"] != "req-123" {
 		t.Errorf("expected HTTP header X-Request-ID=req-123, got %s", capturedHeaders["X-Request-ID"])
 	}
+}
+
+func TestKafkaHandler_EmptyTargetName(t *testing.T) {
+	publisher := &mockPublisher{}
+	store := link.NewTargetStore([]link.LinkTarget{})
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+
+	req := httptest.NewRequest("POST", "/link/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty target name, got %d", w.Code)
+	}
+}
+
+func TestKafkaHandler_InvalidJSON(t *testing.T) {
+	publisher := &mockPublisher{}
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "test-kafka",
+			Protocol: "kafka",
+			Kafka: &link.KafkaConfig{
+				Topic: "test-topic",
+				Key: link.KeyStrategy{
+					Type:  "payload",
+					Field: "user_id",
+				},
+			},
+		},
+	})
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+
+	req := httptest.NewRequest("POST", "/link/test-kafka", bytes.NewReader([]byte(`invalid json`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid JSON, got %d", w.Code)
+	}
+}
+
+func TestKafkaHandler_UnknownKeyType(t *testing.T) {
+	publisher := &mockPublisher{}
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "test-kafka",
+			Protocol: "kafka",
+			Kafka: &link.KafkaConfig{
+				Topic: "test-topic",
+				Key: link.KeyStrategy{
+					Type: "unknown-type",
+				},
+			},
+		},
+	})
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+
+	req := httptest.NewRequest("POST", "/link/test-kafka", bytes.NewReader([]byte(`{"test":"data"}`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for unknown key type, got %d", w.Code)
+	}
+}
+
+func TestKafkaHandler_ContextCancellation(t *testing.T) {
+	// Test context cancellation during retry
+	publisher := &mockPublisher{
+		publishFunc: func(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
+			// Simulate slow operation that will be cancelled
+			time.Sleep(50 * time.Millisecond)
+			return fmt.Errorf("publish failed")
+		},
+	}
+
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "cancel-test",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Topic: "cancel-topic"},
+			Retry: link.RetryConfig{
+				MaxAttempts: 3,
+			},
+		},
+	})
+
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+
+	// Create request with short timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	req := httptest.NewRequest("POST", "/link/cancel-test", bytes.NewReader([]byte(`{"test":"data"}`)))
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Should fail due to context timeout
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502 for context timeout, got %d", w.Code)
+	}
+}
+
+func TestKafkaHandler_WithMetrics(t *testing.T) {
+	// Test metrics recording on success
+	publisher := &mockPublisher{}
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "metrics-test",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Topic: "metrics-topic"},
+		},
+	})
+
+	reg := prometheus.NewRegistry()
+	metrics := link.NewMetrics(reg)
+
+	handler := NewKafkaHandler(publisher, store, nil, nil, metrics, nil)
+
+	req := httptest.NewRequest("POST", "/link/metrics-test", bytes.NewReader([]byte(`{"test":"data"}`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestKafkaHandler_CircuitBreakerWithMetrics(t *testing.T) {
+	// Test circuit breaker metrics update when open
+	publisher := &mockPublisher{}
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "cb-test",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Topic: "cb-topic"},
+		},
+	})
+
+	breakers := make(map[string]*circuitbreaker.Breaker)
+	breakers["cb-test"] = circuitbreaker.New(circuitbreaker.Config{
+		FailureThreshold: 1,
+		SuccessThreshold: 1,
+		ResetTimeout:     1000 * time.Millisecond,
+	})
+	// Trip the breaker
+	breakers["cb-test"].RecordFailure()
+
+	reg := prometheus.NewRegistry()
+	metrics := link.NewMetrics(reg)
+
+	handler := NewKafkaHandler(publisher, store, breakers, nil, metrics, nil)
+
+	req := httptest.NewRequest("POST", "/link/cb-test", bytes.NewReader([]byte(`{"test":"data"}`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Code)
+	}
+}
+
+func TestKafkaHandler_RateLimitWithMetrics(t *testing.T) {
+	// Test rate limit metrics update
+	publisher := &mockPublisher{}
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "rl-test",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Topic: "rl-topic"},
+		},
+	})
+
+	rateLimiter := ratelimit.New()
+	rateLimiter.Set("rl-test", 0.0001, 1) // Very low rate
+	rateLimiter.Allow("rl-test")          // Consume the burst
+
+	reg := prometheus.NewRegistry()
+	metrics := link.NewMetrics(reg)
+
+	handler := NewKafkaHandler(publisher, store, nil, rateLimiter, metrics, nil)
+
+	req := httptest.NewRequest("POST", "/link/rl-test", bytes.NewReader([]byte(`{"test":"data"}`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", w.Code)
+	}
+}
+
+func TestKafkaHandler_ReadBodyError(t *testing.T) {
+	// Test read body error
+	publisher := &mockPublisher{}
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "body-error-test",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Topic: "body-error-topic"},
+		},
+	})
+
+	reg := prometheus.NewRegistry()
+	metrics := link.NewMetrics(reg)
+	handler := NewKafkaHandler(publisher, store, nil, nil, metrics, nil)
+
+	// Create a reader that errors
+	req := httptest.NewRequest("POST", "/link/body-error-test", &errorReader{})
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for body read error, got %d", w.Code)
+	}
+}
+
+func TestNormalizeHeaderKey(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"X-Request-Id", "X-Request-ID"},
+		{"X-Correlation-Id", "X-Correlation-ID"},
+		{"X-Trace-Id", "X-Trace-ID"},
+		{"X-Span-Id", "X-Span-ID"},
+		{"X-Session-Id", "X-Session-ID"},
+		{"X-User-Id", "X-User-ID"},
+		{"X-Client-Id", "X-Client-ID"},
+		{"X-Api-Key", "X-API-Key"},
+		{"X-Forwarded-For", "X-Forwarded-For"},
+		{"X-Forwarded-Proto", "X-Forwarded-Proto"},
+		{"X-Forwarded-Host", "X-Forwarded-Host"},
+		{"Content-Type", "Content-Type"},       // Not in map, unchanged
+		{"X-Custom-Header", "X-Custom-Header"}, // Not in map, unchanged
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := normalizeHeaderKey(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeHeaderKey(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKafkaHandler_DefaultTopic(t *testing.T) {
+	// Test default topic when Kafka config is nil
+	var capturedTopic string
+	publisher := &mockPublisher{
+		publishFunc: func(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
+			capturedTopic = topic
+			return nil
+		},
+	}
+
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "no-config",
+			Protocol: "kafka",
+			Kafka:    nil, // No Kafka config
+		},
+	})
+
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+
+	req := httptest.NewRequest("POST", "/link/no-config", bytes.NewReader([]byte(`{"test":"data"}`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if capturedTopic != "default-topic" {
+		t.Errorf("expected default-topic, got %s", capturedTopic)
+	}
+}
+
+func TestKafkaHandler_CircuitBreakerRecordsSuccess(t *testing.T) {
+	// Test circuit breaker records success
+	publisher := &mockPublisher{}
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "cb-success",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Topic: "cb-success-topic"},
+		},
+	})
+
+	breakers := make(map[string]*circuitbreaker.Breaker)
+	breakers["cb-success"] = circuitbreaker.New(circuitbreaker.Config{
+		FailureThreshold: 5,
+		SuccessThreshold: 1,
+		ResetTimeout:     1000 * time.Millisecond,
+	})
+
+	handler := NewKafkaHandler(publisher, store, breakers, nil, nil, nil)
+
+	req := httptest.NewRequest("POST", "/link/cb-success", bytes.NewReader([]byte(`{"test":"data"}`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestKafkaHandler_PublishFailureWithMetrics(t *testing.T) {
+	// Test that metrics are recorded on publish failure
+	publisher := &mockPublisher{
+		publishFunc: func(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
+			return fmt.Errorf("publish failed")
+		},
+	}
+
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "fail-metrics",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Topic: "fail-metrics-topic"},
+			Retry: link.RetryConfig{
+				MaxAttempts: 2,
+			},
+		},
+	})
+
+	breakers := make(map[string]*circuitbreaker.Breaker)
+	breakers["fail-metrics"] = circuitbreaker.New(circuitbreaker.Config{
+		FailureThreshold: 5,
+		SuccessThreshold: 1,
+		ResetTimeout:     1000 * time.Millisecond,
+	})
+
+	reg := prometheus.NewRegistry()
+	metrics := link.NewMetrics(reg)
+
+	handler := NewKafkaHandler(publisher, store, breakers, nil, metrics, nil)
+
+	req := httptest.NewRequest("POST", "/link/fail-metrics", bytes.NewReader([]byte(`{"test":"data"}`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", w.Code)
+	}
+}
+
+// errorReader is a reader that always returns an error.
+type errorReader struct{}
+
+func (e *errorReader) Read(p []byte) (n int, err error) {
+	return 0, fmt.Errorf("read error")
 }

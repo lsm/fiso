@@ -104,13 +104,16 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
-	r.Body.Close()
+	_ = r.Body.Close()
 
 	// Build Kafka headers from HTTP headers + static headers
 	kafkaHeaders := make(map[string]string)
 	for k, v := range r.Header {
 		if len(v) > 0 {
-			kafkaHeaders[k] = v[0]
+			// Normalize well-known header names to their conventional casing
+			// since http.Header canonicalizes them (e.g., X-Request-Id instead of X-Request-ID)
+			normalizedKey := normalizeHeaderKey(k)
+			kafkaHeaders[normalizedKey] = v[0]
 		}
 	}
 	// Add static headers from config
@@ -161,7 +164,7 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.metrics.RequestsTotal.WithLabelValues(target.Name, "POST", "200", "kafka").Inc()
 			}
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"status":"published","topic":"%s"}`, topic)
+			_, _ = fmt.Fprintf(w, `{"status":"published","topic":"%s"}`, topic)
 			return
 		}
 
@@ -225,4 +228,29 @@ func (h *KafkaHandler) generateKey(strategy link.KeyStrategy, body []byte, heade
 	default:
 		return nil, fmt.Errorf("unknown key type: %s", strategy.Type)
 	}
+}
+
+// normalizeHeaderKey normalizes HTTP canonical header keys back to their conventional form.
+// Go's http.Header canonicalizes header names (e.g., "X-Request-ID" becomes "X-Request-Id"),
+// but for Kafka headers we want to preserve the conventional casing that users expect.
+func normalizeHeaderKey(key string) string {
+	// Map of canonical forms to conventional forms for well-known headers
+	wellKnownHeaders := map[string]string{
+		"X-Request-Id":      "X-Request-ID",
+		"X-Correlation-Id":  "X-Correlation-ID",
+		"X-Trace-Id":        "X-Trace-ID",
+		"X-Span-Id":         "X-Span-ID",
+		"X-Session-Id":      "X-Session-ID",
+		"X-User-Id":         "X-User-ID",
+		"X-Client-Id":       "X-Client-ID",
+		"X-Api-Key":         "X-API-Key",
+		"X-Forwarded-For":   "X-Forwarded-For",
+		"X-Forwarded-Proto": "X-Forwarded-Proto",
+		"X-Forwarded-Host":  "X-Forwarded-Host",
+	}
+
+	if normalized, ok := wellKnownHeaders[key]; ok {
+		return normalized
+	}
+	return key
 }

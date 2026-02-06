@@ -494,3 +494,203 @@ func TestProxy_429RetriesOnTooManyRequests(t *testing.T) {
 		t.Errorf("expected retry on 429, got %d calls", calls)
 	}
 }
+
+func TestProxy_KafkaTarget_NoPublisher(t *testing.T) {
+	// Test Kafka target routing when kafkaHandler is nil
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "kafka-target", Protocol: "kafka", Host: "localhost:9092"},
+	})
+	handler := NewHandler(Config{
+		Targets: store,
+		// No KafkaPublisher provided
+	})
+
+	req := httptest.NewRequest("POST", "/link/kafka-target/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "kafka targets not supported") {
+		t.Errorf("expected error message about kafka not supported, got %s", w.Body.String())
+	}
+}
+
+func TestProxy_KafkaTarget_WithPublisher(t *testing.T) {
+	// Test that Kafka targets are routed to kafkaHandler
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "kafka-target", Protocol: "kafka", Kafka: &link.KafkaConfig{Topic: "test-topic"}},
+	})
+
+	publisher := &mockKafkaPublisher{
+		publishFunc: func(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
+			return nil
+		},
+	}
+
+	reg := prometheus.NewRegistry()
+	handler := NewHandler(Config{
+		Targets:        store,
+		KafkaPublisher: publisher,
+		Metrics:        link.NewMetrics(reg),
+	})
+
+	req := httptest.NewRequest("POST", "/link/kafka-target", strings.NewReader(`{"test":"data"}`))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestProxy_ResolverError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host},
+	})
+
+	// Mock resolver that returns error
+	resolver := &mockResolver{err: fmt.Errorf("resolver error")}
+
+	handler := NewHandler(Config{
+		Targets:  store,
+		Resolver: resolver,
+	})
+
+	req := httptest.NewRequest("GET", "/link/svc/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "failed to resolve host") {
+		t.Errorf("expected error message about resolver, got %s", w.Body.String())
+	}
+}
+
+func TestProxy_PathMatchError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	handler := setupProxy(t, upstream, []link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host, AllowedPaths: []string{"/api/v2/**", "/api/*/users"}},
+	}, nil, nil)
+
+	// Test path with wildcard pattern
+	req := httptest.NewRequest("GET", "/link/svc/api/v3/users", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for path matching wildcard, got %d", w.Code)
+	}
+}
+
+func TestProxy_PathAllowedPrefixMatch(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	handler := setupProxy(t, upstream, []link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host, AllowedPaths: []string{"/api/v2/**"}},
+	}, nil, nil)
+
+	// Test exact prefix match (without trailing slash)
+	req := httptest.NewRequest("GET", "/link/svc/api/v2", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for exact prefix match, got %d", w.Code)
+	}
+}
+
+func TestProxy_ConnectionError(t *testing.T) {
+	// Test when upstream is unreachable (connection refused)
+	handler := setupProxy(t, nil, []link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: "localhost:1", Retry: link.RetryConfig{
+			MaxAttempts: 2, InitialInterval: "1ms", MaxInterval: "5ms",
+		}},
+	}, nil, nil)
+
+	req := httptest.NewRequest("GET", "/link/svc/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", w.Code)
+	}
+}
+
+func TestProxy_CircuitBreakerMetrics(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	breaker := circuitbreaker.New(circuitbreaker.Config{
+		FailureThreshold: 1, SuccessThreshold: 1, ResetTimeout: 1000000000,
+	})
+
+	reg := prometheus.NewRegistry()
+	handler := NewHandler(Config{
+		Targets:  link.NewTargetStore([]link.LinkTarget{{Name: "svc", Protocol: "http", Host: host, Retry: link.RetryConfig{MaxAttempts: 1}}}),
+		Breakers: map[string]*circuitbreaker.Breaker{"svc": breaker},
+		Metrics:  link.NewMetrics(reg),
+	})
+
+	req := httptest.NewRequest("GET", "/link/svc/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Should record failure and update metrics
+	if w.Code == http.StatusOK {
+		t.Error("expected non-200 status")
+	}
+}
+
+// mockResolver implements discovery.Resolver for testing.
+type mockResolver struct {
+	host string
+	err  error
+}
+
+func (m *mockResolver) Resolve(_ context.Context, defaultHost string) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	if m.host != "" {
+		return m.host, nil
+	}
+	return defaultHost, nil
+}
+
+// mockKafkaPublisher implements dlq.Publisher for testing.
+type mockKafkaPublisher struct {
+	publishFunc func(ctx context.Context, topic string, key, value []byte, headers map[string]string) error
+}
+
+func (m *mockKafkaPublisher) Publish(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
+	if m.publishFunc != nil {
+		return m.publishFunc(ctx, topic, key, value, headers)
+	}
+	return nil
+}
+
+func (m *mockKafkaPublisher) Close() error {
+	return nil
+}

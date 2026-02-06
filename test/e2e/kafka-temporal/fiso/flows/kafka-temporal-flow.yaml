@@ -12,7 +12,7 @@ transform:
     order_id: data.order_id
     total: data.amount
     customer_name: data.customer
-    status: "pending"
+    status: '"pending"'
 cloudevents:
   type: order.created
   source: fiso-e2e

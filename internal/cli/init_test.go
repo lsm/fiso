@@ -1008,3 +1008,37 @@ func TestRunInit_HelpWithFlags(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestPromptChoices(t *testing.T) {
+	// Test that promptChoices calls promptForChoices with all true flags
+	input := "1\n1\n1\n1\n1\n"
+	p := newPrompter(strings.NewReader(input), os.Stdout)
+
+	cfg := &initConfig{}
+	promptChoices(p, cfg)
+
+	// Verify that the config was populated (at minimum, defaults should be set)
+	// Since promptChoices calls promptForChoices with all true flags,
+	// the user will be prompted for all options
+	// The test verifies the function doesn't panic and completes
+	if cfg.Source == "" {
+		t.Error("expected Source to be set after promptChoices")
+	}
+}
+
+func TestPromptChoices_WithDefaults(t *testing.T) {
+	// Test promptChoices with default selections (just press enter)
+	input := "\n\n\n\n\n"
+	p := newPrompter(strings.NewReader(input), os.Stdout)
+
+	cfg := &initConfig{}
+	promptChoices(p, cfg)
+
+	// Verify defaults are applied
+	if cfg.Source == "" {
+		t.Error("expected Source to be set to default after promptChoices")
+	}
+	if cfg.Sink == "" {
+		t.Error("expected Sink to be set to default after promptChoices")
+	}
+}

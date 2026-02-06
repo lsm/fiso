@@ -10,39 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/twmb/franz-go/pkg/kgo"
 )
-
-// mockProducer is a test double for kafka.Producer.
-type mockProducer struct {
-	publishFunc func(ctx context.Context, topic string, key, value []byte, headers map[string]string) error
-	closeFunc   func() error
-}
-
-func (m *mockProducer) ProduceSync(ctx context.Context, rs ...*kgo.Record) kgo.ProduceResults {
-	if m.publishFunc == nil {
-		return kgo.ProduceResults{}
-	}
-	// Simulate producing each record
-	for _, r := range rs {
-		if err := m.publishFunc(ctx, r.Topic, r.Key, r.Value, nil); err != nil {
-			// Return a result with error
-			return kgo.ProduceResults{kgo.ProduceResult{Err: err}}
-		}
-	}
-	return kgo.ProduceResults{}
-}
-
-func (m *mockProducer) Close() {
-	if m.closeFunc != nil {
-		m.closeFunc()
-	}
-}
-
-// mockPublisherFactory allows us to inject a mock publisher for testing.
-// In production, this would be set to kafka.NewPublisher.
-var mockPublisherFactory func(brokers []string) (*mockProducer, error)
 
 func TestRunProduce_Help(t *testing.T) {
 	if err := RunProduce([]string{"-h"}); err != nil {
@@ -1321,6 +1289,36 @@ func TestCountFlagParsingDetailed(t *testing.T) {
 	}
 }
 
+// mockKafkaPublisher is a mock implementation for testing
+type mockKafkaPublisher struct {
+	publishedMessages []mockPublishedMessage
+	publishError      error
+}
+
+type mockPublishedMessage struct {
+	topic   string
+	key     []byte
+	value   []byte
+	headers map[string]string
+}
+
+func (m *mockKafkaPublisher) Publish(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
+	if m.publishError != nil {
+		return m.publishError
+	}
+	m.publishedMessages = append(m.publishedMessages, mockPublishedMessage{
+		topic:   topic,
+		key:     key,
+		value:   value,
+		headers: headers,
+	})
+	return nil
+}
+
+func (m *mockKafkaPublisher) Close() error {
+	return nil
+}
+
 // TestFileVsJsonMutualExclusivity tests that --file and --json are mutually exclusive
 func TestFileVsJsonMutualExclusivity(t *testing.T) {
 	tests := []struct {
@@ -1380,5 +1378,643 @@ func TestFileVsJsonMutualExclusivity(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestProduceInlineJSON_Direct tests produceInlineJSON directly using the publisher interface
+func TestProduceInlineJSON_Direct(t *testing.T) {
+	tests := []struct {
+		name          string
+		jsonStr       string
+		count         int
+		rate          time.Duration
+		publishError  error
+		expectError   bool
+		errorContains string
+		expectCount   int
+	}{
+		{
+			name:        "valid single event",
+			jsonStr:     `{"order_id":"123"}`,
+			count:       1,
+			rate:        0,
+			expectError: false,
+			expectCount: 1,
+		},
+		{
+			name:        "valid multiple events",
+			jsonStr:     `{"order_id":"456"}`,
+			count:       5,
+			rate:        0,
+			expectError: false,
+			expectCount: 5,
+		},
+		{
+			name:          "invalid json",
+			jsonStr:       `{invalid}`,
+			count:         1,
+			rate:          0,
+			expectError:   true,
+			errorContains: "invalid json",
+			expectCount:   0,
+		},
+		{
+			name:        "valid with rate limiting",
+			jsonStr:     `{"test":"data"}`,
+			count:       2,
+			rate:        1 * time.Millisecond,
+			expectError: false,
+			expectCount: 2,
+		},
+		{
+			name:          "publish error",
+			jsonStr:       `{"order_id":"789"}`,
+			count:         3,
+			rate:          0,
+			publishError:  fmt.Errorf("kafka connection failed"),
+			expectError:   true,
+			errorContains: "publish event",
+			expectCount:   0,
+		},
+		{
+			name:        "json array",
+			jsonStr:     `[{"id":1},{"id":2}]`,
+			count:       1,
+			rate:        0,
+			expectError: false,
+			expectCount: 1,
+		},
+		{
+			name:        "json number",
+			jsonStr:     `42`,
+			count:       1,
+			rate:        0,
+			expectError: false,
+			expectCount: 1,
+		},
+		{
+			name:          "empty json string",
+			jsonStr:       ``,
+			count:         1,
+			rate:          0,
+			expectError:   true,
+			errorContains: "invalid json",
+			expectCount:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockKafkaPublisher{
+				publishError: tt.publishError,
+			}
+			ctx := context.Background()
+
+			err := produceInlineJSON(ctx, mock, "test-topic", tt.jsonStr, tt.count, tt.rate)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error but got nil")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("expected error to contain %q, got: %v", tt.errorContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if len(mock.publishedMessages) != tt.expectCount {
+					t.Errorf("expected %d messages, got %d", tt.expectCount, len(mock.publishedMessages))
+				}
+			}
+		})
+	}
+}
+
+// TestProduceFromFile_Direct tests produceFromFile directly using the publisher interface
+func TestProduceFromFile_Direct(t *testing.T) {
+	tests := []struct {
+		name          string
+		content       string
+		count         int
+		rate          time.Duration
+		publishError  error
+		expectError   bool
+		errorContains string
+		expectCount   int
+	}{
+		{
+			name:        "single line file",
+			content:     `{"event":"1"}`,
+			count:       0,
+			rate:        0,
+			expectError: false,
+			expectCount: 1,
+		},
+		{
+			name: "multiple lines file",
+			content: `{"event":"1"}
+{"event":"2"}
+{"event":"3"}`,
+			count:       0,
+			rate:        0,
+			expectError: false,
+			expectCount: 3,
+		},
+		{
+			name: "with count limit",
+			content: `{"event":"1"}
+{"event":"2"}
+{"event":"3"}
+{"event":"4"}`,
+			count:       2,
+			rate:        0,
+			expectError: false,
+			expectCount: 2,
+		},
+		{
+			name: "with rate limiting",
+			content: `{"event":"1"}
+{"event":"2"}`,
+			count:       0,
+			rate:        1 * time.Millisecond,
+			expectError: false,
+			expectCount: 2,
+		},
+		{
+			name: "skip empty lines",
+			content: `{"event":"1"}
+
+{"event":"2"}`,
+			count:       0,
+			rate:        0,
+			expectError: false,
+			expectCount: 2,
+		},
+		{
+			name:          "publish error",
+			content:       `{"event":"1"}`,
+			count:         0,
+			rate:          0,
+			publishError:  fmt.Errorf("kafka connection failed"),
+			expectError:   true,
+			errorContains: "publish event",
+			expectCount:   0,
+		},
+		{
+			name:          "invalid json in file",
+			content:       `{invalid json}`,
+			count:         0,
+			rate:          0,
+			expectError:   true,
+			errorContains: "invalid json",
+			expectCount:   0,
+		},
+		{
+			name:          "empty file",
+			content:       ``,
+			count:         0,
+			rate:          0,
+			expectError:   true,
+			errorContains: "no valid json",
+			expectCount:   0,
+		},
+		{
+			name: "whitespace only",
+			content: `
+
+`,
+			count:         0,
+			rate:          0,
+			expectError:   true,
+			errorContains: "no valid json",
+			expectCount:   0,
+		},
+		{
+			name: "count exactly matches lines",
+			content: `{"event":"1"}
+{"event":"2"}
+{"event":"3"}`,
+			count:       3,
+			rate:        0,
+			expectError: false,
+			expectCount: 3,
+		},
+		{
+			name: "count exceeds lines",
+			content: `{"event":"1"}
+{"event":"2"}`,
+			count:       10,
+			rate:        0,
+			expectError: false,
+			expectCount: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockKafkaPublisher{
+				publishError: tt.publishError,
+			}
+			ctx := context.Background()
+
+			// Create temp file
+			tmpFile := filepath.Join(t.TempDir(), "test.jsonl")
+			if err := os.WriteFile(tmpFile, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			err := produceFromFile(ctx, mock, "test-topic", tmpFile, tt.count, tt.rate)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error but got nil")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("expected error to contain %q, got: %v", tt.errorContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if len(mock.publishedMessages) != tt.expectCount {
+					t.Errorf("expected %d messages, got %d", tt.expectCount, len(mock.publishedMessages))
+				}
+			}
+		})
+	}
+}
+
+// TestRunProduce_WithMockPublisher tests RunProduce with injected mock publisher
+func TestRunProduce_WithMockPublisher(t *testing.T) {
+	// Save original and restore after test
+	origNewPublisher := newPublisherFunc
+	defer func() { newPublisherFunc = origNewPublisher }()
+
+	tests := []struct {
+		name          string
+		args          []string
+		mockPublisher *mockKafkaPublisher
+		publisherErr  error
+		expectError   bool
+		errorContains string
+		expectCount   int
+	}{
+		{
+			name:          "successful inline json produce",
+			args:          []string{"--topic", "test", "--json", `{"order":"123"}`},
+			mockPublisher: &mockKafkaPublisher{},
+			expectError:   false,
+			expectCount:   1,
+		},
+		{
+			name:          "successful inline json with count",
+			args:          []string{"--topic", "test", "--json", `{"order":"123"}`, "--count", "3"},
+			mockPublisher: &mockKafkaPublisher{},
+			expectError:   false,
+			expectCount:   3,
+		},
+		{
+			name:          "publisher creation error",
+			args:          []string{"--topic", "test", "--json", `{"order":"123"}`},
+			mockPublisher: nil,
+			publisherErr:  fmt.Errorf("cannot connect to kafka"),
+			expectError:   true,
+			errorContains: "create kafka publisher",
+			expectCount:   0,
+		},
+		{
+			name:          "publish error during produce",
+			args:          []string{"--topic", "test", "--json", `{"order":"123"}`},
+			mockPublisher: &mockKafkaPublisher{publishError: fmt.Errorf("write failed")},
+			expectError:   true,
+			errorContains: "publish event",
+			expectCount:   0,
+		},
+		{
+			name:          "inline json with rate",
+			args:          []string{"--topic", "test", "--json", `{"order":"123"}`, "--count", "2", "--rate", "1ms"},
+			mockPublisher: &mockKafkaPublisher{},
+			expectError:   false,
+			expectCount:   2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set up mock publisher factory
+			newPublisherFunc = func(brokers []string) (publisher, error) {
+				if tt.publisherErr != nil {
+					return nil, tt.publisherErr
+				}
+				return tt.mockPublisher, nil
+			}
+
+			// Reset published messages
+			if tt.mockPublisher != nil {
+				tt.mockPublisher.publishedMessages = nil
+			}
+
+			err := RunProduce(tt.args)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error but got nil")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("expected error to contain %q, got: %v", tt.errorContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if tt.mockPublisher != nil && len(tt.mockPublisher.publishedMessages) != tt.expectCount {
+					t.Errorf("expected %d messages, got %d", tt.expectCount, len(tt.mockPublisher.publishedMessages))
+				}
+			}
+		})
+	}
+}
+
+// TestRunProduce_WithFileAndMock tests RunProduce file mode with injected mock publisher
+func TestRunProduce_WithFileAndMock(t *testing.T) {
+	// Save original and restore after test
+	origNewPublisher := newPublisherFunc
+	defer func() { newPublisherFunc = origNewPublisher }()
+
+	tests := []struct {
+		name          string
+		fileContent   string
+		extraArgs     []string
+		mockPublisher *mockKafkaPublisher
+		expectError   bool
+		errorContains string
+		expectCount   int
+	}{
+		{
+			name:          "single line file",
+			fileContent:   `{"event":"1"}`,
+			extraArgs:     []string{},
+			mockPublisher: &mockKafkaPublisher{},
+			expectError:   false,
+			expectCount:   1,
+		},
+		{
+			name: "multiple lines with count",
+			fileContent: `{"event":"1"}
+{"event":"2"}
+{"event":"3"}
+{"event":"4"}`,
+			extraArgs:     []string{"--count", "2"},
+			mockPublisher: &mockKafkaPublisher{},
+			expectError:   false,
+			expectCount:   2,
+		},
+		{
+			name:          "publish error",
+			fileContent:   `{"event":"1"}`,
+			extraArgs:     []string{},
+			mockPublisher: &mockKafkaPublisher{publishError: fmt.Errorf("connection lost")},
+			expectError:   true,
+			errorContains: "publish event",
+			expectCount:   0,
+		},
+		{
+			name:          "invalid json in file",
+			fileContent:   `{invalid json}`,
+			extraArgs:     []string{},
+			mockPublisher: &mockKafkaPublisher{},
+			expectError:   true,
+			errorContains: "invalid json",
+			expectCount:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temp file
+			tmpFile := filepath.Join(t.TempDir(), "test.jsonl")
+			if err := os.WriteFile(tmpFile, []byte(tt.fileContent), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			// Set up mock publisher factory
+			newPublisherFunc = func(brokers []string) (publisher, error) {
+				return tt.mockPublisher, nil
+			}
+
+			// Reset published messages
+			tt.mockPublisher.publishedMessages = nil
+
+			args := append([]string{"--topic", "test", "--file", tmpFile}, tt.extraArgs...)
+			err := RunProduce(args)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error but got nil")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("expected error to contain %q, got: %v", tt.errorContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if len(tt.mockPublisher.publishedMessages) != tt.expectCount {
+					t.Errorf("expected %d messages, got %d", tt.expectCount, len(tt.mockPublisher.publishedMessages))
+				}
+			}
+		})
+	}
+}
+
+// TestRunProduce_CustomBrokersWithMock tests that custom brokers are passed to publisher factory
+func TestRunProduce_CustomBrokersWithMock(t *testing.T) {
+	origNewPublisher := newPublisherFunc
+	defer func() { newPublisherFunc = origNewPublisher }()
+
+	var capturedBrokers []string
+	newPublisherFunc = func(brokers []string) (publisher, error) {
+		capturedBrokers = brokers
+		return &mockKafkaPublisher{}, nil
+	}
+
+	args := []string{
+		"--topic", "test",
+		"--json", `{"event":"1"}`,
+		"--brokers", "broker1:9092,broker2:9092,broker3:9092",
+	}
+
+	err := RunProduce(args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := []string{"broker1:9092", "broker2:9092", "broker3:9092"}
+	if len(capturedBrokers) != len(expected) {
+		t.Fatalf("expected %d brokers, got %d", len(expected), len(capturedBrokers))
+	}
+	for i, got := range capturedBrokers {
+		if got != expected[i] {
+			t.Errorf("broker %d: expected %q, got %q", i, expected[i], got)
+		}
+	}
+}
+
+// TestRunProduce_DefaultBrokersWithMock tests that default brokers are used when not specified
+func TestRunProduce_DefaultBrokersWithMock(t *testing.T) {
+	origNewPublisher := newPublisherFunc
+	defer func() { newPublisherFunc = origNewPublisher }()
+
+	var capturedBrokers []string
+	newPublisherFunc = func(brokers []string) (publisher, error) {
+		capturedBrokers = brokers
+		return &mockKafkaPublisher{}, nil
+	}
+
+	args := []string{"--topic", "test", "--json", `{"event":"1"}`}
+
+	err := RunProduce(args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := []string{"localhost:9092"}
+	if len(capturedBrokers) != len(expected) {
+		t.Fatalf("expected %d brokers, got %d", len(expected), len(capturedBrokers))
+	}
+	if capturedBrokers[0] != expected[0] {
+		t.Errorf("expected broker %q, got %q", expected[0], capturedBrokers[0])
+	}
+}
+
+// TestParseIntFlag_EdgeCases tests edge cases for parseIntFlag
+func TestParseIntFlag_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		flag       string
+		defaultVal int
+		want       int
+		wantErr    bool
+	}{
+		{
+			name:       "flag missing value at end",
+			args:       []string{"--count"},
+			flag:       "--count",
+			defaultVal: 1,
+			want:       0,
+			wantErr:    true,
+		},
+		{
+			name:       "very large valid integer",
+			args:       []string{"--count", "999999"},
+			flag:       "--count",
+			defaultVal: 1,
+			want:       999999,
+			wantErr:    false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseIntFlag(tt.args, tt.flag, tt.defaultVal)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseIntFlag() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("parseIntFlag() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestProduceFromFile_LargeFile tests produceFromFile with a larger file
+func TestProduceFromFile_LargeFile(t *testing.T) {
+	mock := &mockKafkaPublisher{}
+	ctx := context.Background()
+
+	// Create file with 100 lines
+	var lines []string
+	for i := 1; i <= 100; i++ {
+		lines = append(lines, fmt.Sprintf(`{"event_id":%d}`, i))
+	}
+	content := strings.Join(lines, "\n")
+
+	tmpFile := filepath.Join(t.TempDir(), "large.jsonl")
+	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := produceFromFile(ctx, mock, "test-topic", tmpFile, 0, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mock.publishedMessages) != 100 {
+		t.Errorf("expected 100 messages, got %d", len(mock.publishedMessages))
+	}
+}
+
+// TestProduceFromFile_MessageContent tests that message content is preserved correctly
+func TestProduceFromFile_MessageContent(t *testing.T) {
+	mock := &mockKafkaPublisher{}
+	ctx := context.Background()
+
+	content := `{"order_id":"ORD-001","amount":99.99,"customer":"Alice"}
+{"order_id":"ORD-002","amount":150.00,"customer":"Bob"}`
+
+	tmpFile := filepath.Join(t.TempDir(), "orders.jsonl")
+	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := produceFromFile(ctx, mock, "orders-topic", tmpFile, 0, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mock.publishedMessages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(mock.publishedMessages))
+	}
+
+	// Check first message
+	if mock.publishedMessages[0].topic != "orders-topic" {
+		t.Errorf("expected topic 'orders-topic', got %q", mock.publishedMessages[0].topic)
+	}
+	if !strings.Contains(string(mock.publishedMessages[0].value), "ORD-001") {
+		t.Errorf("expected message to contain 'ORD-001', got: %s", string(mock.publishedMessages[0].value))
+	}
+
+	// Check second message
+	if !strings.Contains(string(mock.publishedMessages[1].value), "ORD-002") {
+		t.Errorf("expected message to contain 'ORD-002', got: %s", string(mock.publishedMessages[1].value))
+	}
+}
+
+// TestProduceInlineJSON_MessageContent tests that inline JSON content is preserved correctly
+func TestProduceInlineJSON_MessageContent(t *testing.T) {
+	mock := &mockKafkaPublisher{}
+	ctx := context.Background()
+
+	jsonStr := `{"order_id":"TEST-123","items":[{"sku":"A","qty":2},{"sku":"B","qty":1}]}`
+
+	err := produceInlineJSON(ctx, mock, "orders-topic", jsonStr, 1, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mock.publishedMessages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(mock.publishedMessages))
+	}
+
+	if mock.publishedMessages[0].topic != "orders-topic" {
+		t.Errorf("expected topic 'orders-topic', got %q", mock.publishedMessages[0].topic)
+	}
+
+	// Verify JSON content
+	var result map[string]interface{}
+	if err := json.Unmarshal(mock.publishedMessages[0].value, &result); err != nil {
+		t.Fatalf("failed to parse message value as JSON: %v", err)
+	}
+
+	if result["order_id"] != "TEST-123" {
+		t.Errorf("expected order_id 'TEST-123', got %v", result["order_id"])
 	}
 }
