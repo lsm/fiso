@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lsm/fiso/internal/kafka"
 )
 
 func TestLoadConfig_Valid(t *testing.T) {
@@ -13,6 +15,11 @@ func TestLoadConfig_Valid(t *testing.T) {
 	data := `
 listenAddr: "127.0.0.1:4000"
 metricsAddr: ":9091"
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.infra.svc:9092
 targets:
   - name: crm
     protocol: https
@@ -33,8 +40,6 @@ targets:
       jitter: 0.2
     allowedPaths:
       - /api/v2/**
-asyncBrokers:
-  - kafka.infra.svc:9092
 `
 	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
 		t.Fatal(err)
@@ -59,8 +64,8 @@ asyncBrokers:
 	if cfg.Targets[0].Auth.Type != "bearer" {
 		t.Errorf("expected auth type bearer, got %s", cfg.Targets[0].Auth.Type)
 	}
-	if len(cfg.AsyncBrokers) != 1 {
-		t.Errorf("expected 1 async broker, got %d", len(cfg.AsyncBrokers))
+	if len(cfg.Kafka.Clusters) != 1 {
+		t.Errorf("expected 1 kafka cluster, got %d", len(cfg.Kafka.Clusters))
 	}
 }
 
@@ -466,6 +471,13 @@ targets:
 }
 
 func TestConfig_Validate_KafkaProtocol(t *testing.T) {
+	// Helper to create a config with kafka cluster
+	kafkaGlobal := kafka.KafkaGlobalConfig{
+		Clusters: map[string]kafka.ClusterConfig{
+			"main": {Brokers: []string{"localhost:9092"}},
+		},
+	}
+
 	tests := []struct {
 		name    string
 		cfg     Config
@@ -473,141 +485,202 @@ func TestConfig_Validate_KafkaProtocol(t *testing.T) {
 	}{
 		{
 			name: "kafka without topic",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka:    &KafkaConfig{Cluster: "main"},
+				}},
+			},
 			wantErr: "requires topic",
 		},
 		{
 			name: "kafka with empty topic",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka:    &KafkaConfig{Topic: ""},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka:    &KafkaConfig{Cluster: "main", Topic: ""},
+				}},
+			},
 			wantErr: "requires topic",
 		},
 		{
 			name: "kafka with host specified",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Host:     "kafka.example.com",
-				Kafka:    &KafkaConfig{Topic: "events"},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Host:     "kafka.example.com",
+					Kafka:    &KafkaConfig{Cluster: "main", Topic: "events"},
+				}},
+			},
 			wantErr: "does not use host field",
 		},
 		{
+			name: "kafka without cluster reference",
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka:    &KafkaConfig{Topic: "events"},
+				}},
+			},
+			wantErr: "requires cluster reference",
+		},
+		{
 			name: "kafka valid config",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka:    &KafkaConfig{Topic: "events"},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka:    &KafkaConfig{Cluster: "main", Topic: "events"},
+				}},
+			},
 		},
 		{
 			name: "kafka with invalid key type",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka: &KafkaConfig{
-					Topic: "events",
-					Key:   KeyStrategy{Type: "invalid"},
-				},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka: &KafkaConfig{
+						Cluster: "main",
+						Topic:   "events",
+						Key:     KeyStrategy{Type: "invalid"},
+					},
+				}},
+			},
 			wantErr: "invalid key type",
 		},
 		{
 			name: "kafka with header key type missing field",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka: &KafkaConfig{
-					Topic: "events",
-					Key:   KeyStrategy{Type: "header"},
-				},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka: &KafkaConfig{
+						Cluster: "main",
+						Topic:   "events",
+						Key:     KeyStrategy{Type: "header"},
+					},
+				}},
+			},
 			wantErr: "requires field parameter",
 		},
 		{
 			name: "kafka with payload key type missing field",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka: &KafkaConfig{
-					Topic: "events",
-					Key:   KeyStrategy{Type: "payload"},
-				},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka: &KafkaConfig{
+						Cluster: "main",
+						Topic:   "events",
+						Key:     KeyStrategy{Type: "payload"},
+					},
+				}},
+			},
 			wantErr: "requires field parameter",
 		},
 		{
 			name: "kafka with static key type missing value",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka: &KafkaConfig{
-					Topic: "events",
-					Key:   KeyStrategy{Type: "static"},
-				},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka: &KafkaConfig{
+						Cluster: "main",
+						Topic:   "events",
+						Key:     KeyStrategy{Type: "static"},
+					},
+				}},
+			},
 			wantErr: "requires value parameter",
 		},
 		{
 			name: "kafka with valid uuid key type",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka: &KafkaConfig{
-					Topic: "events",
-					Key:   KeyStrategy{Type: "uuid"},
-				},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka: &KafkaConfig{
+						Cluster: "main",
+						Topic:   "events",
+						Key:     KeyStrategy{Type: "uuid"},
+					},
+				}},
+			},
 		},
 		{
 			name: "kafka with valid header key type",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka: &KafkaConfig{
-					Topic: "events",
-					Key:   KeyStrategy{Type: "header", Field: "X-Request-ID"},
-				},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka: &KafkaConfig{
+						Cluster: "main",
+						Topic:   "events",
+						Key:     KeyStrategy{Type: "header", Field: "X-Request-ID"},
+					},
+				}},
+			},
 		},
 		{
 			name: "kafka with valid payload key type",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka: &KafkaConfig{
-					Topic: "events",
-					Key:   KeyStrategy{Type: "payload", Field: "userId"},
-				},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka: &KafkaConfig{
+						Cluster: "main",
+						Topic:   "events",
+						Key:     KeyStrategy{Type: "payload", Field: "userId"},
+					},
+				}},
+			},
 		},
 		{
 			name: "kafka with valid static key type",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka: &KafkaConfig{
-					Topic: "events",
-					Key:   KeyStrategy{Type: "static", Value: "partition-key"},
-				},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka: &KafkaConfig{
+						Cluster: "main",
+						Topic:   "events",
+						Key:     KeyStrategy{Type: "static", Value: "partition-key"},
+					},
+				}},
+			},
 		},
 		{
 			name: "kafka with valid random key type",
-			cfg: Config{Targets: []LinkTarget{{
-				Name:     "kafka-target",
-				Protocol: "kafka",
-				Kafka: &KafkaConfig{
-					Topic: "events",
-					Key:   KeyStrategy{Type: "random"},
-				},
-			}}},
+			cfg: Config{
+				Kafka: kafkaGlobal,
+				Targets: []LinkTarget{{
+					Name:     "kafka-target",
+					Protocol: "kafka",
+					Kafka: &KafkaConfig{
+						Cluster: "main",
+						Topic:   "events",
+						Key:     KeyStrategy{Type: "random"},
+					},
+				}},
+			},
 		},
 	}
 
@@ -636,12 +709,16 @@ func TestLoadConfig_KafkaProtocol(t *testing.T) {
 	data := `
 listenAddr: "127.0.0.1:4000"
 metricsAddr: ":9091"
-asyncBrokers:
-  - kafka.infra.svc:9092
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.infra.svc:9092
 targets:
   - name: events
     protocol: kafka
     kafka:
+      cluster: main
       topic: user-events
       key:
         type: uuid
@@ -676,8 +753,8 @@ targets:
 	if cfg.Targets[0].Kafka.RequiredAcks != "all" {
 		t.Errorf("expected requiredAcks all, got %s", cfg.Targets[0].Kafka.RequiredAcks)
 	}
-	if len(cfg.AsyncBrokers) != 1 {
-		t.Errorf("expected 1 async broker, got %d", len(cfg.AsyncBrokers))
+	if len(cfg.Kafka.Clusters) != 1 {
+		t.Errorf("expected 1 kafka cluster, got %d", len(cfg.Kafka.Clusters))
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lsm/fiso/internal/dlq"
+	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	"github.com/lsm/fiso/internal/link/ratelimit"
@@ -18,7 +19,8 @@ import (
 
 // KafkaHandler handles Kafka target publishing.
 type KafkaHandler struct {
-	publisher   dlq.Publisher
+	publisher   dlq.Publisher         // Single publisher (deprecated, for backwards compat)
+	pool        *kafka.PublisherPool  // Publisher pool for per-cluster publishing
 	targets     *link.TargetStore
 	breakers    map[string]*circuitbreaker.Breaker
 	rateLimiter *ratelimit.Limiter
@@ -26,7 +28,8 @@ type KafkaHandler struct {
 	logger      *slog.Logger
 }
 
-// NewKafkaHandler creates a new Kafka handler.
+// NewKafkaHandler creates a new Kafka handler with a single publisher.
+// Deprecated: Use NewKafkaHandlerWithPool for per-cluster publishing.
 func NewKafkaHandler(publisher dlq.Publisher, targets *link.TargetStore,
 	breakers map[string]*circuitbreaker.Breaker, rateLimiter *ratelimit.Limiter,
 	metrics *link.Metrics, logger *slog.Logger) *KafkaHandler {
@@ -37,6 +40,26 @@ func NewKafkaHandler(publisher dlq.Publisher, targets *link.TargetStore,
 
 	return &KafkaHandler{
 		publisher:   publisher,
+		targets:     targets,
+		breakers:    breakers,
+		rateLimiter: rateLimiter,
+		metrics:     metrics,
+		logger:      logger,
+	}
+}
+
+// NewKafkaHandlerWithPool creates a new Kafka handler with a publisher pool.
+// This supports per-cluster publishing based on target configuration.
+func NewKafkaHandlerWithPool(pool *kafka.PublisherPool, targets *link.TargetStore,
+	breakers map[string]*circuitbreaker.Breaker, rateLimiter *ratelimit.Limiter,
+	metrics *link.Metrics, logger *slog.Logger) *KafkaHandler {
+
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	return &KafkaHandler{
+		pool:        pool,
 		targets:     targets,
 		breakers:    breakers,
 		rateLimiter: rateLimiter,
@@ -150,10 +173,20 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		topic = target.Kafka.Topic
 	}
 
+	// Get publisher for this target's cluster
+	publisher, err := h.getPublisher(target)
+	if err != nil {
+		if h.metrics != nil {
+			h.metrics.RequestsTotal.WithLabelValues(target.Name, "POST", "500", "kafka").Inc()
+		}
+		http.Error(w, fmt.Sprintf("get publisher: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		// Use request context with timeout for safety
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		publishErr = h.publisher.Publish(ctx, topic, key, body, kafkaHeaders)
+		publishErr = publisher.Publish(ctx, topic, key, body, kafkaHeaders)
 		cancel()
 		if publishErr == nil {
 			// Success
@@ -188,6 +221,28 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.metrics.RequestsTotal.WithLabelValues(target.Name, "POST", "502", "kafka").Inc()
 	}
 	http.Error(w, fmt.Sprintf("kafka publish: %v", publishErr), http.StatusBadGateway)
+}
+
+// getPublisher returns the appropriate publisher for the target.
+// If the handler has a pool, it looks up the cluster for the target.
+// Otherwise, it uses the single publisher (backwards compatibility).
+func (h *KafkaHandler) getPublisher(target *link.LinkTarget) (dlq.Publisher, error) {
+	// If we have a pool, use it
+	if h.pool != nil {
+		// Determine cluster name: use target's cluster, or "default"
+		clusterName := "default"
+		if target.Kafka != nil && target.Kafka.Cluster != "" {
+			clusterName = target.Kafka.Cluster
+		}
+		return h.pool.Get(clusterName)
+	}
+
+	// Fallback to single publisher
+	if h.publisher != nil {
+		return h.publisher, nil
+	}
+
+	return nil, fmt.Errorf("no kafka publisher configured")
 }
 
 // generateKey generates a Kafka message key based on strategy.

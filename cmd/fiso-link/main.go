@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/auth"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
@@ -21,7 +22,6 @@ import (
 	"github.com/lsm/fiso/internal/link/proxy"
 	"github.com/lsm/fiso/internal/link/ratelimit"
 	"github.com/lsm/fiso/internal/observability"
-	"github.com/lsm/fiso/internal/source/kafka"
 )
 
 func main() {
@@ -47,21 +47,24 @@ func run() error {
 
 	logger.Info("loaded config", "targets", len(cfg.Targets), "listenAddr", cfg.ListenAddr)
 
-	// Initialize Kafka publisher if async brokers configured
-	var kafkaPublisher *kafka.Publisher
-	if len(cfg.AsyncBrokers) > 0 {
-		pub, err := kafka.NewPublisher(cfg.AsyncBrokers)
-		if err != nil {
-			return fmt.Errorf("kafka publisher: %w", err)
+	// Initialize Kafka cluster registry and publisher pool
+	clusterRegistry := kafka.NewRegistry()
+
+	// Load kafka.clusters
+	if len(cfg.Kafka.Clusters) > 0 {
+		if err := clusterRegistry.LoadFromMap(cfg.Kafka.Clusters); err != nil {
+			return fmt.Errorf("load kafka clusters: %w", err)
 		}
-		kafkaPublisher = pub
-		logger.Info("initialized kafka publisher", "brokers", cfg.AsyncBrokers)
-		defer func() {
-			if err := pub.Close(); err != nil {
-				logger.Error("failed to close kafka publisher", "error", err)
-			}
-		}()
+		logger.Info("loaded kafka clusters", "clusters", clusterRegistry.Names())
 	}
+
+	// Create publisher pool
+	publisherPool := kafka.NewPublisherPool(clusterRegistry)
+	defer func() {
+		if err := publisherPool.Close(); err != nil {
+			logger.Error("failed to close kafka publisher pool", "error", err)
+		}
+	}()
 
 	// Setup metrics
 	reg := prometheus.NewRegistry()
@@ -119,17 +122,15 @@ func run() error {
 
 	// Build proxy handler
 	handlerCfg := proxy.Config{
-		Targets:     store,
-		Breakers:    breakers,
-		RateLimiter: rateLimiter,
-		Auth:        authProvider,
-		Resolver:    discovery.NewDNSResolver(),
-		Metrics:     metrics,
-		Logger:      logger,
-	}
-	// Add Kafka publisher if available
-	if kafkaPublisher != nil {
-		handlerCfg.KafkaPublisher = kafkaPublisher
+		Targets:       store,
+		Breakers:      breakers,
+		RateLimiter:   rateLimiter,
+		Auth:          authProvider,
+		Resolver:      discovery.NewDNSResolver(),
+		Metrics:       metrics,
+		Logger:        logger,
+		KafkaRegistry: clusterRegistry,
+		KafkaPool:     publisherPool,
 	}
 	handler := proxy.NewHandler(handlerCfg)
 

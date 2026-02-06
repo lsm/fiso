@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lsm/fiso/internal/dlq"
+	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/auth"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
@@ -41,7 +42,9 @@ type Config struct {
 	Resolver       discovery.Resolver
 	Metrics        *link.Metrics
 	Logger         *slog.Logger
-	KafkaPublisher dlq.Publisher // Optional: For Kafka targets
+	KafkaPublisher dlq.Publisher       // Deprecated: use KafkaPool instead
+	KafkaRegistry  *kafka.Registry     // Named Kafka cluster registry
+	KafkaPool      *kafka.PublisherPool // Kafka publisher connection pool
 }
 
 // NewHandler creates a new HTTP proxy handler.
@@ -69,8 +72,18 @@ func NewHandler(cfg Config) *Handler {
 		logger: cfg.Logger,
 	}
 
-	// Initialize Kafka handler if publisher provided
-	if cfg.KafkaPublisher != nil {
+	// Initialize Kafka handler if pool or publisher provided
+	if cfg.KafkaPool != nil {
+		h.kafkaHandler = NewKafkaHandlerWithPool(
+			cfg.KafkaPool,
+			cfg.Targets,
+			cfg.Breakers,
+			cfg.RateLimiter,
+			cfg.Metrics,
+			cfg.Logger,
+		)
+	} else if cfg.KafkaPublisher != nil {
+		// Backwards compatibility: single publisher
 		h.kafkaHandler = NewKafkaHandler(
 			cfg.KafkaPublisher,
 			cfg.Targets,

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lsm/fiso/internal/kafka"
 	"gopkg.in/yaml.v3"
 )
 
@@ -47,6 +48,7 @@ type VaultRef struct {
 
 // KafkaConfig defines Kafka-specific settings for a target.
 type KafkaConfig struct {
+	Cluster      string            `yaml:"cluster,omitempty"`      // Reference to named cluster in kafka.clusters
 	Topic        string            `yaml:"topic"`                  // Required: Kafka topic
 	Key          KeyStrategy       `yaml:"key"`                    // Optional: Key generation strategy
 	Headers      map[string]string `yaml:"headers,omitempty"`      // Optional: Static Kafka headers
@@ -236,10 +238,10 @@ func (r *RateLimitConfig) UnmarshalYAML(value *yaml.Node) error {
 
 // Config is the top-level Fiso-Link configuration.
 type Config struct {
-	ListenAddr   string       `yaml:"listenAddr"`
-	MetricsAddr  string       `yaml:"metricsAddr"`
-	Targets      []LinkTarget `yaml:"targets"`
-	AsyncBrokers []string     `yaml:"asyncBrokers"`
+	ListenAddr  string                  `yaml:"listenAddr"`
+	MetricsAddr string                  `yaml:"metricsAddr"`
+	Targets     []LinkTarget            `yaml:"targets"`
+	Kafka       kafka.KafkaGlobalConfig `yaml:"kafka,omitempty"`
 }
 
 // LoadConfig reads Fiso-Link configuration from a YAML file.
@@ -300,7 +302,13 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Errorf("%s: kafka protocol requires topic in kafka.topic field", prefix))
 			}
 			if t.Host != "" {
-				errs = append(errs, fmt.Errorf("%s: kafka protocol does not use host field (use asyncBrokers in config)", prefix))
+				errs = append(errs, fmt.Errorf("%s: kafka protocol does not use host field (use kafka.clusters in config)", prefix))
+			}
+			// Require cluster reference
+			if t.Kafka == nil || t.Kafka.Cluster == "" {
+				errs = append(errs, fmt.Errorf("%s: kafka protocol requires cluster reference in kafka.cluster field", prefix))
+			} else if _, ok := c.Kafka.Clusters[t.Kafka.Cluster]; !ok {
+				errs = append(errs, fmt.Errorf("%s: kafka.cluster %q not found in kafka.clusters", prefix, t.Kafka.Cluster))
 			}
 			// Validate key strategy
 			if t.Kafka != nil && t.Kafka.Key.Type != "" {
@@ -343,6 +351,11 @@ func (c *Config) Validate() error {
 		if t.RateLimit.Burst < 0 {
 			errs = append(errs, fmt.Errorf("%s: rateLimit.burst must be >= 0", prefix))
 		}
+	}
+
+	// Validate Kafka clusters
+	if err := c.Kafka.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("kafka: %w", err))
 	}
 
 	return errors.Join(errs...)
