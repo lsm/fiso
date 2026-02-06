@@ -14,6 +14,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// kafkaConsumer is an interface that abstracts the Kafka client for testing.
+type kafkaConsumer interface {
+	PollFetches(ctx context.Context) kgo.Fetches
+	MarkCommitRecords(rs ...*kgo.Record)
+	CommitMarkedOffsets(ctx context.Context) error
+	Close()
+}
+
+// createKafkaClientFunc is the function used to create a Kafka client.
+// Tests can replace this to stub out the actual client.
+var createKafkaClientFunc = func(cfg kafka.Config) (kafkaConsumer, error) {
+	return createKafkaClient(cfg)
+}
+
 // RunConsume consumes and displays events from Kafka for debugging.
 func RunConsume(args []string) error {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
@@ -91,7 +105,7 @@ Examples:
 		cfg.StartOffset = "earliest"
 	}
 
-	client, err := createKafkaClient(cfg)
+	client, err := createKafkaClientFunc(cfg)
 	if err != nil {
 		return fmt.Errorf("create kafka client: %w", err)
 	}
@@ -141,7 +155,7 @@ Examples:
 }
 
 // consumeBatch consumes a fixed number of messages and exits.
-func consumeBatch(ctx context.Context, client *kgo.Client, topic string, maxMessages int, messageCount *int) error {
+func consumeBatch(ctx context.Context, client kafkaConsumer, topic string, maxMessages int, messageCount *int) error {
 	for *messageCount < maxMessages {
 		fetches := client.PollFetches(ctx)
 		if errs := fetches.Errors(); len(errs) > 0 {
@@ -188,7 +202,7 @@ func consumeBatch(ctx context.Context, client *kgo.Client, topic string, maxMess
 }
 
 // consumeFollow continuously consumes messages until interrupted.
-func consumeFollow(ctx context.Context, client *kgo.Client, topic string) error {
+func consumeFollow(ctx context.Context, client kafkaConsumer, topic string) error {
 	for {
 		fetches := client.PollFetches(ctx)
 		if errs := fetches.Errors(); len(errs) > 0 {

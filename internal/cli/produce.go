@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +11,18 @@ import (
 
 	"github.com/lsm/fiso/internal/source/kafka"
 )
+
+// publisher is an interface that allows mocking the Kafka publisher for testing.
+type publisher interface {
+	Publish(ctx context.Context, topic string, key, value []byte, headers map[string]string) error
+	Close() error
+}
+
+// newPublisherFunc is the function used to create a Kafka publisher.
+// Tests can replace this to stub out the actual publisher.
+var newPublisherFunc func(brokers []string) (publisher, error) = func(brokers []string) (publisher, error) {
+	return kafka.NewPublisher(brokers)
+}
 
 // RunProduce produces test events to Kafka.
 func RunProduce(args []string) error {
@@ -80,11 +91,11 @@ Examples:
 		}
 	}
 
-	publisher, err := kafka.NewPublisher(brokers)
+	publisher, err := newPublisherFunc(brokers)
 	if err != nil {
 		return fmt.Errorf("create kafka publisher: %w", err)
 	}
-	defer publisher.Close()
+	defer func() { _ = publisher.Close() }()
 
 	ctx := context.Background()
 
@@ -95,14 +106,14 @@ Examples:
 	return produceFromFile(ctx, publisher, topic, filePath, count, rate)
 }
 
-func produceInlineJSON(ctx context.Context, publisher *kafka.Publisher, topic, jsonStr string, count int, rate time.Duration) error {
+func produceInlineJSON(ctx context.Context, pub publisher, topic, jsonStr string, count int, rate time.Duration) error {
 	var data json.RawMessage
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 		return fmt.Errorf("invalid json: %w", err)
 	}
 
 	for i := 0; i < count; i++ {
-		if err := publisher.Publish(ctx, topic, nil, data, nil); err != nil {
+		if err := pub.Publish(ctx, topic, nil, data, nil); err != nil {
 			return fmt.Errorf("publish event %d: %w", i+1, err)
 		}
 		fmt.Printf("Produced event %d to topic %s\n", i+1, topic)
@@ -116,12 +127,12 @@ func produceInlineJSON(ctx context.Context, publisher *kafka.Publisher, topic, j
 	return nil
 }
 
-func produceFromFile(ctx context.Context, publisher *kafka.Publisher, topic, filePath string, count int, rate time.Duration) error {
+func produceFromFile(ctx context.Context, pub publisher, topic, filePath string, count int, rate time.Duration) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	produced := 0
 	scanner := bufio.NewScanner(file)
@@ -139,7 +150,7 @@ func produceFromFile(ctx context.Context, publisher *kafka.Publisher, topic, fil
 			return fmt.Errorf("invalid json on line %d: %w", lineNum, err)
 		}
 
-		if err := publisher.Publish(ctx, topic, nil, data, nil); err != nil {
+		if err := pub.Publish(ctx, topic, nil, data, nil); err != nil {
 			return fmt.Errorf("publish event from line %d: %w", lineNum, err)
 		}
 
@@ -196,5 +207,3 @@ func parseIntFlag(args []string, flag string, defaultVal int) (int, error) {
 	}
 	return val, nil
 }
-
-var errFlagNotFound = errors.New("flag not found")

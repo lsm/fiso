@@ -19,12 +19,13 @@ type Config struct {
 
 // Source receives events via HTTP POST and dispatches them to the handler.
 type Source struct {
-	server     *http.Server
-	logger     *slog.Logger
-	addr       string
-	path       string
-	ListenAddr string
-	ready      chan struct{}
+	server          *http.Server
+	logger          *slog.Logger
+	addr            string
+	path            string
+	ListenAddr      string
+	ready           chan struct{}
+	listenerFactory func(string, string) (net.Listener, error) // for testing
 }
 
 // NewSource creates a new HTTP source.
@@ -40,10 +41,11 @@ func NewSource(cfg Config, logger *slog.Logger) (*Source, error) {
 		path = "/"
 	}
 	return &Source{
-		addr:   cfg.ListenAddr,
-		path:   path,
-		logger: logger,
-		ready:  make(chan struct{}),
+		addr:            cfg.ListenAddr,
+		path:            path,
+		logger:          logger,
+		ready:           make(chan struct{}),
+		listenerFactory: net.Listen,
 	}, nil
 }
 
@@ -85,7 +87,7 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 		w.WriteHeader(http.StatusOK)
 	})
 
-	lis, err := net.Listen("tcp", s.addr)
+	lis, err := s.listenerFactory("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", s.addr, err)
 	}
