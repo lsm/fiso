@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lsm/fiso/internal/source/kafka"
+	"github.com/lsm/fiso/internal/kafka"
+	kafkasource "github.com/lsm/fiso/internal/source/kafka"
 )
 
 // publisher abstracts the kafka publisher for testing.
@@ -15,7 +16,7 @@ type publisher interface {
 
 // Config holds Kafka sink configuration.
 type Config struct {
-	Brokers []string
+	Cluster *kafka.ClusterConfig // Cluster config with auth/TLS (required)
 	Topic   string
 }
 
@@ -27,14 +28,14 @@ type Sink struct {
 
 // NewSink creates a new Kafka sink.
 func NewSink(cfg Config) (*Sink, error) {
-	if len(cfg.Brokers) == 0 {
-		return nil, fmt.Errorf("brokers are required")
+	if cfg.Cluster == nil {
+		return nil, fmt.Errorf("cluster config is required")
 	}
 	if cfg.Topic == "" {
 		return nil, fmt.Errorf("topic is required")
 	}
 
-	pub, err := kafka.NewPublisher(cfg.Brokers)
+	pub, err := kafkasource.NewPublisher(cfg.Cluster)
 	if err != nil {
 		return nil, fmt.Errorf("kafka publisher: %w", err)
 	}

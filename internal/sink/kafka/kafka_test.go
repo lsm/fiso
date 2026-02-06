@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	intkafka "github.com/lsm/fiso/internal/kafka"
 )
 
 // mockPublisher implements the publisher interface for testing.
@@ -31,18 +33,25 @@ func (m *mockPublisher) Close() error {
 	return nil
 }
 
-func TestNewSink_MissingBrokers(t *testing.T) {
+func testCluster(brokers ...string) *intkafka.ClusterConfig {
+	if len(brokers) == 0 {
+		brokers = []string{"localhost:9092"}
+	}
+	return &intkafka.ClusterConfig{Brokers: brokers}
+}
+
+func TestNewSink_MissingCluster(t *testing.T) {
 	_, err := NewSink(Config{Topic: "test-topic"})
 	if err == nil {
-		t.Fatal("expected error for missing brokers")
+		t.Fatal("expected error for missing cluster")
 	}
-	if err.Error() != "brokers are required" {
+	if err.Error() != "cluster config is required" {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestNewSink_MissingTopic(t *testing.T) {
-	_, err := NewSink(Config{Brokers: []string{"localhost:9092"}})
+	_, err := NewSink(Config{Cluster: testCluster()})
 	if err == nil {
 		t.Fatal("expected error for missing topic")
 	}
@@ -137,7 +146,7 @@ func TestNewSink_PublisherFailure(t *testing.T) {
 	// Test with invalid broker address format
 	// This should cause kafka.NewPublisher to fail
 	cfg := Config{
-		Brokers: []string{"invalid://broker-address"},
+		Cluster: testCluster("invalid://broker-address"),
 		Topic:   "test-topic",
 	}
 
@@ -146,26 +155,16 @@ func TestNewSink_PublisherFailure(t *testing.T) {
 		t.Fatal("expected error for invalid broker address")
 	}
 	// Verify the error is wrapped with "kafka publisher" prefix
-	if err.Error() == "brokers are required" || err.Error() == "topic is required" {
+	if err.Error() == "cluster config is required" || err.Error() == "topic is required" {
 		t.Errorf("unexpected validation error: %v", err)
 	}
 }
 
-func TestNewSink_EmptyBrokerSlice(t *testing.T) {
-	_, err := NewSink(Config{Brokers: []string{}, Topic: "test-topic"})
-	if err == nil {
-		t.Fatal("expected error for empty broker slice")
-	}
-	if err.Error() != "brokers are required" {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
 func TestNewSink_MultipleBrokers(t *testing.T) {
-	// This test verifies that NewSink accepts multiple brokers
+	// This test verifies that NewSink accepts multiple brokers in cluster config
 	// The actual publisher creation will succeed with multiple brokers
 	cfg := Config{
-		Brokers: []string{"broker1:9092", "broker2:9092", "broker3:9092"},
+		Cluster: testCluster("broker1:9092", "broker2:9092", "broker3:9092"),
 		Topic:   "test-topic",
 	}
 
@@ -173,7 +172,7 @@ func TestNewSink_MultipleBrokers(t *testing.T) {
 	// In a test environment, we'd want to mock this
 	_, err := NewSink(cfg)
 	// We expect this might fail due to unavailable brokers, but not due to config validation
-	if err != nil && err.Error() == "brokers are required" {
+	if err != nil && err.Error() == "cluster config is required" {
 		t.Errorf("unexpected validation error: %v", err)
 	}
 }
@@ -348,7 +347,7 @@ func TestSink_Deliver_BinaryData(t *testing.T) {
 
 func TestNewSink_ValidConfig(t *testing.T) {
 	cfg := Config{
-		Brokers: []string{"localhost:9092"},
+		Cluster: testCluster(),
 		Topic:   "test-topic",
 	}
 

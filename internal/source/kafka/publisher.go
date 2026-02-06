@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/lsm/fiso/internal/kafka"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -18,13 +19,19 @@ type Publisher struct {
 	client producer
 }
 
-// NewPublisher creates a new Kafka publisher.
-func NewPublisher(brokers []string) (*Publisher, error) {
-	if len(brokers) == 0 {
-		return nil, fmt.Errorf("at least one broker is required")
+// NewPublisher creates a new Kafka publisher with cluster configuration.
+// This supports SASL authentication and TLS.
+func NewPublisher(cluster *kafka.ClusterConfig) (*Publisher, error) {
+	if cluster == nil {
+		return nil, fmt.Errorf("cluster config is required")
 	}
 
-	client, err := kgo.NewClient(kgo.SeedBrokers(brokers...))
+	opts, err := kafka.ClientOptions(cluster)
+	if err != nil {
+		return nil, fmt.Errorf("cluster options: %w", err)
+	}
+
+	client, err := kgo.NewClient(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka publisher client: %w", err)
 	}

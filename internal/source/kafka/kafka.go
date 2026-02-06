@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/source"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 // Config holds Kafka source configuration.
 type Config struct {
-	Brokers       []string
+	Cluster       *kafka.ClusterConfig // Cluster config with auth/TLS (required)
 	Topic         string
 	ConsumerGroup string
 	StartOffset   string // "earliest" or "latest" (default: "latest")
@@ -34,8 +35,8 @@ type Source struct {
 
 // NewSource creates a new Kafka source.
 func NewSource(cfg Config, logger *slog.Logger) (*Source, error) {
-	if len(cfg.Brokers) == 0 {
-		return nil, fmt.Errorf("at least one broker is required")
+	if cfg.Cluster == nil {
+		return nil, fmt.Errorf("cluster config is required")
 	}
 	if cfg.Topic == "" {
 		return nil, fmt.Errorf("topic is required")
@@ -52,13 +53,18 @@ func NewSource(cfg Config, logger *slog.Logger) (*Source, error) {
 		offset = kgo.NewOffset().AtStart()
 	}
 
-	opts := []kgo.Opt{
-		kgo.SeedBrokers(cfg.Brokers...),
+	opts, err := kafka.ClientOptions(cfg.Cluster)
+	if err != nil {
+		return nil, fmt.Errorf("cluster options: %w", err)
+	}
+
+	// Add consumer-specific options
+	opts = append(opts,
 		kgo.ConsumerGroup(cfg.ConsumerGroup),
 		kgo.ConsumeTopics(cfg.Topic),
 		kgo.ConsumeResetOffset(offset),
 		kgo.DisableAutoCommit(),
-	}
+	)
 
 	client, err := kgo.NewClient(opts...)
 	if err != nil {

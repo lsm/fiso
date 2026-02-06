@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	intkafka "github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/source"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
@@ -44,19 +45,26 @@ func (m *mockConsumer) Close() {
 	m.closed = true
 }
 
-func TestNewSource_MissingBrokers(t *testing.T) {
+func testCluster(brokers ...string) *intkafka.ClusterConfig {
+	if len(brokers) == 0 {
+		brokers = []string{"localhost:9092"}
+	}
+	return &intkafka.ClusterConfig{Brokers: brokers}
+}
+
+func TestNewSource_MissingCluster(t *testing.T) {
 	_, err := NewSource(Config{
 		Topic:         "test",
 		ConsumerGroup: "test-group",
 	}, nil)
 	if err == nil {
-		t.Fatal("expected error for missing brokers")
+		t.Fatal("expected error for missing cluster")
 	}
 }
 
 func TestNewSource_MissingTopic(t *testing.T) {
 	_, err := NewSource(Config{
-		Brokers:       []string{"localhost:9092"},
+		Cluster:       testCluster(),
 		ConsumerGroup: "test-group",
 	}, nil)
 	if err == nil {
@@ -66,7 +74,7 @@ func TestNewSource_MissingTopic(t *testing.T) {
 
 func TestNewSource_MissingConsumerGroup(t *testing.T) {
 	_, err := NewSource(Config{
-		Brokers: []string{"localhost:9092"},
+		Cluster: testCluster(),
 		Topic:   "test",
 	}, nil)
 	if err == nil {
@@ -76,7 +84,7 @@ func TestNewSource_MissingConsumerGroup(t *testing.T) {
 
 func TestNewSource_ValidConfig(t *testing.T) {
 	s, err := NewSource(Config{
-		Brokers:       []string{"localhost:9092"},
+		Cluster:       testCluster(),
 		Topic:         "test-topic",
 		ConsumerGroup: "test-group",
 		StartOffset:   "earliest",
@@ -93,7 +101,7 @@ func TestNewSource_ValidConfig(t *testing.T) {
 
 func TestNewSource_DefaultOffset(t *testing.T) {
 	s, err := NewSource(Config{
-		Brokers:       []string{"localhost:9092"},
+		Cluster:       testCluster(),
 		Topic:         "test-topic",
 		ConsumerGroup: "test-group",
 	}, nil)
@@ -105,7 +113,7 @@ func TestNewSource_DefaultOffset(t *testing.T) {
 
 func TestSource_Close(t *testing.T) {
 	s, err := NewSource(Config{
-		Brokers:       []string{"localhost:9092"},
+		Cluster:       testCluster(),
 		Topic:         "test-topic",
 		ConsumerGroup: "test-group",
 	}, nil)
@@ -119,7 +127,7 @@ func TestSource_Close(t *testing.T) {
 
 func TestSource_StartCancelledContext(t *testing.T) {
 	s, err := NewSource(Config{
-		Brokers:       []string{"localhost:59092"}, // non-existent broker
+		Cluster:       testCluster("localhost:59092"), // non-existent broker
 		Topic:         "test-topic",
 		ConsumerGroup: "test-group",
 	}, nil)

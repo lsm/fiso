@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	intkafka "github.com/lsm/fiso/internal/kafka"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -24,15 +25,15 @@ func (m *mockProducer) Close() {
 	m.closed = true
 }
 
-func TestNewPublisher_EmptyBrokers(t *testing.T) {
+func TestNewPublisher_NilCluster(t *testing.T) {
 	_, err := NewPublisher(nil)
 	if err == nil {
-		t.Fatal("expected error for empty brokers")
+		t.Fatal("expected error for nil cluster")
 	}
 }
 
 func TestNewPublisher_ValidConfig(t *testing.T) {
-	pub, err := NewPublisher([]string{"localhost:9092"})
+	pub, err := NewPublisher(&intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,7 +41,7 @@ func TestNewPublisher_ValidConfig(t *testing.T) {
 }
 
 func TestPublisher_Close(t *testing.T) {
-	pub, err := NewPublisher([]string{"localhost:9092"})
+	pub, err := NewPublisher(&intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
