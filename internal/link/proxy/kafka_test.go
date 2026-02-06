@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+	"fmt"
 
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
@@ -243,5 +244,130 @@ func TestGenerateKey(t *testing.T) {
 				t.Errorf("key = %q, want %q", string(key), tt.wantKey)
 			}
 		})
+	}
+}
+
+func TestKafkaHandler_RetryLogic(t *testing.T) {
+	// Test retry logic when publish fails initially then succeeds
+	attempts := 0
+	publisher := &mockPublisher{
+		publishFunc: func(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
+			attempts++
+			if attempts < 2 {
+				return fmt.Errorf("temporary failure")
+			}
+			return nil
+		},
+	}
+
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "retry-test",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Topic: "retry-topic"},
+			Retry: link.RetryConfig{
+				MaxAttempts: 3,
+			},
+		},
+	})
+
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+
+	req := httptest.NewRequest("POST", "/link/retry-test", bytes.NewReader([]byte(`{"test":"data"}`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200 after retries, got %d", w.Code)
+	}
+	if attempts != 2 {
+		t.Errorf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestKafkaHandler_PublishFailureAfterRetries(t *testing.T) {
+	// Test that all retries are exhausted before giving up
+	attempts := 0
+	publisher := &mockPublisher{
+		publishFunc: func(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
+			attempts++
+			return fmt.Errorf("persistent failure")
+		},
+	}
+
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "fail-test",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Topic: "fail-topic"},
+			Retry: link.RetryConfig{
+				MaxAttempts: 3,
+			},
+		},
+	})
+
+	breakers := make(map[string]*circuitbreaker.Breaker)
+	breakers["fail-test"] = circuitbreaker.New(circuitbreaker.Config{
+		FailureThreshold: 5,
+		SuccessThreshold: 2,
+		ResetTimeout:     1000 * time.Millisecond,
+	})
+
+	handler := NewKafkaHandler(publisher, store, breakers, nil, nil, nil)
+
+	req := httptest.NewRequest("POST", "/link/fail-test", bytes.NewReader([]byte(`{"test":"data"}`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected status 502 after failed retries, got %d", w.Code)
+	}
+	if attempts != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts)
+	}
+}
+
+func TestKafkaHandler_StaticHeaders(t *testing.T) {
+	// Test that static headers from config are added to Kafka messages
+	var capturedHeaders map[string]string
+	publisher := &mockPublisher{
+		publishFunc: func(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
+			capturedHeaders = headers
+			return nil
+		},
+	}
+
+	store := link.NewTargetStore([]link.LinkTarget{
+		{
+			Name:     "headers-test",
+			Protocol: "kafka",
+			Kafka: &link.KafkaConfig{
+				Topic: "headers-topic",
+				Headers: map[string]string{
+					"source":  "test-service",
+					"version": "1.0",
+				},
+			},
+		},
+	})
+
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+
+	req := httptest.NewRequest("POST", "/link/headers-test", bytes.NewReader([]byte(`{"test":"data"}`)))
+	req.Header.Set("X-Request-ID", "req-123")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+	if capturedHeaders["source"] != "test-service" {
+		t.Errorf("expected static header source=test-service, got %s", capturedHeaders["source"])
+	}
+	if capturedHeaders["version"] != "1.0" {
+		t.Errorf("expected static header version=1.0, got %s", capturedHeaders["version"])
+	}
+	if capturedHeaders["X-Request-ID"] != "req-123" {
+		t.Errorf("expected HTTP header X-Request-ID=req-123, got %s", capturedHeaders["X-Request-ID"])
 	}
 }
