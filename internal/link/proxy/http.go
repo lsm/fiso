@@ -42,8 +42,8 @@ type Config struct {
 	Resolver       discovery.Resolver
 	Metrics        *link.Metrics
 	Logger         *slog.Logger
-	KafkaPublisher dlq.Publisher       // Deprecated: use KafkaPool instead
-	KafkaRegistry  *kafka.Registry     // Named Kafka cluster registry
+	KafkaPublisher dlq.Publisher        // Deprecated: use KafkaPool instead
+	KafkaRegistry  *kafka.Registry      // Named Kafka cluster registry
 	KafkaPool      *kafka.PublisherPool // Kafka publisher connection pool
 }
 

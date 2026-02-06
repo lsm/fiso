@@ -19,8 +19,8 @@ import (
 
 // KafkaHandler handles Kafka target publishing.
 type KafkaHandler struct {
-	publisher   dlq.Publisher         // Single publisher (deprecated, for backwards compat)
-	pool        *kafka.PublisherPool  // Publisher pool for per-cluster publishing
+	publisher   dlq.Publisher        // Single publisher (deprecated, for backwards compat)
+	pool        *kafka.PublisherPool // Publisher pool for per-cluster publishing
 	targets     *link.TargetStore
 	breakers    map[string]*circuitbreaker.Breaker
 	rateLimiter *ratelimit.Limiter
