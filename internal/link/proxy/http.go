@@ -21,14 +21,14 @@ import (
 
 // Handler is the HTTP forward proxy for Fiso-Link.
 type Handler struct {
-	targets     *link.TargetStore
-	breakers    map[string]*circuitbreaker.Breaker
-	rateLimiter *ratelimit.Limiter
-	auth        auth.Provider
-	resolver    discovery.Resolver
-	metrics     *link.Metrics
-	client      *http.Client
-	logger      *slog.Logger
+	targets      *link.TargetStore
+	breakers     map[string]*circuitbreaker.Breaker
+	rateLimiter  *ratelimit.Limiter
+	auth         auth.Provider
+	resolver     discovery.Resolver
+	metrics      *link.Metrics
+	client       *http.Client
+	logger       *slog.Logger
 	kafkaHandler *KafkaHandler // Optional: For Kafka targets
 }
 

@@ -56,7 +56,11 @@ func run() error {
 		}
 		kafkaPublisher = pub
 		logger.Info("initialized kafka publisher", "brokers", cfg.AsyncBrokers)
-		defer pub.Close()
+		defer func() {
+			if err := pub.Close(); err != nil {
+				logger.Error("failed to close kafka publisher", "error", err)
+			}
+		}()
 	}
 
 	// Setup metrics

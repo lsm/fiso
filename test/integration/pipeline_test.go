@@ -79,7 +79,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 
 	transformer, err := unifiedxform.NewTransformer(map[string]string{
 		"transformed": "true",
-		"original":   "data",
+		"original":    "data",
 	})
 	if err != nil {
 		t.Fatalf("unified transformer: %v", err)

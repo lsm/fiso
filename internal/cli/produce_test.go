@@ -136,52 +136,52 @@ func TestParseStringFlag(t *testing.T) {
 
 func TestParseIntFlag(t *testing.T) {
 	tests := []struct {
-		name      string
-		args      []string
-		flag      string
+		name       string
+		args       []string
+		flag       string
 		defaultVal int
-		want      int
-		wantErr   bool
+		want       int
+		wantErr    bool
 	}{
 		{
-			name:      "valid integer",
-			args:      []string{"--count", "10"},
-			flag:      "--count",
+			name:       "valid integer",
+			args:       []string{"--count", "10"},
+			flag:       "--count",
 			defaultVal: 1,
-			want:      10,
-			wantErr:   false,
+			want:       10,
+			wantErr:    false,
 		},
 		{
-			name:      "default value",
-			args:      []string{},
-			flag:      "--count",
+			name:       "default value",
+			args:       []string{},
+			flag:       "--count",
 			defaultVal: 5,
-			want:      5,
-			wantErr:   false,
+			want:       5,
+			wantErr:    false,
 		},
 		{
-			name:      "invalid integer",
-			args:      []string{"--count", "abc"},
-			flag:      "--count",
+			name:       "invalid integer",
+			args:       []string{"--count", "abc"},
+			flag:       "--count",
 			defaultVal: 1,
-			want:      0,
-			wantErr:   true,
+			want:       0,
+			wantErr:    true,
 		},
 		{
-			name:      "zero value",
-			args:      []string{"--count", "0"},
-			flag:      "--count",
+			name:       "zero value",
+			args:       []string{"--count", "0"},
+			flag:       "--count",
 			defaultVal: 1,
-			want:      0,
-			wantErr:   true,
+			want:       0,
+			wantErr:    true,
 		},
 		{
-			name:      "negative value",
-			args:      []string{"--count", "-1"},
-			flag:      "--count",
+			name:       "negative value",
+			args:       []string{"--count", "-1"},
+			flag:       "--count",
 			defaultVal: 1,
-			want:      0,
-			wantErr:   true,
+			want:       0,
+			wantErr:    true,
 		},
 	}
 	for _, tt := range tests {
@@ -439,24 +439,24 @@ func TestParseStringFlag_EmptyArgs(t *testing.T) {
 func TestRunProduce_BrokerParsing(t *testing.T) {
 	// Test that --brokers flag is parsed correctly
 	tests := []struct {
-		name      string
+		name       string
 		brokersStr string
-		expected  []string
+		expected   []string
 	}{
 		{
-			name:      "single broker",
+			name:       "single broker",
 			brokersStr: "localhost:9092",
-			expected:  []string{"localhost:9092"},
+			expected:   []string{"localhost:9092"},
 		},
 		{
-			name:      "multiple brokers",
+			name:       "multiple brokers",
 			brokersStr: "broker1:9092,broker2:9092",
-			expected:  []string{"broker1:9092", "broker2:9092"},
+			expected:   []string{"broker1:9092", "broker2:9092"},
 		},
 		{
-			name:      "brokers with spaces",
+			name:       "brokers with spaces",
 			brokersStr: "broker1:9092, broker2:9092 , broker3:9092",
-			expected:  []string{"broker1:9092", "broker2:9092", "broker3:9092"},
+			expected:   []string{"broker1:9092", "broker2:9092", "broker3:9092"},
 		},
 	}
 	for _, tt := range tests {
@@ -659,9 +659,9 @@ func TestProduceFromFile_ValidJSONLDetailed(t *testing.T) {
 		expectParsed int
 	}{
 		{
-			name: "single json line",
-			content: `{"order_id":"001"}`,
-			count:  1,
+			name:         "single json line",
+			content:      `{"order_id":"001"}`,
+			count:        1,
 			expectParsed: 1,
 		},
 		{
@@ -669,7 +669,7 @@ func TestProduceFromFile_ValidJSONLDetailed(t *testing.T) {
 			content: `{"order_id":"001"}
 {"order_id":"002"}
 {"order_id":"003"}`,
-			count:  0,
+			count:        0,
 			expectParsed: 3,
 		},
 		{
@@ -679,7 +679,7 @@ func TestProduceFromFile_ValidJSONLDetailed(t *testing.T) {
 {"order_id":"003"}
 {"order_id":"004"}
 {"order_id":"005"}`,
-			count:  3,
+			count:        3,
 			expectParsed: 3,
 		},
 		{
@@ -689,14 +689,14 @@ func TestProduceFromFile_ValidJSONLDetailed(t *testing.T) {
 {"order_id":"002"}
 
 {"order_id":"003"}`,
-			count:  0,
+			count:        0,
 			expectParsed: 3,
 		},
 		{
 			name: "jsonl with complex json",
 			content: `{"user":{"id":"1","name":"Alice"},"items":[{"sku":"A"},{"sku":"B"}]}
 {"user":{"id":"2","name":"Bob"},"items":[{"sku":"C"}]}`,
-			count:  0,
+			count:        0,
 			expectParsed: 2,
 		},
 		{
@@ -704,7 +704,7 @@ func TestProduceFromFile_ValidJSONLDetailed(t *testing.T) {
 			content: `
 
 `,
-			count:  0,
+			count:        0,
 			expectParsed: 0,
 		},
 		{
@@ -713,7 +713,7 @@ func TestProduceFromFile_ValidJSONLDetailed(t *testing.T) {
 	{"order_id":"002"}
    {"order_id":"003"}
 `,
-			count:  0,
+			count:        0,
 			expectParsed: 3,
 		},
 	}
@@ -796,8 +796,8 @@ not json
 			errorOnLine: 2,
 		},
 		{
-			name: "special characters unescaped",
-			content: `{"msg":"hello` + "\n" + `world"}`,
+			name:        "special characters unescaped",
+			content:     `{"msg":"hello` + "\n" + `world"}`,
 			expectError: "invalid json",
 			errorOnLine: 1,
 		},
@@ -1111,8 +1111,8 @@ func TestProduceFromFile_EmptyFileErrors(t *testing.T) {
 			errorMsg:    "no valid json",
 		},
 		{
-			name:        "only comments (not valid JSON)",
-			content:     `# comment
+			name: "only comments (not valid JSON)",
+			content: `# comment
 // another comment`,
 			expectError: true,
 			errorMsg:    "invalid json",

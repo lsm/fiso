@@ -266,14 +266,14 @@ func TestSink_Deliver_MultipleHeaders(t *testing.T) {
 	}
 
 	headers := map[string]string{
-		"Content-Type":      "application/cloudevents+json",
-		"ce-id":             "evt-123",
-		"ce-source":         "test-source",
-		"ce-type":           "test.event",
-		"ce-specversion":    "1.0",
-		"X-Custom-Header":   "custom-value",
-		"X-Another-Header":  "another-value",
-		"Authorization":     "Bearer token",
+		"Content-Type":     "application/cloudevents+json",
+		"ce-id":            "evt-123",
+		"ce-source":        "test-source",
+		"ce-type":          "test.event",
+		"ce-specversion":   "1.0",
+		"X-Custom-Header":  "custom-value",
+		"X-Another-Header": "another-value",
+		"Authorization":    "Bearer token",
 	}
 
 	err := s.Deliver(context.Background(), []byte(`{}`), headers)

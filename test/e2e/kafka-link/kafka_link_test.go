@@ -221,11 +221,11 @@ func (f *FisoLinkClient) HealthCheck(ctx context.Context) error {
 
 // E2ETestContext holds the test context
 type E2ETestContext struct {
-	Kafka          *KafkaTestClient
-	FisoLink       *FisoLinkClient
-	Brokers        []string
-	FisoAddr       string
-	cleanupTopics  []string
+	Kafka         *KafkaTestClient
+	FisoLink      *FisoLinkClient
+	Brokers       []string
+	FisoAddr      string
+	cleanupTopics []string
 }
 
 // SetupE2ETest initializes the E2E test environment
@@ -1012,7 +1012,7 @@ func TestKafkaMultipleMessages(t *testing.T) {
 		payload, _ := json.Marshal(msg)
 
 		resp, err := e.FisoLink.PublishMessage(ctx, targetName, payload, map[string]string{
-			"X-Test-Name": t.Name(),
+			"X-Test-Name":   t.Name(),
 			"X-Message-Num": fmt.Sprintf("%d", i),
 		})
 		if err != nil {

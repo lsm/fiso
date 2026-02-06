@@ -365,4 +365,3 @@ targets:
 		t.Errorf("expected initialInterval \"200ms\", got %q", cfg.Targets[0].Retry.InitialInterval)
 	}
 }
-

@@ -81,29 +81,29 @@ source:
 		}
 
 		testCases := []struct {
-			name           string
-			brokers        []string
-			flowFileName   string
+			name         string
+			brokers      []string
+			flowFileName string
 		}{
 			{
-				name:           "single broker",
-				brokers:        []string{"single:9092"},
-				flowFileName:   "single-broker.yaml",
+				name:         "single broker",
+				brokers:      []string{"single:9092"},
+				flowFileName: "single-broker.yaml",
 			},
 			{
-				name:           "multiple brokers",
-				brokers:        []string{"broker1:9092", "broker2:9092", "broker3:9092"},
-				flowFileName:   "multi-broker.yaml",
+				name:         "multiple brokers",
+				brokers:      []string{"broker1:9092", "broker2:9092", "broker3:9092"},
+				flowFileName: "multi-broker.yaml",
 			},
 			{
-				name:           "non-standard port",
-				brokers:        []string{"broker:9093"},
-				flowFileName:   "custom-port.yaml",
+				name:         "non-standard port",
+				brokers:      []string{"broker:9093"},
+				flowFileName: "custom-port.yaml",
 			},
 			{
-				name:           "dns names",
-				brokers:        []string{"kafka.service.consul", "kafka2.service.consul"},
-				flowFileName:   "dns-names.yaml",
+				name:         "dns names",
+				brokers:      []string{"kafka.service.consul", "kafka2.service.consul"},
+				flowFileName: "dns-names.yaml",
 			},
 		}
 
@@ -192,85 +192,85 @@ func TestRunConsume(t *testing.T) {
 	const skipIntegrationTests = true
 
 	tests := []struct {
-		name        string
-		args        []string
-		expectError bool
+		name          string
+		args          []string
+		expectError   bool
 		errorContains string
 		skipIfNoKafka bool
 	}{
 		{
-			name:        "help flag",
-			args:        []string{"--help"},
-			expectError: false,
+			name:          "help flag",
+			args:          []string{"--help"},
+			expectError:   false,
 			skipIfNoKafka: false,
 		},
 		{
-			name:        "missing topic flag",
-			args:        []string{},
-			expectError: true,
+			name:          "missing topic flag",
+			args:          []string{},
+			expectError:   true,
 			errorContains: "--topic is required",
 			skipIfNoKafka: false,
 		},
 		{
-			name:        "missing topic value",
-			args:        []string{"--topic"},
-			expectError: true,
+			name:          "missing topic value",
+			args:          []string{"--topic"},
+			expectError:   true,
 			errorContains: "--topic requires a value",
 			skipIfNoKafka: false,
 		},
 		{
-			name:        "unknown flag",
-			args:        []string{"--unknown"},
-			expectError: true,
+			name:          "unknown flag",
+			args:          []string{"--unknown"},
+			expectError:   true,
 			errorContains: "unknown flag: --unknown",
 			skipIfNoKafka: false,
 		},
 		{
-			name:        "invalid max-messages value",
-			args:        []string{"--topic", "test", "--max-messages", "abc"},
-			expectError: true,
+			name:          "invalid max-messages value",
+			args:          []string{"--topic", "test", "--max-messages", "abc"},
+			expectError:   true,
 			errorContains: "invalid --max-messages value",
 			skipIfNoKafka: false,
 		},
 		{
-			name:        "zero max-messages",
-			args:        []string{"--topic", "test", "--max-messages", "0"},
-			expectError: true,
+			name:          "zero max-messages",
+			args:          []string{"--topic", "test", "--max-messages", "0"},
+			expectError:   true,
 			errorContains: "must be positive",
 			skipIfNoKafka: false,
 		},
 		{
-			name:        "negative max-messages",
-			args:        []string{"--topic", "test", "--max-messages", "-5"},
-			expectError: true,
+			name:          "negative max-messages",
+			args:          []string{"--topic", "test", "--max-messages", "-5"},
+			expectError:   true,
 			errorContains: "must be positive",
 			skipIfNoKafka: false,
 		},
 		{
-			name:        "valid batch mode args",
-			args:        []string{"--topic", "test", "--max-messages", "5"},
-			expectError: true,
+			name:          "valid batch mode args",
+			args:          []string{"--topic", "test", "--max-messages", "5"},
+			expectError:   true,
 			errorContains: "",
 			skipIfNoKafka: true,
 		},
 		{
-			name:        "valid follow mode args",
-			args:        []string{"--topic", "test", "--follow"},
-			expectError: true,
+			name:          "valid follow mode args",
+			args:          []string{"--topic", "test", "--follow"},
+			expectError:   true,
 			errorContains: "",
 			skipIfNoKafka: true,
 		},
 		{
-			name:        "from-beginning flag",
-			args:        []string{"--topic", "test", "--from-beginning"},
-			expectError: true,
+			name:          "from-beginning flag",
+			args:          []string{"--topic", "test", "--from-beginning"},
+			expectError:   true,
 			errorContains: "",
 			skipIfNoKafka: true,
 		},
 		{
-			name:        "all flags",
-			args:        []string{"--topic", "test", "--from-beginning", "--max-messages", "10"},
-			expectError: true,
+			name:          "all flags",
+			args:          []string{"--topic", "test", "--from-beginning", "--max-messages", "10"},
+			expectError:   true,
 			errorContains: "",
 			skipIfNoKafka: true,
 		},
@@ -379,9 +379,9 @@ func TestParseMessageCount(t *testing.T) {
 
 func TestParseKafkaConfigFromYAML(t *testing.T) {
 	tests := []struct {
-		name        string
-		yaml        string
-		expectNil   bool
+		name          string
+		yaml          string
+		expectNil     bool
 		expectBrokers []string
 	}{
 		{
@@ -396,7 +396,7 @@ source:
     topic: orders
     consumerGroup: test-group
 `,
-			expectNil:   false,
+			expectNil:     false,
 			expectBrokers: []string{"localhost:9092", "kafka:9092"},
 		},
 		{
@@ -420,7 +420,7 @@ source:
     topic: orders
     consumerGroup: test-group
 `,
-			expectNil:   false,
+			expectNil:     false,
 			expectBrokers: []string{"localhost:9092"},
 		},
 		{
@@ -801,8 +801,8 @@ source:
 
 func TestPrintMessage(t *testing.T) {
 	tests := []struct {
-		name     string
-		record   *kgo.Record
+		name      string
+		record    *kgo.Record
 		wantPanic bool
 	}{
 		{

@@ -1008,4 +1008,3 @@ func TestRunInit_HelpWithFlags(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
-

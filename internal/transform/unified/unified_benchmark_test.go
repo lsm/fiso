@@ -77,7 +77,7 @@ func BenchmarkWithComputation(b *testing.B) {
 // BenchmarkWithNestedStructure benchmarks CEL with nested output structure.
 func BenchmarkWithNestedStructure(b *testing.B) {
 	fields := map[string]string{
-		"order": `{"id": data.order_id, "total": data.subtotal + data.tax}`,
+		"order":    `{"id": data.order_id, "total": data.subtotal + data.tax}`,
 		"customer": `{"id": data.customer.id, "name": data.customer.name}`,
 	}
 	tr, err := NewTransformer(fields)
@@ -182,7 +182,7 @@ func BenchmarkComplexExpression(b *testing.B) {
 // BenchmarkLargePayload benchmarks CEL with a large realistic event payload.
 func BenchmarkLargePayload(b *testing.B) {
 	fields := map[string]string{
-		"event_id":  "data.id",
+		"event_id":   "data.id",
 		"event_type": "data.type",
 		"timestamp":  "data.timestamp",
 		"user":       `{"id": data.user_id, "segment": data.segment}`,
