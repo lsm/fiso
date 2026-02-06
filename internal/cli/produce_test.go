@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	intkafka "github.com/lsm/fiso/internal/kafka"
 )
 
 func TestRunProduce_Help(t *testing.T) {
@@ -1701,7 +1703,7 @@ func TestRunProduce_WithMockPublisher(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set up mock publisher factory
-			newPublisherFunc = func(brokers []string) (publisher, error) {
+			newPublisherFunc = func(cluster *intkafka.ClusterConfig) (publisher, error) {
 				if tt.publisherErr != nil {
 					return nil, tt.publisherErr
 				}
@@ -1796,7 +1798,7 @@ func TestRunProduce_WithFileAndMock(t *testing.T) {
 			}
 
 			// Set up mock publisher factory
-			newPublisherFunc = func(brokers []string) (publisher, error) {
+			newPublisherFunc = func(cluster *intkafka.ClusterConfig) (publisher, error) {
 				return tt.mockPublisher, nil
 			}
 
@@ -1830,8 +1832,8 @@ func TestRunProduce_CustomBrokersWithMock(t *testing.T) {
 	defer func() { newPublisherFunc = origNewPublisher }()
 
 	var capturedBrokers []string
-	newPublisherFunc = func(brokers []string) (publisher, error) {
-		capturedBrokers = brokers
+	newPublisherFunc = func(cluster *intkafka.ClusterConfig) (publisher, error) {
+		capturedBrokers = cluster.Brokers
 		return &mockKafkaPublisher{}, nil
 	}
 
@@ -1863,8 +1865,8 @@ func TestRunProduce_DefaultBrokersWithMock(t *testing.T) {
 	defer func() { newPublisherFunc = origNewPublisher }()
 
 	var capturedBrokers []string
-	newPublisherFunc = func(brokers []string) (publisher, error) {
-		capturedBrokers = brokers
+	newPublisherFunc = func(cluster *intkafka.ClusterConfig) (publisher, error) {
+		capturedBrokers = cluster.Brokers
 		return &mockKafkaPublisher{}, nil
 	}
 

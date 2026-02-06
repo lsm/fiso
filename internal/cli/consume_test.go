@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lsm/fiso/internal/source/kafka"
+	intkafka "github.com/lsm/fiso/internal/kafka"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -28,14 +28,18 @@ func TestRunConsume_ConfigLoading(t *testing.T) {
 			t.Fatalf("Failed to create flow directory: %v", err)
 		}
 
-		// Create a flow file with custom brokers
+		// Create a flow file with kafka cluster config
 		flowYAML := `
+kafka:
+  clusters:
+    main:
+      brokers:
+        - custom-broker:9092
+        - another-broker:9093
 source:
   type: kafka
   config:
-    brokers:
-      - custom-broker:9092
-      - another-broker:9093
+    cluster: main
     topic: orders
     consumerGroup: test-group
 `
@@ -46,16 +50,16 @@ source:
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		// Test that loadKafkaConfig picks up the custom brokers
-		cfg, err := loadKafkaConfig("test-topic")
+		// Test that loadKafkaClusterConfig picks up the custom brokers
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		expectedBrokers := []string{"custom-broker:9092", "another-broker:9093"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -65,15 +69,15 @@ source:
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		expectedBrokers := []string{"localhost:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -120,15 +124,19 @@ source:
 				}
 
 				flowYAML := `
-source:
-  type: kafka
-  config:
-    brokers:
+kafka:
+  clusters:
+    main:
+      brokers:
 `
 				for _, broker := range tc.brokers {
-					flowYAML += fmt.Sprintf("      - %s\n", broker)
+					flowYAML += fmt.Sprintf("        - %s\n", broker)
 				}
-				flowYAML += `    topic: orders
+				flowYAML += `source:
+  type: kafka
+  config:
+    cluster: main
+    topic: orders
     consumerGroup: test-group
 `
 				flowPath := filepath.Join(flowDir, tc.flowFileName)
@@ -136,18 +144,18 @@ source:
 					t.Fatalf("Failed to write flow file: %v", err)
 				}
 
-				// Change to tmpDir so loadKafkaConfig finds the flow files
+				// Change to tmpDir so loadKafkaClusterConfig finds the flow files
 				_ = os.Chdir(tmpDir)
 				defer func() { _ = os.Chdir(origWd) }()
 
-				cfg, err := loadKafkaConfig("test-topic")
+				cfg, err := loadKafkaClusterConfig("test-topic")
 				if err != nil {
-					t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+					t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 					return
 				}
 
 				if !equalStringSlices(cfg.Brokers, tc.brokers) {
-					t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, tc.brokers)
+					t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, tc.brokers)
 				}
 			})
 		}
@@ -391,14 +399,18 @@ func TestParseKafkaConfigFromYAML(t *testing.T) {
 		expectBrokers []string
 	}{
 		{
-			name: "valid kafka source",
+			name: "valid kafka source with cluster",
 			yaml: `
+kafka:
+  clusters:
+    main:
+      brokers:
+        - localhost:9092
+        - kafka:9092
 source:
   type: kafka
   config:
-    brokers:
-      - localhost:9092
-      - kafka:9092
+    cluster: main
     topic: orders
     consumerGroup: test-group
 `,
@@ -416,13 +428,17 @@ source:
 			expectNil: true,
 		},
 		{
-			name: "kafka source with single broker",
+			name: "kafka source with single broker cluster",
 			yaml: `
+kafka:
+  clusters:
+    default:
+      brokers:
+        - localhost:9092
 source:
   type: kafka
   config:
-    brokers:
-      - localhost:9092
+    cluster: default
     topic: orders
     consumerGroup: test-group
 `,
@@ -430,12 +446,11 @@ source:
 			expectBrokers: []string{"localhost:9092"},
 		},
 		{
-			name: "empty brokers",
+			name: "kafka source without cluster reference",
 			yaml: `
 source:
   type: kafka
   config:
-    brokers: []
     topic: orders
     consumerGroup: test-group
 `,
@@ -453,22 +468,22 @@ source: [
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := parseKafkaConfigFromYAML([]byte(tt.yaml))
+			cfg, err := parseKafkaClusterFromYAML([]byte(tt.yaml))
 			if tt.expectNil {
 				if cfg != nil && len(cfg.Brokers) > 0 {
-					t.Errorf("parseKafkaConfigFromYAML() expected nil brokers, got %v", cfg.Brokers)
+					t.Errorf("parseKafkaClusterFromYAML() expected nil brokers, got %v", cfg.Brokers)
 				}
 			} else {
 				if err != nil {
-					t.Errorf("parseKafkaConfigFromYAML() unexpected error = %v", err)
+					t.Errorf("parseKafkaClusterFromYAML() unexpected error = %v", err)
 					return
 				}
 				if cfg == nil {
-					t.Errorf("parseKafkaConfigFromYAML() expected non-nil config")
+					t.Errorf("parseKafkaClusterFromYAML() expected non-nil config")
 					return
 				}
 				if !equalStringSlices(cfg.Brokers, tt.expectBrokers) {
-					t.Errorf("parseKafkaConfigFromYAML() brokers = %v, want %v", cfg.Brokers, tt.expectBrokers)
+					t.Errorf("parseKafkaClusterFromYAML() brokers = %v, want %v", cfg.Brokers, tt.expectBrokers)
 				}
 			}
 		})
@@ -488,20 +503,20 @@ func TestLoadKafkaConfig(t *testing.T) {
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		if cfg == nil {
-			t.Error("loadKafkaConfig() returned nil config")
+			t.Error("loadKafkaClusterConfig() returned nil config")
 			return
 		}
 
 		expectedBrokers := []string{"localhost:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -514,15 +529,15 @@ func TestLoadKafkaConfig(t *testing.T) {
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		expectedBrokers := []string{"localhost:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -534,12 +549,16 @@ func TestLoadKafkaConfig(t *testing.T) {
 		}
 
 		flowYAML := `
+kafka:
+  clusters:
+    main:
+      brokers:
+        - broker1:9092
+        - broker2:9092
 source:
   type: kafka
   config:
-    brokers:
-      - broker1:9092
-      - broker2:9092
+    cluster: main
     topic: orders
     consumerGroup: test-group
 `
@@ -551,15 +570,15 @@ source:
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		expectedBrokers := []string{"broker1:9092", "broker2:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -572,11 +591,15 @@ source:
 
 		// First flow file with kafka config
 		flowYAML1 := `
+kafka:
+  clusters:
+    main:
+      brokers:
+        - first-broker:9092
 source:
   type: kafka
   config:
-    brokers:
-      - first-broker:9092
+    cluster: main
     topic: orders
     consumerGroup: test-group
 `
@@ -586,11 +609,15 @@ source:
 
 		// Second flow file with kafka config
 		flowYAML2 := `
+kafka:
+  clusters:
+    main:
+      brokers:
+        - second-broker:9092
 source:
   type: kafka
   config:
-    brokers:
-      - second-broker:9092
+    cluster: main
     topic: orders
     consumerGroup: test-group
 `
@@ -601,16 +628,16 @@ source:
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		// Should use the first kafka config found
 		expectedBrokers := []string{"first-broker:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -634,15 +661,15 @@ source:
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		expectedBrokers := []string{"localhost:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -664,16 +691,16 @@ source:
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		// Should return default since no valid YAML was found
 		expectedBrokers := []string{"localhost:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -686,11 +713,15 @@ source:
 
 		// Create a valid flow file
 		flowYAML := `
+kafka:
+  clusters:
+    main:
+      brokers:
+        - test-broker:9092
 source:
   type: kafka
   config:
-    brokers:
-      - test-broker:9092
+    cluster: main
     topic: orders
     consumerGroup: test-group
 `
@@ -701,15 +732,15 @@ source:
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		expectedBrokers := []string{"test-broker:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -721,11 +752,15 @@ source:
 		}
 
 		flowYAML := `
+kafka:
+  clusters:
+    main:
+      brokers:
+        - yml-broker:9092
 source:
   type: kafka
   config:
-    brokers:
-      - yml-broker:9092
+    cluster: main
     topic: orders
     consumerGroup: test-group
 `
@@ -736,15 +771,15 @@ source:
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		expectedBrokers := []string{"yml-broker:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -764,15 +799,15 @@ source:
 		defer func() { _ = os.Chdir(origWd) }()
 
 		// Should return default config instead of error
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() should not error on invalid YAML, got: %v", err)
+			t.Errorf("loadKafkaClusterConfig() should not error on invalid YAML, got: %v", err)
 			return
 		}
 
 		expectedBrokers := []string{"localhost:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 
@@ -785,11 +820,15 @@ source:
 
 		// Create a valid flow file
 		flowYAML := `
+kafka:
+  clusters:
+    main:
+      brokers:
+        - good-broker:9092
 source:
   type: kafka
   config:
-    brokers:
-      - good-broker:9092
+    cluster: main
     topic: orders
     consumerGroup: test-group
 `
@@ -801,16 +840,16 @@ source:
 		_ = os.Chdir(tmpDir)
 		defer func() { _ = os.Chdir(origWd) }()
 
-		cfg, err := loadKafkaConfig("test-topic")
+		cfg, err := loadKafkaClusterConfig("test-topic")
 		if err != nil {
-			t.Errorf("loadKafkaConfig() unexpected error = %v", err)
+			t.Errorf("loadKafkaClusterConfig() unexpected error = %v", err)
 			return
 		}
 
 		// Should find the good file
 		expectedBrokers := []string{"good-broker:9092"}
 		if !equalStringSlices(cfg.Brokers, expectedBrokers) {
-			t.Errorf("loadKafkaConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
+			t.Errorf("loadKafkaClusterConfig() brokers = %v, want %v", cfg.Brokers, expectedBrokers)
 		}
 	})
 }
@@ -918,8 +957,8 @@ func TestCreateKafkaClient(t *testing.T) {
 			t.Skip("Skipping integration test - requires Kafka running")
 		}
 
-		cfg := kafka.Config{
-			Brokers:       []string{"localhost:9092"},
+		cfg := consumeConfig{
+			Cluster:       &intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}},
 			Topic:         "test-topic",
 			ConsumerGroup: "test-group",
 			StartOffset:   "earliest",
@@ -946,8 +985,8 @@ func TestCreateKafkaClient(t *testing.T) {
 			t.Skip("Skipping integration test - requires Kafka running")
 		}
 
-		cfg := kafka.Config{
-			Brokers:       []string{"localhost:9092"},
+		cfg := consumeConfig{
+			Cluster:       &intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}},
 			Topic:         "test-topic",
 			ConsumerGroup: "test-group",
 			StartOffset:   "latest",
@@ -969,8 +1008,8 @@ func TestCreateKafkaClient(t *testing.T) {
 			t.Skip("Skipping integration test - requires Kafka running")
 		}
 
-		cfg := kafka.Config{
-			Brokers:       []string{"broker1:9092", "broker2:9092", "broker3:9092"},
+		cfg := consumeConfig{
+			Cluster:       &intkafka.ClusterConfig{Brokers: []string{"broker1:9092", "broker2:9092", "broker3:9092"}},
 			Topic:         "test-topic",
 			ConsumerGroup: "test-group",
 			StartOffset:   "latest",
@@ -992,13 +1031,13 @@ func TestCreateKafkaClient(t *testing.T) {
 		// This is a unit test that doesn't require Kafka
 		tests := []struct {
 			name        string
-			cfg         kafka.Config
+			cfg         consumeConfig
 			expectError bool
 		}{
 			{
 				name: "valid config with earliest offset",
-				cfg: kafka.Config{
-					Brokers:       []string{"localhost:9092"},
+				cfg: consumeConfig{
+					Cluster:       &intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}},
 					Topic:         "test-topic",
 					ConsumerGroup: "test-group",
 					StartOffset:   "earliest",
@@ -1007,8 +1046,8 @@ func TestCreateKafkaClient(t *testing.T) {
 			},
 			{
 				name: "valid config with latest offset",
-				cfg: kafka.Config{
-					Brokers:       []string{"localhost:9092"},
+				cfg: consumeConfig{
+					Cluster:       &intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}},
 					Topic:         "test-topic",
 					ConsumerGroup: "test-group",
 					StartOffset:   "latest",
@@ -1046,8 +1085,8 @@ func TestCreateKafkaClient(t *testing.T) {
 
 	t.Run("timeout configuration", func(t *testing.T) {
 		// Verify that the dial timeout is configured correctly
-		cfg := kafka.Config{
-			Brokers:       []string{"localhost:9092"},
+		cfg := consumeConfig{
+			Cluster:       &intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}},
 			Topic:         "test-topic",
 			ConsumerGroup: "test-group",
 			StartOffset:   "latest",
@@ -1416,7 +1455,7 @@ func TestRunConsume_WithMockClient(t *testing.T) {
 			},
 			maxFetches: 5,
 		}
-		createKafkaClientFunc = func(cfg kafka.Config) (kafkaConsumer, error) {
+		createKafkaClientFunc = func(cfg consumeConfig) (kafkaConsumer, error) {
 			return mock, nil
 		}
 
@@ -1436,7 +1475,7 @@ func TestRunConsume_WithMockClient(t *testing.T) {
 	})
 
 	t.Run("client creation error", func(t *testing.T) {
-		createKafkaClientFunc = func(cfg kafka.Config) (kafkaConsumer, error) {
+		createKafkaClientFunc = func(cfg consumeConfig) (kafkaConsumer, error) {
 			return nil, fmt.Errorf("cannot connect to kafka")
 		}
 
@@ -1450,12 +1489,12 @@ func TestRunConsume_WithMockClient(t *testing.T) {
 	})
 
 	t.Run("from-beginning flag", func(t *testing.T) {
-		var capturedCfg kafka.Config
+		var capturedCfg consumeConfig
 		mock := &mockKafkaConsumer{
 			records:    []*kgo.Record{},
 			maxFetches: 2,
 		}
-		createKafkaClientFunc = func(cfg kafka.Config) (kafkaConsumer, error) {
+		createKafkaClientFunc = func(cfg consumeConfig) (kafkaConsumer, error) {
 			capturedCfg = cfg
 			return mock, nil
 		}
@@ -1483,7 +1522,7 @@ func TestRunConsume_WithMockClient(t *testing.T) {
 			},
 			maxFetches: 3,
 		}
-		createKafkaClientFunc = func(cfg kafka.Config) (kafkaConsumer, error) {
+		createKafkaClientFunc = func(cfg consumeConfig) (kafkaConsumer, error) {
 			return mock, nil
 		}
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lsm/fiso/internal/source/kafka"
+	intkafka "github.com/lsm/fiso/internal/kafka"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"gopkg.in/yaml.v3"
 )
@@ -22,9 +22,17 @@ type kafkaConsumer interface {
 	Close()
 }
 
+// consumeConfig holds configuration for the consume command.
+type consumeConfig struct {
+	Cluster       *intkafka.ClusterConfig
+	Topic         string
+	ConsumerGroup string
+	StartOffset   string
+}
+
 // createKafkaClientFunc is the function used to create a Kafka client.
 // Tests can replace this to stub out the actual client.
-var createKafkaClientFunc = func(cfg kafka.Config) (kafkaConsumer, error) {
+var createKafkaClientFunc = func(cfg consumeConfig) (kafkaConsumer, error) {
 	return createKafkaClient(cfg)
 }
 
@@ -89,14 +97,14 @@ Examples:
 	}
 
 	// Load Kafka configuration from flow files
-	kafkaCfg, err := loadKafkaConfig(topic)
+	cluster, err := loadKafkaClusterConfig(topic)
 	if err != nil {
 		return fmt.Errorf("load kafka config: %w", err)
 	}
 
 	// Create Kafka consumer
-	cfg := kafka.Config{
-		Brokers:       kafkaCfg.Brokers,
+	cfg := consumeConfig{
+		Cluster:       cluster,
 		Topic:         topic,
 		ConsumerGroup: fmt.Sprintf("fiso-consume-%d", time.Now().Unix()),
 		StartOffset:   "latest",
@@ -112,7 +120,7 @@ Examples:
 	defer client.Close()
 
 	fmt.Printf("Consuming from topic: %s\n", topic)
-	fmt.Printf("Brokers: %s\n", strings.Join(cfg.Brokers, ", "))
+	fmt.Printf("Brokers: %s\n", strings.Join(cluster.Brokers, ", "))
 	fmt.Printf("Offset: %s\n", cfg.StartOffset)
 	if follow {
 		fmt.Println("Mode: follow (continuous)")
@@ -258,19 +266,14 @@ func printMessage(record *kgo.Record) {
 	fmt.Println()
 }
 
-// kafkaConfig holds Kafka connection configuration.
-type kafkaConfig struct {
-	Brokers []string
-}
-
-// loadKafkaConfig loads Kafka configuration from flow definition files.
-func loadKafkaConfig(topic string) (*kafkaConfig, error) {
+// loadKafkaClusterConfig loads Kafka cluster configuration from flow definition files.
+func loadKafkaClusterConfig(topic string) (*intkafka.ClusterConfig, error) {
 	// Search for Kafka source configuration in flow files
 	flowDir := "./fiso/flows"
 	entries, err := os.ReadDir(flowDir)
 	if err != nil {
 		// If fiso/flows doesn't exist, use default localhost config
-		return &kafkaConfig{Brokers: []string{"localhost:9092"}}, nil
+		return &intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}}, nil
 	}
 
 	for _, entry := range entries {
@@ -288,8 +291,8 @@ func loadKafkaConfig(topic string) (*kafkaConfig, error) {
 			continue
 		}
 
-		// Parse YAML to extract Kafka brokers
-		cfg, err := parseKafkaConfigFromYAML(data)
+		// Parse YAML to extract Kafka cluster config
+		cfg, err := parseKafkaClusterFromYAML(data)
 		if err != nil {
 			continue
 		}
@@ -299,18 +302,19 @@ func loadKafkaConfig(topic string) (*kafkaConfig, error) {
 	}
 
 	// Default to localhost
-	return &kafkaConfig{Brokers: []string{"localhost:9092"}}, nil
+	return &intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}}, nil
 }
 
-// parseKafkaConfigFromYAML extracts Kafka configuration from a flow definition YAML.
-func parseKafkaConfigFromYAML(data []byte) (*kafkaConfig, error) {
+// parseKafkaClusterFromYAML extracts Kafka cluster configuration from a flow definition YAML.
+func parseKafkaClusterFromYAML(data []byte) (*intkafka.ClusterConfig, error) {
 	type flowConfig struct {
+		Kafka struct {
+			Clusters map[string]intkafka.ClusterConfig `yaml:"clusters"`
+		} `yaml:"kafka"`
 		Source struct {
 			Type   string `yaml:"type"`
 			Config struct {
-				Brokers       []string `yaml:"brokers"`
-				Topic         string   `yaml:"topic"`
-				ConsumerGroup string   `yaml:"consumerGroup"`
+				Cluster string `yaml:"cluster"`
 			} `yaml:"config"`
 		} `yaml:"source"`
 	}
@@ -320,30 +324,36 @@ func parseKafkaConfigFromYAML(data []byte) (*kafkaConfig, error) {
 		return nil, err
 	}
 
-	if fc.Source.Type == "kafka" && len(fc.Source.Config.Brokers) > 0 {
-		return &kafkaConfig{Brokers: fc.Source.Config.Brokers}, nil
+	if fc.Source.Type == "kafka" && fc.Source.Config.Cluster != "" {
+		if cluster, ok := fc.Kafka.Clusters[fc.Source.Config.Cluster]; ok {
+			return &cluster, nil
+		}
 	}
 
 	return nil, nil
 }
 
 // createKafkaClient creates a Kafka client for consuming.
-func createKafkaClient(cfg kafka.Config) (*kgo.Client, error) {
+func createKafkaClient(cfg consumeConfig) (*kgo.Client, error) {
 	offset := kgo.NewOffset().AtEnd()
 	if cfg.StartOffset == "earliest" {
 		offset = kgo.NewOffset().AtStart()
 	}
 
-	opts := []kgo.Opt{
-		kgo.SeedBrokers(cfg.Brokers...),
+	opts, err := intkafka.ClientOptions(cfg.Cluster)
+	if err != nil {
+		return nil, fmt.Errorf("cluster options: %w", err)
+	}
+
+	opts = append(opts,
 		kgo.ConsumerGroup(cfg.ConsumerGroup),
 		kgo.ConsumeTopics(cfg.Topic),
 		kgo.ConsumeResetOffset(offset),
 		kgo.DisableAutoCommit(),
 		// Add short timeout for initial connection attempts
 		// This allows tests to fail fast when Kafka is unavailable
-		kgo.DialTimeout(3 * time.Second),
-	}
+		kgo.DialTimeout(3*time.Second),
+	)
 
 	return kgo.NewClient(opts...)
 }

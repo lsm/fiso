@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	intkafka "github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/source/kafka"
 )
 
@@ -20,8 +21,8 @@ type publisher interface {
 
 // newPublisherFunc is the function used to create a Kafka publisher.
 // Tests can replace this to stub out the actual publisher.
-var newPublisherFunc func(brokers []string) (publisher, error) = func(brokers []string) (publisher, error) {
-	return kafka.NewPublisher(brokers)
+var newPublisherFunc func(cluster *intkafka.ClusterConfig) (publisher, error) = func(cluster *intkafka.ClusterConfig) (publisher, error) {
+	return kafka.NewPublisher(cluster)
 }
 
 // RunProduce produces test events to Kafka.
@@ -68,12 +69,13 @@ Examples:
 	rateStr, _ := parseStringFlag(args, "--rate")
 	brokersStr, _ := parseStringFlag(args, "--brokers")
 
-	brokers := []string{"localhost:9092"}
+	cluster := &intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}}
 	if brokersStr != "" {
-		brokers = strings.Split(brokersStr, ",")
+		brokers := strings.Split(brokersStr, ",")
 		for i, b := range brokers {
 			brokers[i] = strings.TrimSpace(b)
 		}
+		cluster.Brokers = brokers
 	}
 
 	if filePath == "" && inlineJSON == "" {
@@ -91,7 +93,7 @@ Examples:
 		}
 	}
 
-	publisher, err := newPublisherFunc(brokers)
+	publisher, err := newPublisherFunc(cluster)
 	if err != nil {
 		return fmt.Errorf("create kafka publisher: %w", err)
 	}
