@@ -25,7 +25,7 @@ echo "Waiting for temporal-worker to register workflows..."
 sleep 5
 
 echo "Producing test message to Kafka..."
-echo '{"order_id":"e2e-123","amount":99.99,"customer":"Alice"}' | \
+echo '{"data":{"order_id":"e2e-123","amount":99.99,"customer":"Alice"}}' | \
     docker compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh \
     --bootstrap-server localhost:9092 \
     --topic order-events
