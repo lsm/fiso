@@ -412,9 +412,9 @@ cloudevents:
 - **Temporal** — Starts Temporal workflows for long-running event processing. Supports typed parameters for cross-SDK compatibility.
 - **Kafka** — Produces events to Kafka topics with at-least-once delivery guarantees.
 
-#### Temporal Sink: Typed Parameters
+#### Temporal Sink: CloudEvent Integration
 
-When integrating with Temporal workflows written in different languages (Java, Kotlin, TypeScript), the default behavior of passing raw `[]byte` can be problematic. The Temporal sink supports **typed parameters** that extract individual fields from the event and pass them as separate workflow arguments:
+The Temporal sink sends events to Temporal workflows as **structured CloudEvent objects** (not raw bytes), enabling seamless integration with Java/Kotlin/TypeScript workflows that use Jackson or other JSON deserializers.
 
 ```yaml
 sink:
@@ -423,7 +423,46 @@ sink:
     hostPort: temporal:7233
     taskQueue: order-processing
     workflowType: ProcessOrderWorkflow
-    workflowIdExpr: "{{.eventId}}-{{.ctn}}"
+    workflowIdExpr: "order-{{.data.orderId}}"  # Nested field access supported
+    mode: start  # or "signal"
+```
+
+**Default behavior (recommended):**
+```kotlin
+// Define a CloudEvent data class matching the CE structure
+data class CloudEvent(
+    val specversion: String,
+    val type: String,
+    val source: String,
+    val id: String,
+    val data: OrderData  // Your business data
+)
+
+@WorkflowMethod
+fun processOrder(event: CloudEvent) {
+    // Direct access to typed fields - no manual parsing needed
+    val orderId = event.data.orderId
+}
+```
+
+**workflowIdExpr** supports nested field access using `{{.path}}` syntax:
+- `{{.id}}` → CloudEvent ID
+- `{{.type}}` → CloudEvent type
+- `{{.data.orderId}}` → Field inside CloudEvent's data payload
+- `order-{{.data.customerId}}-{{.data.orderId}}` → Composite IDs
+
+#### Typed Parameters (Advanced)
+
+For workflows requiring specific argument signatures, use **typed parameters** to extract individual fields:
+
+```yaml
+sink:
+  type: temporal
+  config:
+    hostPort: temporal:7233
+    taskQueue: order-processing
+    workflowType: ProcessOrderWorkflow
+    workflowIdExpr: "{{.data.eventId}}-{{.data.ctn}}"
     mode: start
     params:
       - expr: "data.eventId"      # CEL expression → string
@@ -433,16 +472,6 @@ sink:
       - expr: "data.order"        # → object (nested structure)
 ```
 
-**Without typed params (default):**
-```kotlin
-@WorkflowMethod
-fun run(input: ByteArray) {
-    // Manual JSON parsing required
-    val event = Jackson.readValue(input, Event::class.java)
-}
-```
-
-**With typed params:**
 ```kotlin
 @WorkflowMethod
 fun run(eventId: String, ctn: String, accountId: String, amount: Double, order: Order) {
@@ -455,8 +484,6 @@ fun run(eventId: String, ctn: String, accountId: String, amount: Double, order: 
 - Null values
 - Arrays: `[data.item1, data.item2]`
 - Objects: `data.customer` (passes entire nested object)
-
-**Note:** When `params` is not specified, the sink maintains backwards compatibility by passing the raw event bytes as a single argument.
 
 #### Dead Letter Queue
 
