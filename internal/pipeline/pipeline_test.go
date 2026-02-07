@@ -2067,7 +2067,8 @@ func TestPipeline_CELNilProgram(t *testing.T) {
 		FlowName: "test-flow",
 		CloudEvents: &CloudEventsOverrides{
 			// This will fail to compile as CEL (not valid syntax), so will use literal
-			ID: "literal-id-value",
+			ID:   "literal-id-value",
+			Data: "literal-data-value", // Also test Data with literal (nil CEL program)
 		},
 	}, src, nil, sk, dlqHandler, nil)
 
@@ -2087,6 +2088,10 @@ func TestPipeline_CELNilProgram(t *testing.T) {
 	// ID should be the literal value
 	if ce["id"] != "literal-id-value" {
 		t.Errorf("expected id 'literal-id-value', got %v", ce["id"])
+	}
+	// Data should be the literal string value
+	if ce["data"] != "literal-data-value" {
+		t.Errorf("expected data 'literal-data-value', got %v", ce["data"])
 	}
 }
 
@@ -2125,6 +2130,45 @@ func TestPipeline_CloudEventsOverrides_NonStringCEL(t *testing.T) {
 	// Subject should be the number converted to string
 	if ce["subject"] != "42" {
 		t.Errorf("expected subject '42', got %v", ce["subject"])
+	}
+}
+
+func TestPipeline_CloudEventsData_CELEvalError(t *testing.T) {
+	// Test when Data CEL expression fails to evaluate - returns nil which marshals to null
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"field":"value"}`), Topic: "test"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			// CEL expression that accesses missing nested field - will return nil
+			Data: "data.missing.nested.path",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	// Event should still be processed (Data override returned nil, marshaled to null)
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Data should be null when CEL returns nil
+	if ce["data"] != nil {
+		t.Errorf("expected data to be nil, got %v", ce["data"])
 	}
 }
 
