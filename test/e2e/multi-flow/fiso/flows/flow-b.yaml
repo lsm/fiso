@@ -2,7 +2,7 @@ name: flow-b
 source:
   type: http
   config:
-    listenAddr: ":8082"
+    listenAddr: ":8080"
     path: /ingest-b
 sink:
   type: http

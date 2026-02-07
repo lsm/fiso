@@ -98,6 +98,10 @@ func run() error {
 		}
 	}()
 
+	// Create shared HTTP server pool for path-based routing
+	// Multiple HTTP flows can share the same port with different paths
+	httpPool := httpsource.NewServerPool(logger)
+
 	// Build and start all flows concurrently (router model)
 	// Each flow runs independently - one flow failure doesn't stop others
 	type flowRunner struct {
@@ -108,7 +112,7 @@ func run() error {
 	runners := make([]*flowRunner, 0, len(flows))
 	for name, def := range flows {
 		logger.Info("building flow", "name", name)
-		p, err := buildPipeline(def, logger)
+		p, err := buildPipeline(def, logger, httpPool)
 		if err != nil {
 			return fmt.Errorf("build pipeline %s: %w", name, err)
 		}
@@ -124,6 +128,13 @@ func run() error {
 
 	logger.Info("starting flows", "count", len(runners))
 	health.SetReady(true)
+
+	// Start the shared HTTP pool (handles all HTTP sources)
+	go func() {
+		if err := httpPool.Start(ctx); err != nil && err != context.Canceled {
+			logger.Error("http pool error", "error", err)
+		}
+	}()
 
 	// Start each flow in its own goroutine (independent execution)
 	for _, runner := range runners {
@@ -149,6 +160,11 @@ func run() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
+	// Shut down HTTP pool first (stops accepting new requests)
+	if err := httpPool.Close(); err != nil {
+		logger.Error("http pool shutdown error", "error", err)
+	}
+
 	// Shut down all pipelines
 	for _, runner := range runners {
 		if err := runner.pipeline.Shutdown(shutdownCtx); err != nil {
@@ -164,7 +180,7 @@ func run() error {
 	return nil
 }
 
-func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeline.Pipeline, error) {
+func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool *httpsource.ServerPool) (*pipeline.Pipeline, error) {
 	// Build source
 	var src source.Source
 	var propagateErrors bool
@@ -209,7 +225,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 	case "http":
 		listenAddr, _ := flowDef.Source.Config["listenAddr"].(string)
 		path, _ := flowDef.Source.Config["path"].(string)
-		s, err := httpsource.NewSource(httpsource.Config{ListenAddr: listenAddr, Path: path}, logger)
+		s, err := httpsource.NewPooledSource(httpPool, httpsource.Config{ListenAddr: listenAddr, Path: path})
 		if err != nil {
 			return nil, fmt.Errorf("http source: %w", err)
 		}

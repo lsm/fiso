@@ -587,6 +587,40 @@ INFO flow started name=audit-log           # Still running
 
 Kubernetes will detect degraded state via health checks if needed.
 
+**Shared HTTP port with path-based routing:**
+
+Multiple HTTP flows can share the same port and route by path:
+
+```yaml
+# flow-a.yaml
+name: flow-a
+source:
+  type: http
+  config:
+    listenAddr: ":8080"   # Same port
+    path: /ingest-a       # Different path
+sink:
+  type: http
+  config:
+    url: http://service-a:8080
+    method: POST
+
+# flow-b.yaml
+name: flow-b
+source:
+  type: http
+  config:
+    listenAddr: ":8080"   # Same port!
+    path: /ingest-b       # Different path
+sink:
+  type: http
+  config:
+    url: http://service-b:8080
+    method: POST
+```
+
+This creates a single HTTP server on port 8080 that routes `/ingest-a` → flow-a and `/ingest-b` → flow-b.
+
 Kafka sink example:
 
 ```yaml

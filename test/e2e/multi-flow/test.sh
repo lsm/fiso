@@ -2,10 +2,10 @@
 set -e
 
 echo "=== Multi-Flow E2E Test ==="
-echo "Tests that fiso-flow runs multiple flows concurrently (router model)"
+echo "Tests that fiso-flow runs multiple flows on a shared port with path-based routing"
 echo ""
-echo "Flow A: curl:8081/ingest-a → fiso-flow → user-service/flow-a"
-echo "Flow B: curl:8083/ingest-b → fiso-flow → user-service/flow-b"
+echo "Flow A: curl:8080/ingest-a → fiso-flow → user-service/flow-a"
+echo "Flow B: curl:8080/ingest-b → fiso-flow → user-service/flow-b"
 echo ""
 
 BUILD_FLAG="${E2E_BUILD_FLAG:---build}"
@@ -17,9 +17,9 @@ echo "Waiting for services to be ready..."
 sleep 3
 
 echo ""
-echo "=== Test 1: Send event to Flow A (port 8081) ==="
+echo "=== Test 1: Send event to Flow A (port 8080, path /ingest-a) ==="
 STATUS_A=$(curl -s -o /tmp/e2e-response-a.txt -w "%{http_code}" \
-    -X POST http://localhost:8081/ingest-a \
+    -X POST http://localhost:8080/ingest-a \
     -H "Content-Type: application/json" \
     -d '{"flow": "a", "order_id": "A-001"}')
 
@@ -29,9 +29,9 @@ cat /tmp/e2e-response-a.txt
 echo ""
 
 echo ""
-echo "=== Test 2: Send event to Flow B (port 8083) ==="
+echo "=== Test 2: Send event to Flow B (port 8080, path /ingest-b) ==="
 STATUS_B=$(curl -s -o /tmp/e2e-response-b.txt -w "%{http_code}" \
-    -X POST http://localhost:8083/ingest-b \
+    -X POST http://localhost:8080/ingest-b \
     -H "Content-Type: application/json" \
     -d '{"flow": "b", "order_id": "B-001"}')
 

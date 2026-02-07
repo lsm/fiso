@@ -2,7 +2,7 @@ name: flow-a
 source:
   type: http
   config:
-    listenAddr: ":8081"
+    listenAddr: ":8080"
     path: /ingest-a
 sink:
   type: http

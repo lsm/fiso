@@ -13,8 +13,7 @@ services:
       context: ../../..
       dockerfile: Dockerfile.flow
     ports:
-      - "8081:8081"   # flow-a
-      - "8083:8082"   # flow-b (internal 8082 mapped to external 8083)
+      - "8080:8080"   # shared HTTP server (flow-a + flow-b via path routing)
     volumes:
       - ./fiso/flows:/etc/fiso/flows:ro
     environment:
