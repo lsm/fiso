@@ -427,3 +427,165 @@ func TestServerPool_ListenAddr_NotStarted(t *testing.T) {
 		t.Errorf("expected empty addr for non-existent server, got %s", addr)
 	}
 }
+
+func TestPooledSource_Start(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	src, err := NewPooledSource(pool, Config{ListenAddr: "127.0.0.1:0", Path: "/test"})
+	if err != nil {
+		t.Fatalf("new pooled source: %v", err)
+	}
+
+	var received bool
+	var mu sync.Mutex
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start the source in background (registers handler and blocks)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- src.Start(ctx, func(_ context.Context, evt source.Event) error {
+			mu.Lock()
+			received = true
+			mu.Unlock()
+			return nil
+		})
+	}()
+
+	// Give time for registration to complete
+	time.Sleep(10 * time.Millisecond)
+
+	// Now start the pool
+	go func() {
+		_ = pool.Start(ctx)
+	}()
+
+	// Wait for pool to be ready
+	pool.WaitReady()
+	addr := pool.ListenAddr("127.0.0.1:0")
+
+	// Send request
+	resp, err := http.Post("http://"+addr+"/test", "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	cancel()
+	err = <-errCh
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !received {
+		t.Error("expected handler to be called")
+	}
+}
+
+func TestPooledSource_EmptyAddress(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	_, err := NewPooledSource(pool, Config{ListenAddr: "", Path: "/test"})
+	if err == nil {
+		t.Fatal("expected error for empty address")
+	}
+}
+
+func TestPooledSource_DefaultPath(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	src, err := NewPooledSource(pool, Config{ListenAddr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatalf("new pooled source: %v", err)
+	}
+
+	if src.path != "/" {
+		t.Errorf("expected default path /, got %s", src.path)
+	}
+}
+
+func TestPooledSource_Close(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	src, err := NewPooledSource(pool, Config{ListenAddr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatalf("new pooled source: %v", err)
+	}
+
+	// Close is a no-op for pooled sources
+	if err := src.Close(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPooledSource_DuplicateRegistration(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	// Register first source
+	_, err := pool.Register("127.0.0.1:0", "/path", func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+
+	// Try to register pooled source with same path
+	src, err := NewPooledSource(pool, Config{ListenAddr: "127.0.0.1:0", Path: "/path"})
+	if err != nil {
+		t.Fatalf("new pooled source: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start should fail due to duplicate path
+	err = src.Start(ctx, func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+	if err == nil {
+		t.Error("expected error for duplicate path")
+	}
+}
+
+func TestServerPool_Start_InvalidAddress(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	// Register with an invalid address that will fail on listen
+	_, err := pool.Register("999.999.999.999:99999", "/", func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Start should fail due to listen error
+	err = pool.Start(ctx)
+	if err == nil {
+		t.Error("expected error for invalid address")
+	}
+}
+
+func TestServerPool_Close_NotStarted(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	_, err := pool.Register("127.0.0.1:0", "/", func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Close before start should work (no server to shutdown)
+	if err := pool.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
+}
