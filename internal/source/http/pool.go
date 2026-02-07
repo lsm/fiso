@@ -42,13 +42,15 @@ type RouteHandle struct {
 // PooledSource is an HTTP source that uses a shared server pool.
 // It implements the Source interface but delegates actual serving to the pool.
 type PooledSource struct {
-	pool *ServerPool
-	addr string
-	path string
+	pool   *ServerPool
+	addr   string
+	path   string
+	handle *RouteHandle
 }
 
-// NewPooledSource creates an HTTP source that registers with a shared pool.
-// The pool must be started separately after all sources are registered.
+// NewPooledSource creates an HTTP source that pre-registers with a shared pool.
+// The path is reserved immediately so pool.Start() knows about all routes.
+// The handler is set later when Start() is called.
 func NewPooledSource(pool *ServerPool, cfg Config) (*PooledSource, error) {
 	if cfg.ListenAddr == "" {
 		return nil, fmt.Errorf("HTTP listen address is required")
@@ -57,19 +59,26 @@ func NewPooledSource(pool *ServerPool, cfg Config) (*PooledSource, error) {
 	if path == "" {
 		path = "/"
 	}
+
+	// Pre-register to reserve the path (handler set in Start)
+	handle, err := pool.PreRegister(cfg.ListenAddr, path)
+	if err != nil {
+		return nil, fmt.Errorf("pre-register: %w", err)
+	}
+
 	return &PooledSource{
-		pool: pool,
-		addr: cfg.ListenAddr,
-		path: path,
+		pool:   pool,
+		addr:   cfg.ListenAddr,
+		path:   path,
+		handle: handle,
 	}, nil
 }
 
-// Start registers the handler with the pool and blocks until ctx is cancelled.
+// Start sets the handler for this source and blocks until ctx is cancelled.
 // The actual HTTP server is managed by the pool.
 func (s *PooledSource) Start(ctx context.Context, handler func(context.Context, source.Event) error) error {
-	_, err := s.pool.Register(s.addr, s.path, handler)
-	if err != nil {
-		return fmt.Errorf("register with pool: %w", err)
+	if err := s.pool.SetHandler(s.handle, handler); err != nil {
+		return fmt.Errorf("set handler: %w", err)
 	}
 
 	// Block until context is cancelled
@@ -92,6 +101,118 @@ func NewServerPool(logger *slog.Logger) *ServerPool {
 		servers: make(map[string]*sharedServer),
 		logger:  logger,
 	}
+}
+
+// PreRegister reserves a path on a shared server without setting a handler.
+// The handler is set later via SetHandler. This allows routes to be registered
+// before pool.Start() while handlers are set during source.Start().
+func (p *ServerPool) PreRegister(listenAddr, path string) (*RouteHandle, error) {
+	if listenAddr == "" {
+		return nil, fmt.Errorf("listenAddr is required")
+	}
+	if path == "" {
+		path = "/"
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	srv, exists := p.servers[listenAddr]
+	if !exists {
+		srv = &sharedServer{
+			addr:     listenAddr,
+			mux:      http.NewServeMux(),
+			handlers: make(map[string]func(context.Context, source.Event) error),
+			ready:    make(chan struct{}),
+			logger:   p.logger,
+		}
+		p.servers[listenAddr] = srv
+	}
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	if _, pathExists := srv.handlers[path]; pathExists {
+		return nil, fmt.Errorf("path %q already registered on %s", path, listenAddr)
+	}
+
+	// Reserve the path with nil handler (set later via SetHandler)
+	srv.handlers[path] = nil
+
+	// Register HTTP handler that looks up the actual handler at request time
+	srv.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		srv.mu.Lock()
+		handler := srv.handlers[path]
+		srv.mu.Unlock()
+
+		if handler == nil {
+			http.Error(w, "handler not ready", http.StatusServiceUnavailable)
+			return
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+
+		headers := make(map[string]string)
+		for k, v := range r.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+
+		evt := source.Event{
+			Value:   body,
+			Headers: headers,
+			Topic:   "http",
+		}
+
+		if err := handler(r.Context(), evt); err != nil {
+			srv.logger.Error("handler error", "path", path, "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	})
+
+	return &RouteHandle{
+		pool: p,
+		addr: listenAddr,
+		path: path,
+	}, nil
+}
+
+// SetHandler sets the handler for a pre-registered route.
+func (p *ServerPool) SetHandler(handle *RouteHandle, handler func(context.Context, source.Event) error) error {
+	if handle == nil {
+		return fmt.Errorf("handle is nil")
+	}
+
+	p.mu.RLock()
+	srv, exists := p.servers[handle.addr]
+	p.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("server %s not found", handle.addr)
+	}
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	if _, pathExists := srv.handlers[handle.path]; !pathExists {
+		return fmt.Errorf("path %q not registered on %s", handle.path, handle.addr)
+	}
+
+	srv.handlers[handle.path] = handler
+	return nil
 }
 
 // Register adds a path handler to a shared server.

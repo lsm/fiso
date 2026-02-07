@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -527,29 +528,19 @@ func TestPooledSource_Close(t *testing.T) {
 func TestPooledSource_DuplicateRegistration(t *testing.T) {
 	pool := NewServerPool(nil)
 
-	// Register first source
-	_, err := pool.Register("127.0.0.1:0", "/path", func(_ context.Context, evt source.Event) error {
-		return nil
-	})
+	// Register first source using PreRegister (same as NewPooledSource)
+	_, err := pool.PreRegister("127.0.0.1:0", "/path")
 	if err != nil {
-		t.Fatalf("first register: %v", err)
+		t.Fatalf("first pre-register: %v", err)
 	}
 
-	// Try to register pooled source with same path
-	src, err := NewPooledSource(pool, Config{ListenAddr: "127.0.0.1:0", Path: "/path"})
-	if err != nil {
-		t.Fatalf("new pooled source: %v", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Start should fail due to duplicate path
-	err = src.Start(ctx, func(_ context.Context, evt source.Event) error {
-		return nil
-	})
+	// Try to register pooled source with same path - should fail at creation time
+	_, err = NewPooledSource(pool, Config{ListenAddr: "127.0.0.1:0", Path: "/path"})
 	if err == nil {
 		t.Error("expected error for duplicate path")
+	}
+	if !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("expected 'already registered' error, got: %v", err)
 	}
 }
 
@@ -587,5 +578,115 @@ func TestServerPool_Close_NotStarted(t *testing.T) {
 	// Close before start should work (no server to shutdown)
 	if err := pool.Close(); err != nil {
 		t.Errorf("close: %v", err)
+	}
+}
+
+func TestPreRegister_HandlerNotReady(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	// Pre-register without setting handler
+	_, err := pool.PreRegister("127.0.0.1:0", "/")
+	if err != nil {
+		t.Fatalf("pre-register: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = pool.Start(ctx)
+	}()
+	pool.WaitReady()
+
+	// Request should get 503 because handler not set
+	addr := pool.ListenAddr("127.0.0.1:0")
+	resp, err := http.Post("http://"+addr+"/", "application/json", bytes.NewReader([]byte("test")))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", resp.StatusCode)
+	}
+}
+
+func TestSetHandler_NilHandle(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	err := pool.SetHandler(nil, func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+	if err == nil {
+		t.Error("expected error for nil handle")
+	}
+}
+
+func TestSetHandler_ServerNotFound(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	handle := &RouteHandle{
+		pool: pool,
+		addr: "127.0.0.1:0",
+		path: "/",
+	}
+
+	err := pool.SetHandler(handle, func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+	if err == nil {
+		t.Error("expected error for server not found")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' error, got: %v", err)
+	}
+}
+
+func TestSetHandler_PathNotRegistered(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	// Pre-register one path
+	_, err := pool.PreRegister("127.0.0.1:0", "/path1")
+	if err != nil {
+		t.Fatalf("pre-register: %v", err)
+	}
+
+	// Try to set handler for different path
+	handle := &RouteHandle{
+		pool: pool,
+		addr: "127.0.0.1:0",
+		path: "/path2",
+	}
+
+	err = pool.SetHandler(handle, func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+	if err == nil {
+		t.Error("expected error for path not registered")
+	}
+	if !strings.Contains(err.Error(), "not registered") {
+		t.Errorf("expected 'not registered' error, got: %v", err)
+	}
+}
+
+func TestPreRegister_EmptyAddress(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	_, err := pool.PreRegister("", "/")
+	if err == nil {
+		t.Error("expected error for empty address")
+	}
+}
+
+func TestPreRegister_DefaultPath(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	handle, err := pool.PreRegister("127.0.0.1:0", "")
+	if err != nil {
+		t.Fatalf("pre-register: %v", err)
+	}
+
+	if handle.path != "/" {
+		t.Errorf("expected default path '/', got %q", handle.path)
 	}
 }
