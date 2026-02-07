@@ -416,3 +416,99 @@ func TestDeliver_NoParams_BackwardsCompatible(t *testing.T) {
 		t.Errorf("expected first arg to be []byte, got %T", mc.lastArgs[0])
 	}
 }
+
+func TestDeliver_TypedParams_AllTypes(t *testing.T) {
+	mc := &mockClient{}
+	s, err := NewSink(mc, Config{
+		TaskQueue:    "test-queue",
+		WorkflowType: "TestWorkflow",
+		Params: []ParamConfig{
+			{Expr: "data.strVal"},
+			{Expr: "data.intVal"},
+			{Expr: "data.floatVal"},
+			{Expr: "data.boolVal"},
+			{Expr: "data.nullVal"},
+			{Expr: "data.listVal"},
+			{Expr: "data.mapVal"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating sink: %v", err)
+	}
+
+	event, _ := json.Marshal(map[string]interface{}{
+		"strVal":   "hello",
+		"intVal":   42,
+		"floatVal": 3.14,
+		"boolVal":  true,
+		"nullVal":  nil,
+		"listVal":  []interface{}{"a", "b", "c"},
+		"mapVal":   map[string]interface{}{"nested": "value"},
+	})
+	err = s.Deliver(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mc.lastArgs) != 7 {
+		t.Fatalf("expected 7 args, got %d", len(mc.lastArgs))
+	}
+
+	// String
+	if mc.lastArgs[0] != "hello" {
+		t.Errorf("expected strVal 'hello', got %v", mc.lastArgs[0])
+	}
+	// Int (JSON numbers are float64 by default)
+	if mc.lastArgs[1] != float64(42) {
+		t.Errorf("expected intVal 42, got %v (type: %T)", mc.lastArgs[1], mc.lastArgs[1])
+	}
+	// Float
+	if mc.lastArgs[2] != 3.14 {
+		t.Errorf("expected floatVal 3.14, got %v", mc.lastArgs[2])
+	}
+	// Bool
+	if mc.lastArgs[3] != true {
+		t.Errorf("expected boolVal true, got %v", mc.lastArgs[3])
+	}
+	// Null
+	if mc.lastArgs[4] != nil {
+		t.Errorf("expected nullVal nil, got %v", mc.lastArgs[4])
+	}
+	// List
+	list, ok := mc.lastArgs[5].([]interface{})
+	if !ok {
+		t.Errorf("expected listVal to be []interface{}, got %T", mc.lastArgs[5])
+	} else if len(list) != 3 {
+		t.Errorf("expected listVal to have 3 elements, got %d", len(list))
+	}
+	// Map
+	m, ok := mc.lastArgs[6].(map[string]interface{})
+	if !ok {
+		t.Errorf("expected mapVal to be map[string]interface{}, got %T", mc.lastArgs[6])
+	} else if m["nested"] != "value" {
+		t.Errorf("expected mapVal.nested to be 'value', got %v", m["nested"])
+	}
+}
+
+func TestDeliver_InvalidEventJSON(t *testing.T) {
+	mc := &mockClient{}
+	s, err := NewSink(mc, Config{
+		TaskQueue:    "test-queue",
+		WorkflowType: "TestWorkflow",
+		Params: []ParamConfig{
+			{Expr: "data.field"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating sink: %v", err)
+	}
+
+	// Invalid JSON
+	err = s.Deliver(context.Background(), []byte("not valid json"), nil)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "parse event") {
+		t.Errorf("expected parse error, got: %v", err)
+	}
+}
