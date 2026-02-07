@@ -2052,6 +2052,121 @@ func TestPipeline_CloudEventDetection_CELDataExtraction(t *testing.T) {
 	}
 }
 
+func TestPipeline_CELNilProgram(t *testing.T) {
+	// Test behavior when CEL program is nil (literal value used)
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"data":"ok"}`), Topic: "test"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			// This will fail to compile as CEL (not valid syntax), so will use literal
+			ID: "literal-id-value",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// ID should be the literal value
+	if ce["id"] != "literal-id-value" {
+		t.Errorf("expected id 'literal-id-value', got %v", ce["id"])
+	}
+}
+
+func TestPipeline_CloudEventsOverrides_NonStringCEL(t *testing.T) {
+	// Test CEL expressions that return non-string types
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(`{"count":42,"flag":true}`), Topic: "test"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			// CEL that returns a number - should be converted to string
+			Subject: "data.count",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Subject should be the number converted to string
+	if ce["subject"] != "42" {
+		t.Errorf("expected subject '42', got %v", ce["subject"])
+	}
+}
+
+func TestPipeline_CloudEventDetection_CELEvalError(t *testing.T) {
+	// Test that CEL evaluation errors are handled gracefully
+	ceInput := `{"specversion":"1.0","type":"test","source":"test","id":"123","data":{}}`
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(ceInput), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			// CEL expression that will return empty string for missing field
+			ID: "data.nonexistent.field",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// ID should remain unchanged from original (CEL eval failed)
+	if ce["id"] != "123" {
+		t.Errorf("expected id '123' (unchanged), got %v", ce["id"])
+	}
+}
+
 func TestIsCloudEvent(t *testing.T) {
 	tests := []struct {
 		name     string

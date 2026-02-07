@@ -708,6 +708,14 @@ func TestResolveNestedField(t *testing.T) {
 			path:     "count",
 			expected: "42",
 		},
+		{
+			name: "non-map in path",
+			data: map[string]interface{}{
+				"data": "not-a-map",
+			},
+			path:     "data.field",
+			expected: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -717,5 +725,51 @@ func TestResolveNestedField(t *testing.T) {
 				t.Errorf("resolveNestedField(%v, %q) = %q, want %q", tt.data, tt.path, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestToNative_CELTypes(t *testing.T) {
+	// Test toNative with actual CEL types
+	mc := &mockClient{}
+	s, err := NewSink(mc, Config{
+		TaskQueue:    "test-queue",
+		WorkflowType: "TestWorkflow",
+		Params: []ParamConfig{
+			{Expr: "data.intVal"},
+			{Expr: "data.doubleVal"},
+			{Expr: "data.boolVal"},
+			{Expr: "data.strVal"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating sink: %v", err)
+	}
+
+	event, _ := json.Marshal(map[string]interface{}{
+		"intVal":    int64(42),
+		"doubleVal": 3.14159,
+		"boolVal":   false,
+		"strVal":    "test-string",
+	})
+	err = s.Deliver(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mc.lastArgs) != 4 {
+		t.Fatalf("expected 4 args, got %d", len(mc.lastArgs))
+	}
+	// Int (JSON numbers are float64 by default, CEL may convert)
+	if mc.lastArgs[0] != float64(42) {
+		t.Errorf("expected intVal 42, got %v (type: %T)", mc.lastArgs[0], mc.lastArgs[0])
+	}
+	if mc.lastArgs[1] != 3.14159 {
+		t.Errorf("expected doubleVal 3.14159, got %v", mc.lastArgs[1])
+	}
+	if mc.lastArgs[2] != false {
+		t.Errorf("expected boolVal false, got %v", mc.lastArgs[2])
+	}
+	if mc.lastArgs[3] != "test-string" {
+		t.Errorf("expected strVal 'test-string', got %v", mc.lastArgs[3])
 	}
 }
