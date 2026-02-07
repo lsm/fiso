@@ -27,6 +27,7 @@ type sharedServer struct {
 	listener net.Listener
 	handlers map[string]func(context.Context, source.Event) error
 	started  bool
+	ready    chan struct{} // closed when listener is ready
 	mu       sync.Mutex
 	logger   *slog.Logger
 }
@@ -113,6 +114,7 @@ func (p *ServerPool) Register(listenAddr, path string, handler func(context.Cont
 			addr:     listenAddr,
 			mux:      http.NewServeMux(),
 			handlers: make(map[string]func(context.Context, source.Event) error),
+			ready:    make(chan struct{}),
 			logger:   p.logger,
 		}
 		p.servers[listenAddr] = srv
@@ -197,10 +199,10 @@ func (p *ServerPool) Start(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		// Graceful shutdown
-		p.Close()
+		_ = p.Close()
 		return ctx.Err()
 	case err := <-errCh:
-		p.Close()
+		_ = p.Close()
 		return err
 	}
 }
@@ -240,6 +242,40 @@ func (p *ServerPool) RouteCount() int {
 	return count
 }
 
+// WaitReady blocks until all servers are ready to accept connections.
+func (p *ServerPool) WaitReady() {
+	p.mu.RLock()
+	servers := make([]*sharedServer, 0, len(p.servers))
+	for _, srv := range p.servers {
+		servers = append(servers, srv)
+	}
+	p.mu.RUnlock()
+
+	for _, srv := range servers {
+		<-srv.ready
+	}
+}
+
+// ListenAddr returns the actual listen address for a server after it starts.
+// Returns empty string if server not found or not started.
+func (p *ServerPool) ListenAddr(configAddr string) string {
+	p.mu.RLock()
+	srv, exists := p.servers[configAddr]
+	p.mu.RUnlock()
+
+	if !exists {
+		return ""
+	}
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	if srv.listener == nil {
+		return ""
+	}
+	return srv.listener.Addr().String()
+}
+
 func (s *sharedServer) start(ctx context.Context) error {
 	s.mu.Lock()
 	if s.started {
@@ -255,6 +291,7 @@ func (s *sharedServer) start(ctx context.Context) error {
 	s.listener = lis
 	s.server = &http.Server{Handler: s.mux}
 	s.started = true
+	close(s.ready) // signal that listener is ready
 	s.mu.Unlock()
 
 	s.logger.Info("http pool server starting", "addr", lis.Addr().String(), "routes", len(s.handlers))

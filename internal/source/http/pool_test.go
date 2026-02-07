@@ -57,15 +57,11 @@ func TestServerPool_SingleServer_MultiplePaths(t *testing.T) {
 		errCh <- pool.Start(ctx)
 	}()
 
-	// Wait for server to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for server to be ready
+	pool.WaitReady()
 
 	// Get the actual listen address from the pool
-	pool.mu.RLock()
-	srv := pool.servers["127.0.0.1:0"]
-	pool.mu.RUnlock()
-
-	addr := srv.listener.Addr().String()
+	addr := pool.ListenAddr("127.0.0.1:0")
 
 	// Send requests to both paths
 	resp, err := http.Post("http://"+addr+"/path-a", "application/json", bytes.NewReader([]byte(`{}`)))
@@ -205,13 +201,8 @@ func TestServerPool_HandlerError(t *testing.T) {
 		errCh <- pool.Start(ctx)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
-
-	pool.mu.RLock()
-	srv := pool.servers["127.0.0.1:0"]
-	pool.mu.RUnlock()
-
-	addr := srv.listener.Addr().String()
+	pool.WaitReady()
+	addr := pool.ListenAddr("127.0.0.1:0")
 
 	resp, err := http.Post("http://"+addr+"/error", "application/json", bytes.NewReader([]byte(`{}`)))
 	if err != nil {
@@ -243,13 +234,8 @@ func TestServerPool_MethodNotAllowed(t *testing.T) {
 		errCh <- pool.Start(ctx)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
-
-	pool.mu.RLock()
-	srv := pool.servers["127.0.0.1:0"]
-	pool.mu.RUnlock()
-
-	addr := srv.listener.Addr().String()
+	pool.WaitReady()
+	addr := pool.ListenAddr("127.0.0.1:0")
 
 	resp, err := http.Get("http://" + addr + "/")
 	if err != nil {
@@ -293,7 +279,7 @@ func TestServerPool_Close(t *testing.T) {
 		errCh <- pool.Start(ctx)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	pool.WaitReady()
 
 	// Close should work
 	if err := pool.Close(); err != nil {
@@ -336,13 +322,8 @@ func TestServerPool_ConcurrentRequests(t *testing.T) {
 		errCh <- pool.Start(ctx)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
-
-	pool.mu.RLock()
-	srv := pool.servers["127.0.0.1:0"]
-	pool.mu.RUnlock()
-
-	addr := srv.listener.Addr().String()
+	pool.WaitReady()
+	addr := pool.ListenAddr("127.0.0.1:0")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
@@ -400,13 +381,8 @@ func TestServerPool_HeadersPassed(t *testing.T) {
 		errCh <- pool.Start(ctx)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
-
-	pool.mu.RLock()
-	srv := pool.servers["127.0.0.1:0"]
-	pool.mu.RUnlock()
-
-	addr := srv.listener.Addr().String()
+	pool.WaitReady()
+	addr := pool.ListenAddr("127.0.0.1:0")
 
 	client := &http.Client{}
 	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/", bytes.NewReader([]byte(`{}`)))
@@ -426,5 +402,28 @@ func TestServerPool_HeadersPassed(t *testing.T) {
 
 	if receivedHeaders["X-Custom-Header"] != "test-value" {
 		t.Errorf("expected header X-Custom-Header=test-value, got %v", receivedHeaders)
+	}
+}
+
+func TestServerPool_ListenAddr_NotStarted(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	_, err := pool.Register("127.0.0.1:0", "/", func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// ListenAddr should return empty before start
+	addr := pool.ListenAddr("127.0.0.1:0")
+	if addr != "" {
+		t.Errorf("expected empty addr before start, got %s", addr)
+	}
+
+	// ListenAddr for non-existent server
+	addr = pool.ListenAddr("127.0.0.2:0")
+	if addr != "" {
+		t.Errorf("expected empty addr for non-existent server, got %s", addr)
 	}
 }
