@@ -10,7 +10,9 @@ import (
 // ProcessOrder is a Temporal workflow that processes an order event.
 // It receives the CloudEvent-wrapped payload from fiso-flow and calls
 // an external service via fiso-link.
-func ProcessOrder(ctx workflow.Context, event []byte) (string, error) {
+// The event is received as a structured CloudEvent map (JSON object),
+// making it compatible with Java/Kotlin SDK workflows.
+func ProcessOrder(ctx workflow.Context, event map[string]interface{}) (string, error) {
 	opts := workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{

@@ -15,20 +15,16 @@ type Activities struct {
 	LinkAddr string
 }
 
-// CallExternalService parses the CloudEvent, extracts the data payload,
-// and calls an external service via fiso-link. This demonstrates the full
-// path: Kafka → fiso-flow → Temporal → activity → fiso-link → external-api.
-func (a *Activities) CallExternalService(_ context.Context, event []byte) (string, error) {
-	log.Printf("activity received event: %s", event)
+// CallExternalService receives the CloudEvent directly as a structured map,
+// extracts the data payload, and calls an external service via fiso-link.
+// This demonstrates the full path: Kafka → fiso-flow → Temporal → activity → fiso-link → external-api.
+// The event is now a map[string]interface{} instead of []byte, making it compatible
+// with Java/Kotlin SDK workflows that deserialize JSON to typed objects.
+func (a *Activities) CallExternalService(_ context.Context, event map[string]interface{}) (string, error) {
+	log.Printf("activity received event: %v", event)
 
-	// Parse the CloudEvent envelope
-	var ce map[string]interface{}
-	if err := json.Unmarshal(event, &ce); err != nil {
-		return "", fmt.Errorf("unmarshal cloudevent: %w", err)
-	}
-
-	// Extract the data field
-	dataRaw, err := json.Marshal(ce["data"])
+	// Extract the data field directly (no need to unmarshal)
+	dataRaw, err := json.Marshal(event["data"])
 	if err != nil {
 		return "", fmt.Errorf("marshal data: %w", err)
 	}

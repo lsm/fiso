@@ -10,9 +10,11 @@ import (
 // WaitForSignal is a Temporal workflow that blocks until it receives
 // the "order-update" signal. Once signaled, it processes the event
 // data by calling an external service via fiso-link.
+// The signal data is received as a structured CloudEvent map (JSON object),
+// making it compatible with Java/Kotlin SDK workflows.
 func WaitForSignal(ctx workflow.Context) (string, error) {
 	// Wait for the "order-update" signal from fiso-flow
-	var signalData []byte
+	var signalData map[string]interface{}
 	signalCh := workflow.GetSignalChannel(ctx, "order-update")
 	signalCh.Receive(ctx, &signalData)
 
