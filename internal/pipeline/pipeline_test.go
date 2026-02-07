@@ -2447,3 +2447,163 @@ func TestPipeline_InterceptorError_PropagateErrors(t *testing.T) {
 		t.Fatalf("expected 1 DLQ event, got %d", pub.count())
 	}
 }
+
+func TestPipeline_CloudEventDetection_CELTypeOverride(t *testing.T) {
+	// Test CEL Type expression override on existing CloudEvent
+	// This covers the p.ceTypeProgram != nil path in passOrMergeCloudEvent
+	ceInput := `{"specversion":"1.0","type":"original.type","source":"test-source","id":"123","data":{"category":"orders"}}`
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(ceInput), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			// CEL expression to extract type from data
+			Type: "data.category + '.event'",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Type should be overridden with CEL result
+	if ce["type"] != "orders.event" {
+		t.Errorf("expected type 'orders.event', got %v", ce["type"])
+	}
+}
+
+func TestPipeline_CloudEventDetection_LiteralDataOverride(t *testing.T) {
+	// Test literal Data value override on existing CloudEvent
+	// This covers the else branch where Data is a literal (not CEL expression)
+	ceInput := `{"specversion":"1.0","type":"test","source":"test-source","id":"123","data":{"nested":"value"}}`
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(ceInput), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			// This is NOT a valid CEL expression, so it falls back to literal
+			Data: "literal-string-value",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Data should be the literal string value
+	if ce["data"] != "literal-string-value" {
+		t.Errorf("expected data 'literal-string-value', got %v", ce["data"])
+	}
+}
+
+func TestPipeline_WrapCloudEvent_LiteralDataContentType(t *testing.T) {
+	// Test literal DataContentType value in wrapCloudEvent
+	// This covers the else branch where DataContentType is literal
+	rawInput := `{"orderId":"123"}`
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(rawInput), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			// This is NOT a valid CEL expression for DataContentType
+			DataContentType: "application/xml",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// DataContentType should be the literal value
+	if ce["datacontenttype"] != "application/xml" {
+		t.Errorf("expected datacontenttype 'application/xml', got %v", ce["datacontenttype"])
+	}
+}
+
+func TestPipeline_WrapCloudEvent_LiteralDataFallback(t *testing.T) {
+	// Test literal Data value fallback in wrapCloudEvent
+	// This covers the else branch where Data is a string literal, not CEL
+	rawInput := `{"orderId":"123"}`
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(rawInput), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			// This is NOT a valid CEL expression, treated as literal
+			Data: "static-payload",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Data should be the literal string value
+	if ce["data"] != "static-payload" {
+		t.Errorf("expected data 'static-payload', got %v", ce["data"])
+	}
+}
