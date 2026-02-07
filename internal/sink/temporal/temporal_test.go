@@ -204,7 +204,7 @@ func TestDeliver_UnsupportedMode(t *testing.T) {
 
 func TestResolveWorkflowID_StaticExpr(t *testing.T) {
 	s := &Sink{config: Config{WorkflowIDExpr: "static-id"}}
-	id := s.resolveWorkflowID([]byte("{}"))
+	id := s.resolveWorkflowID(map[string]interface{}{})
 	if id != "static-id" {
 		t.Errorf("expected 'static-id', got %q", id)
 	}
@@ -212,17 +212,52 @@ func TestResolveWorkflowID_StaticExpr(t *testing.T) {
 
 func TestResolveWorkflowID_EmptyExpr(t *testing.T) {
 	s := &Sink{config: Config{WorkflowType: "TestWF"}}
-	id := s.resolveWorkflowID([]byte("{}"))
+	id := s.resolveWorkflowID(map[string]interface{}{})
 	if !strings.HasPrefix(id, "TestWF-") {
 		t.Errorf("expected ID starting with 'TestWF-', got %q", id)
 	}
 }
 
-func TestResolveWorkflowID_InvalidJSON(t *testing.T) {
-	s := &Sink{config: Config{WorkflowIDExpr: "wf-{{.id}}"}}
-	id := s.resolveWorkflowID([]byte("not json"))
-	if id != "wf-{{.id}}" {
-		t.Errorf("expected raw template on invalid JSON, got %q", id)
+func TestResolveWorkflowID_NestedField(t *testing.T) {
+	s := &Sink{config: Config{WorkflowIDExpr: "order-{{.data.orderId}}"}}
+	eventData := map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "order.created",
+		"source":      "test",
+		"data": map[string]interface{}{
+			"orderId": "12345",
+		},
+	}
+	id := s.resolveWorkflowID(eventData)
+	if id != "order-12345" {
+		t.Errorf("expected 'order-12345', got %q", id)
+	}
+}
+
+func TestResolveWorkflowID_TopLevelField(t *testing.T) {
+	s := &Sink{config: Config{WorkflowIDExpr: "wf-{{.id}}-{{.type}}"}}
+	eventData := map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "order.created",
+		"source":      "test",
+		"id":          "ce-123",
+	}
+	id := s.resolveWorkflowID(eventData)
+	if id != "wf-ce-123-order.created" {
+		t.Errorf("expected 'wf-ce-123-order.created', got %q", id)
+	}
+}
+
+func TestResolveWorkflowID_MissingNestedField(t *testing.T) {
+	s := &Sink{config: Config{WorkflowIDExpr: "order-{{.data.missing}}"}}
+	eventData := map[string]interface{}{
+		"data": map[string]interface{}{
+			"orderId": "12345",
+		},
+	}
+	id := s.resolveWorkflowID(eventData)
+	if id != "order-" {
+		t.Errorf("expected 'order-' (empty for missing field), got %q", id)
 	}
 }
 
@@ -393,27 +428,50 @@ func TestDeliver_TypedParams_EvalError(t *testing.T) {
 	}
 }
 
-func TestDeliver_NoParams_BackwardsCompatible(t *testing.T) {
+func TestDeliver_NoParams_SendsCloudEventAsMap(t *testing.T) {
 	mc := &mockClient{}
 	s, _ := NewSink(mc, Config{
 		TaskQueue:      "test-queue",
 		WorkflowType:   "TestWorkflow",
-		WorkflowIDExpr: "order-{{.orderId}}",
-		// No Params - should pass raw bytes
+		WorkflowIDExpr: "order-{{.data.orderId}}",
+		// No Params - should send the entire CloudEvent as a structured map
 	})
 
-	event, _ := json.Marshal(map[string]interface{}{"orderId": "12345"})
+	// Simulate a CloudEvent structure (as the pipeline would send)
+	event, _ := json.Marshal(map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "order.created",
+		"source":      "test-flow",
+		"id":          "ce-123",
+		"data": map[string]interface{}{
+			"orderId": "12345",
+		},
+	})
 	err := s.Deliver(context.Background(), event, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify raw bytes were passed (backwards compatibility)
+	// Verify CloudEvent map was passed (not raw bytes)
 	if len(mc.lastArgs) != 1 {
-		t.Fatalf("expected 1 arg (raw bytes), got %d", len(mc.lastArgs))
+		t.Fatalf("expected 1 arg (CloudEvent map), got %d", len(mc.lastArgs))
 	}
-	if _, ok := mc.lastArgs[0].([]byte); !ok {
-		t.Errorf("expected first arg to be []byte, got %T", mc.lastArgs[0])
+	ceMap, ok := mc.lastArgs[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected first arg to be map[string]interface{}, got %T", mc.lastArgs[0])
+	}
+	if ceMap["specversion"] != "1.0" {
+		t.Errorf("expected specversion '1.0', got %v", ceMap["specversion"])
+	}
+	if ceMap["type"] != "order.created" {
+		t.Errorf("expected type 'order.created', got %v", ceMap["type"])
+	}
+	data, ok := ceMap["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected data to be map, got %T", ceMap["data"])
+	}
+	if data["orderId"] != "12345" {
+		t.Errorf("expected data.orderId '12345', got %v", data["orderId"])
 	}
 }
 
@@ -508,7 +566,156 @@ func TestDeliver_InvalidEventJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
-	if !strings.Contains(err.Error(), "parse event") {
-		t.Errorf("expected parse error, got: %v", err)
+	if !strings.Contains(err.Error(), "parse cloudevent") {
+		t.Errorf("expected parse cloudevent error, got: %v", err)
+	}
+}
+
+func TestDeliver_SignalMode_CloudEventAsMap(t *testing.T) {
+	mc := &mockClient{}
+	s, _ := NewSink(mc, Config{
+		TaskQueue:      "test-queue",
+		WorkflowType:   "TestWorkflow",
+		Mode:           ModeSignal,
+		SignalName:     "event-signal",
+		WorkflowIDExpr: "wf-{{.data.id}}",
+		// No Params - sends entire CloudEvent
+	})
+
+	event, _ := json.Marshal(map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "order.created",
+		"source":      "test-flow",
+		"id":          "ce-123",
+		"data": map[string]interface{}{
+			"id":      "abc",
+			"orderId": "12345",
+		},
+	})
+	err := s.Deliver(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if mc.lastSignalID != "wf-abc" {
+		t.Errorf("expected signal workflow ID 'wf-abc', got %q", mc.lastSignalID)
+	}
+
+	// Signal arg should be the entire CloudEvent as a map
+	ceMap, ok := mc.lastSignalArg.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected signal arg to be map[string]interface{}, got %T", mc.lastSignalArg)
+	}
+	if ceMap["type"] != "order.created" {
+		t.Errorf("expected type 'order.created', got %v", ceMap["type"])
+	}
+}
+
+func TestDeliver_TypedParams_CloudEventStructure(t *testing.T) {
+	// Test that typed params work with CloudEvent structure
+	mc := &mockClient{}
+	s, err := NewSink(mc, Config{
+		TaskQueue:      "test-queue",
+		WorkflowType:   "TestWorkflow",
+		WorkflowIDExpr: "order-{{.data.orderId}}",
+		Params: []ParamConfig{
+			{Expr: "data.type"},         // CE type
+			{Expr: "data.data.orderId"}, // Nested data field
+			{Expr: "data.data.amount"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating sink: %v", err)
+	}
+
+	event, _ := json.Marshal(map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "order.created",
+		"source":      "test-flow",
+		"id":          "ce-123",
+		"data": map[string]interface{}{
+			"orderId": "12345",
+			"amount":  150.50,
+		},
+	})
+	err = s.Deliver(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mc.lastArgs) != 3 {
+		t.Fatalf("expected 3 args, got %d", len(mc.lastArgs))
+	}
+	if mc.lastArgs[0] != "order.created" {
+		t.Errorf("expected first arg 'order.created', got %v", mc.lastArgs[0])
+	}
+	if mc.lastArgs[1] != "12345" {
+		t.Errorf("expected second arg '12345', got %v", mc.lastArgs[1])
+	}
+	if mc.lastArgs[2] != 150.50 {
+		t.Errorf("expected third arg 150.50, got %v", mc.lastArgs[2])
+	}
+}
+
+func TestResolveNestedField(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     map[string]interface{}
+		path     string
+		expected string
+	}{
+		{
+			name:     "top level field",
+			data:     map[string]interface{}{"id": "123"},
+			path:     "id",
+			expected: "123",
+		},
+		{
+			name: "nested field",
+			data: map[string]interface{}{
+				"data": map[string]interface{}{"orderId": "456"},
+			},
+			path:     "data.orderId",
+			expected: "456",
+		},
+		{
+			name: "deeply nested field",
+			data: map[string]interface{}{
+				"data": map[string]interface{}{
+					"order": map[string]interface{}{"id": "789"},
+				},
+			},
+			path:     "data.order.id",
+			expected: "789",
+		},
+		{
+			name:     "missing field",
+			data:     map[string]interface{}{"id": "123"},
+			path:     "missing",
+			expected: "",
+		},
+		{
+			name: "missing nested field",
+			data: map[string]interface{}{
+				"data": map[string]interface{}{"orderId": "456"},
+			},
+			path:     "data.missing",
+			expected: "",
+		},
+		{
+			name:     "numeric value",
+			data:     map[string]interface{}{"count": 42},
+			path:     "count",
+			expected: "42",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := resolveNestedField(tt.data, tt.path)
+			if result != tt.expected {
+				t.Errorf("resolveNestedField(%v, %q) = %q, want %q", tt.data, tt.path, result, tt.expected)
+			}
+		})
 	}
 }

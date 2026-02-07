@@ -124,21 +124,28 @@ func NewSink(client WorkflowClient, cfg Config) (*Sink, error) {
 }
 
 // Deliver sends an event to Temporal as a workflow start or signal.
+// The event is expected to be in CloudEvents format (JSON).
+// When no params are configured, the entire CloudEvent is sent as a structured map,
+// allowing Java/Kotlin workflows to deserialize it directly.
 func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]string) error {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
-	workflowID := s.resolveWorkflowID(event)
+	// Parse the CloudEvent for workflow ID resolution and args
+	var eventData map[string]interface{}
+	if err := json.Unmarshal(event, &eventData); err != nil {
+		return fmt.Errorf("parse cloudevent: %w", err)
+	}
 
-	// Determine workflow arguments: typed params or raw bytes
+	workflowID := s.resolveWorkflowID(eventData)
+
+	// Determine workflow arguments: typed params or the whole CloudEvent
 	var args []interface{}
 	if len(s.paramPrograms) > 0 {
-		// Parse event data for CEL evaluation
-		var data map[string]interface{}
-		if err := json.Unmarshal(event, &data); err != nil {
-			return fmt.Errorf("parse event for params: %w", err)
-		}
-		activation := map[string]interface{}{"data": data}
+		// CEL activation exposes the CloudEvent structure:
+		// - data.specversion, data.type, data.source → CE metadata
+		// - data.data.orderId → fields inside CE's data payload
+		activation := map[string]interface{}{"data": eventData}
 
 		// Evaluate each param expression
 		args = make([]interface{}, len(s.paramPrograms))
@@ -150,8 +157,9 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 			args[i] = toNative(out)
 		}
 	} else {
-		// Legacy: pass raw event bytes
-		args = []interface{}{event}
+		// Send the entire CloudEvent as a structured map.
+		// Java/Kotlin workflows can define a CloudEvent input class to receive this.
+		args = []interface{}{eventData}
 	}
 
 	switch s.config.Mode {
@@ -192,8 +200,12 @@ func (s *Sink) Close() error {
 }
 
 // resolveWorkflowID resolves the workflow ID from the template expression.
-// Supports {{.field}} syntax to extract fields from JSON event payload.
-func (s *Sink) resolveWorkflowID(event []byte) string {
+// Supports {{.field}} and {{.nested.field}} syntax to extract fields from CloudEvent.
+// Examples:
+//   - {{.id}} → CloudEvent ID
+//   - {{.type}} → CloudEvent type
+//   - {{.data.orderId}} → field inside CloudEvent's data payload
+func (s *Sink) resolveWorkflowID(eventData map[string]interface{}) string {
 	expr := s.config.WorkflowIDExpr
 	if expr == "" {
 		return fmt.Sprintf("%s-%d", s.config.WorkflowType, time.Now().UnixNano())
@@ -203,19 +215,46 @@ func (s *Sink) resolveWorkflowID(event []byte) string {
 		return expr
 	}
 
-	var data map[string]interface{}
-	if err := json.Unmarshal(event, &data); err != nil {
-		return expr
-	}
-
 	result := expr
-	for key, val := range data {
-		placeholder := "{{." + key + "}}"
-		if strings.Contains(result, placeholder) {
-			result = strings.ReplaceAll(result, placeholder, fmt.Sprintf("%v", val))
+	// Find all {{.path}} placeholders and resolve them
+	for {
+		start := strings.Index(result, "{{.")
+		if start == -1 {
+			break
 		}
+		end := strings.Index(result[start:], "}}")
+		if end == -1 {
+			break
+		}
+		end += start + 2
+
+		placeholder := result[start:end]
+		path := result[start+3 : end-2] // Extract "field" or "nested.field" from "{{.field}}"
+
+		value := resolveNestedField(eventData, path)
+		result = strings.Replace(result, placeholder, value, 1)
 	}
 	return result
+}
+
+// resolveNestedField resolves a dot-separated path in a nested map.
+// Examples: "id" → data["id"], "data.orderId" → data["data"]["orderId"]
+func resolveNestedField(data map[string]interface{}, path string) string {
+	parts := strings.Split(path, ".")
+	var current interface{} = data
+
+	for _, part := range parts {
+		if m, ok := current.(map[string]interface{}); ok {
+			current = m[part]
+		} else {
+			return "" // Path doesn't exist
+		}
+	}
+
+	if current == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", current)
 }
 
 // toNative recursively converts CEL ref.Val types to native Go types
