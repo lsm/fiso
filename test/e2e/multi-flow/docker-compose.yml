@@ -1,0 +1,24 @@
+services:
+  # User's backend business logic - receives from both flows
+  user-service:
+    build:
+      context: ./user-service
+    ports:
+      - "8082:8082"
+
+  # Ingress — runs both flows concurrently (multi-flow support)
+  fiso-flow:
+    image: fiso-flow:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.flow
+    ports:
+      - "8081:8081"   # flow-a
+      - "8083:8082"   # flow-b (internal 8082 mapped to external 8083)
+    volumes:
+      - ./fiso/flows:/etc/fiso/flows:ro
+    environment:
+      FISO_CONFIG_DIR: /etc/fiso/flows
+      FISO_METRICS_ADDR: ":9090"
+    depends_on:
+      - user-service

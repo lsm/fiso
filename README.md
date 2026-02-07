@@ -283,14 +283,180 @@ transform:
 
 #### CloudEvents Customization
 
-CloudEvents envelope fields (`type`, `source`, `subject`) can be customized per flow. Values starting with `$.` are resolved as JSONPath expressions against the original input event (before transforms).
+All CloudEvents v1.0 spec fields can be customized per flow using **CEL expressions** evaluated against the **original input event** (before transforms). This ensures CloudEvent metadata reflects the source event characteristics.
+
+**Full CloudEvents Spec Support:**
+```yaml
+cloudevents:
+  id: 'data.eventId + "-" + data.CTN'     # CloudEvent ID for idempotency
+  type: 'data.amount > 1000 ? "high-value" : "standard"'  # Event type
+  source: '"service-" + data.region'       # Event source
+  subject: 'data.customerId'               # Optional subject
+  data: 'data.payload'                     # Custom data field (default: transformed payload)
+  datacontenttype: '"application/json"'    # Content type (default: application/json)
+  dataschema: '"https://example.com/schemas/v1/order.json"'  # Schema URL (optional)
+```
+
+**CEL Expression Examples:**
+```yaml
+cloudevents:
+  # Field extraction
+  id: 'data.requestId'                    # Extract single field
+  type: 'data.eventType'                   # Dynamic type from payload
+  subject: 'data.order.id'                 # Nested field access
+
+  # Field combination  id: 'data.eventId + "-" + data.CTN'     # Combine fields for idempotency
+
+  # Conditionals
+  type: 'data.amount > 1000 ? "high-value" : "standard"'
+
+  # String operations
+  source: '"service-" + data.region'
+
+  # Custom data
+  data: 'data.payload'                     # Use nested field as data
+  data: 'data'                             # Use entire original input as data
+```
+
+**Idempotency Pattern with CEL:**
+
+```yaml
+name: order-processing
+source:
+  type: kafka
+  config:
+    topic: orders
+
+# Combine eventId + CTN for idempotency using CEL
+cloudevents:
+  id: 'data.eventId + "-" + data.CTN'
+  type: "order.created"
+
+sink:
+  type: http
+  config:
+    url: http://order-service:8080
+```
+
+**Input:**
+```json
+{"eventId": "evt-123", "CTN": "456", "order": {...}}
+```
+
+**CloudEvent Output:**
+```json
+{
+  "id": "evt-123-456",  ← Combined from CEL expression
+  "type": "order.created",
+  "source": "fiso-flow/order-processing",
+  "data": {...}
+}
+```
+
+**Custom Data Field Example:**
+
+By default, the CloudEvent `data` field contains the **transformed** payload. You can override this to use a specific field from the **original** input:
+
+```yaml
+name: payment-processor
+source:
+  type: kafka
+  config:
+    topic: payments
+
+transform:
+  fields:
+    transactionId: "data.txn_id"
+    processedAt: "time"
+
+cloudevents:
+  id: "data.paymentId"
+  type: "payment.processed"
+  data: "data.rawPayment"      # Extract specific field from original input
+  dataschema: '"https://api.example.com/schemas/payment/v2.json"'
+```
+
+**Input:**
+```json
+{
+  "paymentId": "pay-999",
+  "txn_id": "txn-abc",
+  "rawPayment": {"amount": 100, "currency": "USD"},
+  "metadata": {"region": "us-west"}
+}
+```
+
+**CloudEvent Output:**
+```json
+{
+  "specversion": "1.0",
+  "id": "pay-999",
+  "type": "payment.processed",
+  "source": "fiso-flow/payment-processor",
+  "dataschema": "https://api.example.com/schemas/payment/v2.json",
+  "datacontenttype": "application/json",
+  "time": "2026-02-06T22:00:00Z",
+  "data": {
+    "amount": 100,
+    "currency": "USD"
+  }
+}
+```
+
+**Note:** The `data` field contains only `rawPayment` from the original input, not the transformed output. CloudEvent metadata (id, type, source, subject, dataschema) always resolves from the **original** input, while the default `data` field uses the **transformed** payload unless explicitly overridden.
 
 #### Sinks
 
 - **HTTP** — Delivers events via HTTP with exponential backoff retry. Distinguishes retryable errors (5xx, 429) from permanent failures (4xx).
 - **gRPC** — Delivers events via gRPC streaming.
-- **Temporal** — Starts Temporal workflows for long-running event processing.
+- **Temporal** — Starts Temporal workflows for long-running event processing. Supports typed parameters for cross-SDK compatibility.
 - **Kafka** — Produces events to Kafka topics with at-least-once delivery guarantees.
+
+#### Temporal Sink: Typed Parameters
+
+When integrating with Temporal workflows written in different languages (Java, Kotlin, TypeScript), the default behavior of passing raw `[]byte` can be problematic. The Temporal sink supports **typed parameters** that extract individual fields from the event and pass them as separate workflow arguments:
+
+```yaml
+sink:
+  type: temporal
+  config:
+    hostPort: temporal:7233
+    taskQueue: order-processing
+    workflowType: ProcessOrderWorkflow
+    workflowIdExpr: "{{.eventId}}-{{.ctn}}"
+    mode: start
+    params:
+      - expr: "data.eventId"      # CEL expression → string
+      - expr: "data.ctn"          # → string
+      - expr: "data.accountId"    # → string
+      - expr: "data.amount"       # → float64 (typed!)
+      - expr: "data.order"        # → object (nested structure)
+```
+
+**Without typed params (default):**
+```kotlin
+@WorkflowMethod
+fun run(input: ByteArray) {
+    // Manual JSON parsing required
+    val event = Jackson.readValue(input, Event::class.java)
+}
+```
+
+**With typed params:**
+```kotlin
+@WorkflowMethod
+fun run(eventId: String, ctn: String, accountId: String, amount: Double, order: Order) {
+    // Clean typed signature, Temporal SDK handles deserialization
+}
+```
+
+**Supported types:**
+- Primitives: `string`, `int`, `float`, `bool`
+- Null values
+- Arrays: `[data.item1, data.item2]`
+- Objects: `data.customer` (passes entire nested object)
+
+**Note:** When `params` is not specified, the sink maintains backwards compatibility by passing the raw event bytes as a single argument.
 
 #### Dead Letter Queue
 
@@ -379,6 +545,47 @@ errorHandling:
 ```
 
 Fiso watches the config directory and hot-reloads on changes.
+
+#### Multiple Flows per Instance
+
+Fiso-flow supports running **multiple flows concurrently** in a single instance using the **router model**. Each flow runs independently in its own goroutine — one flow's failure doesn't affect others.
+
+**Benefits:**
+- **Reduced infrastructure:** Run `guarantee-event-ingested` and `guarantee-email-sent` in one pod instead of separate deployments
+- **Shared resources:** Single metrics server, health check, config watcher
+- **Independent lifecycles:** HTTP ingestion continues even if Kafka consumer fails
+
+**Configuration:**
+
+Simply place multiple flow YAML files in the config directory:
+
+```
+fiso/flows/
+├── order-events.yaml      # Flow 1: Kafka → HTTP
+├── email-notifications.yaml   # Flow 2: HTTP → Temporal
+└── audit-log.yaml         # Flow 3: gRPC → Kafka
+```
+
+All flows start concurrently when fiso-flow starts:
+
+```
+INFO starting flows count=3
+INFO flow started name=order-events
+INFO flow started name=email-notifications
+INFO flow started name=audit-log
+```
+
+**Failure isolation (router model):**
+
+Each flow runs independently. If one flow encounters an error, the others continue:
+
+```
+ERROR flow stopped with error name=order-events error="kafka consumer: connection refused"
+INFO flow started name=email-notifications  # Still running
+INFO flow started name=audit-log           # Still running
+```
+
+Kubernetes will detect degraded state via health checks if needed.
 
 Kafka sink example:
 
@@ -1371,6 +1578,7 @@ deploy/
 test/
   e2e/
     http/                    HTTP flow E2E (Docker Compose)
+    multi-flow/              Multi-flow concurrent execution E2E (Docker Compose)
     kafka/                   Kafka flow E2E (Docker Compose)
     kafka-temporal/          Kafka → Temporal E2E (Docker Compose)
     kafka-temporal-signal/   Kafka → Temporal signal E2E (Docker Compose)

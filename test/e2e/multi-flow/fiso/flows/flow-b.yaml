@@ -1,0 +1,11 @@
+name: flow-b
+source:
+  type: http
+  config:
+    listenAddr: ":8082"
+    path: /ingest-b
+sink:
+  type: http
+  config:
+    url: http://user-service:8082/flow-b
+    method: POST
