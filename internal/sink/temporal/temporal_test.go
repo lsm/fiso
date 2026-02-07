@@ -239,3 +239,180 @@ func TestClose(t *testing.T) {
 		t.Error("expected client to be closed")
 	}
 }
+
+func TestDeliver_TypedParams_StartMode(t *testing.T) {
+	mc := &mockClient{}
+	s, err := NewSink(mc, Config{
+		TaskQueue:      "test-queue",
+		WorkflowType:   "TestWorkflow",
+		WorkflowIDExpr: "order-{{.orderId}}",
+		Params: []ParamConfig{
+			{Expr: "data.eventId"},
+			{Expr: "data.ctn"},
+			{Expr: "data.accountId"},
+			{Expr: "data.amount"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating sink: %v", err)
+	}
+
+	event, _ := json.Marshal(map[string]interface{}{
+		"orderId":   "12345",
+		"eventId":   "evt-001",
+		"ctn":       "9876543210",
+		"accountId": "acc-999",
+		"amount":    150.50,
+	})
+	err = s.Deliver(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify typed args were passed
+	if len(mc.lastArgs) != 4 {
+		t.Fatalf("expected 4 args, got %d", len(mc.lastArgs))
+	}
+	if mc.lastArgs[0] != "evt-001" {
+		t.Errorf("expected first arg 'evt-001', got %v", mc.lastArgs[0])
+	}
+	if mc.lastArgs[1] != "9876543210" {
+		t.Errorf("expected second arg '9876543210', got %v", mc.lastArgs[1])
+	}
+	if mc.lastArgs[2] != "acc-999" {
+		t.Errorf("expected third arg 'acc-999', got %v", mc.lastArgs[2])
+	}
+	if mc.lastArgs[3] != 150.50 {
+		t.Errorf("expected fourth arg 150.50, got %v", mc.lastArgs[3])
+	}
+}
+
+func TestDeliver_TypedParams_SignalMode(t *testing.T) {
+	mc := &mockClient{}
+	s, err := NewSink(mc, Config{
+		TaskQueue:      "test-queue",
+		WorkflowType:   "TestWorkflow",
+		Mode:           ModeSignal,
+		SignalName:     "event-signal",
+		WorkflowIDExpr: "wf-{{.workflowId}}",
+		Params: []ParamConfig{
+			{Expr: "data.eventType"},
+			{Expr: "data.payload"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating sink: %v", err)
+	}
+
+	event, _ := json.Marshal(map[string]interface{}{
+		"workflowId": "abc",
+		"eventType":  "order.created",
+		"payload":    map[string]interface{}{"key": "value"},
+	})
+	err = s.Deliver(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify signal received args as slice (multiple params)
+	args, ok := mc.lastSignalArg.([]interface{})
+	if !ok {
+		t.Fatalf("expected signal arg to be []interface{}, got %T", mc.lastSignalArg)
+	}
+	if len(args) != 2 {
+		t.Fatalf("expected 2 signal args, got %d", len(args))
+	}
+	if args[0] != "order.created" {
+		t.Errorf("expected first signal arg 'order.created', got %v", args[0])
+	}
+}
+
+func TestDeliver_TypedParams_SingleParam_SignalMode(t *testing.T) {
+	mc := &mockClient{}
+	s, err := NewSink(mc, Config{
+		TaskQueue:      "test-queue",
+		WorkflowType:   "TestWorkflow",
+		Mode:           ModeSignal,
+		SignalName:     "event-signal",
+		WorkflowIDExpr: "wf-static",
+		Params: []ParamConfig{
+			{Expr: "data.eventType"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating sink: %v", err)
+	}
+
+	event, _ := json.Marshal(map[string]interface{}{
+		"eventType": "order.created",
+	})
+	err = s.Deliver(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify single param is passed directly (not wrapped in slice)
+	if mc.lastSignalArg != "order.created" {
+		t.Errorf("expected signal arg 'order.created', got %v (type: %T)", mc.lastSignalArg, mc.lastSignalArg)
+	}
+}
+
+func TestNewSink_InvalidParamExpr(t *testing.T) {
+	_, err := NewSink(&mockClient{}, Config{
+		TaskQueue:    "test-queue",
+		WorkflowType: "TestWorkflow",
+		Params: []ParamConfig{
+			{Expr: "invalid.syntax[["}, // Invalid CEL expression
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid param expression")
+	}
+	if !strings.Contains(err.Error(), "compile param") {
+		t.Errorf("expected compile error, got: %v", err)
+	}
+}
+
+func TestDeliver_TypedParams_EvalError(t *testing.T) {
+	mc := &mockClient{}
+	s, err := NewSink(mc, Config{
+		TaskQueue:    "test-queue",
+		WorkflowType: "TestWorkflow",
+		Params: []ParamConfig{
+			{Expr: "data.nonexistent.nested.field"}, // Will fail at runtime
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating sink: %v", err)
+	}
+
+	event := []byte(`{"simple": "value"}`)
+	err = s.Deliver(context.Background(), event, nil)
+	if err == nil {
+		t.Fatal("expected error for param evaluation failure")
+	}
+}
+
+func TestDeliver_NoParams_BackwardsCompatible(t *testing.T) {
+	mc := &mockClient{}
+	s, _ := NewSink(mc, Config{
+		TaskQueue:      "test-queue",
+		WorkflowType:   "TestWorkflow",
+		WorkflowIDExpr: "order-{{.orderId}}",
+		// No Params - should pass raw bytes
+	})
+
+	event, _ := json.Marshal(map[string]interface{}{"orderId": "12345"})
+	err := s.Deliver(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify raw bytes were passed (backwards compatibility)
+	if len(mc.lastArgs) != 1 {
+		t.Fatalf("expected 1 arg (raw bytes), got %d", len(mc.lastArgs))
+	}
+	if _, ok := mc.lastArgs[0].([]byte); !ok {
+		t.Errorf("expected first arg to be []byte, got %T", mc.lastArgs[0])
+	}
+}
