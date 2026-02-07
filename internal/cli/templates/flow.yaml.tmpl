@@ -43,7 +43,7 @@ sink:
     namespace: default
     taskQueue: my-task-queue
     workflowType: ProcessEvent
-    # workflowIdExpr: "{{.eventId}}-{{.ctn}}"  # Optional: template for workflow ID
+    # workflowIdExpr: "{{"{{"}}.eventId{{"}}"}}-{{"{{"}}.ctn{{"}}"}}"  # Optional: template for workflow ID
     # mode: start                               # Optional: start (default) or signal
     # params:                                   # Optional: typed workflow parameters (cross-SDK compatible)
     #   - expr: "data.eventId"                  # CEL expression evaluated against event
