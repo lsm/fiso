@@ -98,43 +98,70 @@ func run() error {
 		}
 	}()
 
-	// Build and start pipeline for the first flow (single-flow for Phase 1)
-	var flowName string
-	var flowDef *config.FlowDefinition
+	// Build and start all flows concurrently (router model)
+	// Each flow runs independently - one flow failure doesn't stop others
+	type flowRunner struct {
+		name     string
+		pipeline *pipeline.Pipeline
+	}
+
+	runners := make([]*flowRunner, 0, len(flows))
 	for name, def := range flows {
-		flowName = name
-		flowDef = def
-		break
+		logger.Info("building flow", "name", name)
+		p, err := buildPipeline(def, logger)
+		if err != nil {
+			return fmt.Errorf("build pipeline %s: %w", name, err)
+		}
+		runners = append(runners, &flowRunner{
+			name:     name,
+			pipeline: p,
+		})
 	}
 
-	logger.Info("starting flow", "name", flowName)
-
-	p, err := buildPipeline(flowDef, logger)
-	if err != nil {
-		return fmt.Errorf("build pipeline %s: %w", flowName, err)
+	if len(runners) == 0 {
+		return fmt.Errorf("no flows to run")
 	}
 
+	logger.Info("starting flows", "count", len(runners))
 	health.SetReady(true)
 
-	// Run pipeline until shutdown
-	pipelineErr := p.Run(ctx)
+	// Start each flow in its own goroutine (independent execution)
+	for _, runner := range runners {
+		go func(r *flowRunner) {
+			logger.Info("flow started", "name", r.name)
+			if err := r.pipeline.Run(ctx); err != nil {
+				// Log error but don't stop other flows (router model)
+				logger.Error("flow stopped with error", "name", r.name, "error", err)
+			} else {
+				logger.Info("flow stopped", "name", r.name)
+			}
+		}(runner)
+	}
+
+	// Wait for shutdown signal
+	<-ctx.Done()
 
 	// Graceful shutdown
+	logger.Info("shutdown initiated")
 	health.SetReady(false)
 	close(watchDone)
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	if err := p.Shutdown(shutdownCtx); err != nil {
-		logger.Error("pipeline shutdown error", "error", err)
+	// Shut down all pipelines
+	for _, runner := range runners {
+		if err := runner.pipeline.Shutdown(shutdownCtx); err != nil {
+			logger.Error("pipeline shutdown error", "flow", runner.name, "error", err)
+		}
 	}
+
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("http server shutdown error", "error", err)
 	}
 
 	logger.Info("shutdown complete")
-	return pipelineErr
+	return nil
 }
 
 func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeline.Pipeline, error) {
@@ -248,6 +275,19 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger) (*pipeli
 		}
 		if v := getString(flowDef.Sink.Config, "mode"); v != "" {
 			tcfg.Mode = temporalsink.Mode(v)
+		}
+
+		// Parse typed params for cross-SDK compatibility
+		if paramsRaw, ok := flowDef.Sink.Config["params"].([]interface{}); ok {
+			for _, p := range paramsRaw {
+				if pm, ok := p.(map[string]interface{}); ok {
+					if expr := getString(pm, "expr"); expr != "" {
+						tcfg.Params = append(tcfg.Params, temporalsink.ParamConfig{
+							Expr: expr,
+						})
+					}
+				}
+			}
 		}
 
 		client, err := newTemporalSDKClient(tcfg)
