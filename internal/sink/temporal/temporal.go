@@ -60,9 +60,9 @@ type Config struct {
 
 // Sink delivers events by starting or signalling Temporal workflows.
 type Sink struct {
-	client       WorkflowClient
-	config       Config
-	timeout      time.Duration
+	client        WorkflowClient
+	config        Config
+	timeout       time.Duration
 	paramPrograms []cel.Program // Compiled CEL programs for typed params
 }
 
