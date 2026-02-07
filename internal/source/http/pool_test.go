@@ -604,7 +604,7 @@ func TestPreRegister_HandlerNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected 503, got %d", resp.StatusCode)
@@ -688,5 +688,143 @@ func TestPreRegister_DefaultPath(t *testing.T) {
 
 	if handle.path != "/" {
 		t.Errorf("expected default path '/', got %q", handle.path)
+	}
+}
+
+func TestPooledSource_StartSetHandlerError(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	// Create a PooledSource with a bad handle (server doesn't exist)
+	src := &PooledSource{
+		pool: pool,
+		addr: "127.0.0.1:0",
+		path: "/test",
+		handle: &RouteHandle{
+			pool: pool,
+			addr: "127.0.0.1:0",
+			path: "/test",
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start should fail because the server/path wasn't pre-registered
+	err := src.Start(ctx, func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+	if err == nil {
+		t.Error("expected error from Start")
+	}
+	if !strings.Contains(err.Error(), "set handler") {
+		t.Errorf("expected 'set handler' error, got: %v", err)
+	}
+}
+
+func TestPreRegister_ReadBodyError(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	handle, err := pool.PreRegister("127.0.0.1:0", "/")
+	if err != nil {
+		t.Fatalf("pre-register: %v", err)
+	}
+
+	// Set a handler
+	if err := pool.SetHandler(handle, func(_ context.Context, evt source.Event) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("set handler: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = pool.Start(ctx)
+	}()
+	pool.WaitReady()
+
+	addr := pool.ListenAddr("127.0.0.1:0")
+
+	// Test GET method (should be rejected)
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", resp.StatusCode)
+	}
+}
+
+func TestPreRegister_HandlerError(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	handle, err := pool.PreRegister("127.0.0.1:0", "/")
+	if err != nil {
+		t.Fatalf("pre-register: %v", err)
+	}
+
+	// Set a handler that returns an error
+	if err := pool.SetHandler(handle, func(_ context.Context, evt source.Event) error {
+		return errors.New("handler failed")
+	}); err != nil {
+		t.Fatalf("set handler: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = pool.Start(ctx)
+	}()
+	pool.WaitReady()
+
+	addr := pool.ListenAddr("127.0.0.1:0")
+
+	// Send request - should get 500 due to handler error
+	resp, err := http.Post("http://"+addr+"/", "application/json", bytes.NewReader([]byte("test")))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", resp.StatusCode)
+	}
+}
+
+func TestServerPool_StartTwice(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	_, err := pool.Register("127.0.0.1:0", "/", func(_ context.Context, evt source.Event) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start in background
+	go func() {
+		_ = pool.Start(ctx)
+	}()
+	pool.WaitReady()
+
+	// Get the actual server address
+	addr := pool.ListenAddr("127.0.0.1:0")
+	if addr == "" {
+		t.Fatal("expected non-empty address after start")
+	}
+
+	// Server should still work
+	resp, err := http.Post("http://"+addr+"/", "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
 	}
 }
