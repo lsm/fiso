@@ -1824,6 +1824,234 @@ func TestPipeline_CloudEventDetection_PartialCE_WrapsNormally(t *testing.T) {
 	}
 }
 
+func TestPipeline_CloudEventDetection_AllOverrides(t *testing.T) {
+	// Test all CloudEvent overrides on an existing CloudEvent
+	ceInput := `{"specversion":"1.0","type":"original.type","source":"original-source","id":"ce-123","data":{"orderId":"456","payload":{"key":"value"}}}`
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(ceInput), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			ID:              "new-id-123",
+			Type:            "overridden.type",
+			Source:          "new-source",
+			Subject:         "new-subject",
+			Data:            "data.payload",
+			DataContentType: "application/xml",
+			DataSchema:      "https://example.com/schema.json",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// All fields should be overridden
+	if ce["id"] != "new-id-123" {
+		t.Errorf("expected id 'new-id-123', got %v", ce["id"])
+	}
+	if ce["type"] != "overridden.type" {
+		t.Errorf("expected type 'overridden.type', got %v", ce["type"])
+	}
+	if ce["source"] != "new-source" {
+		t.Errorf("expected source 'new-source', got %v", ce["source"])
+	}
+	if ce["subject"] != "new-subject" {
+		t.Errorf("expected subject 'new-subject', got %v", ce["subject"])
+	}
+	if ce["datacontenttype"] != "application/xml" {
+		t.Errorf("expected datacontenttype 'application/xml', got %v", ce["datacontenttype"])
+	}
+	if ce["dataschema"] != "https://example.com/schema.json" {
+		t.Errorf("expected dataschema, got %v", ce["dataschema"])
+	}
+	// Data should be extracted from the CEL expression
+	data, ok := ce["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected data to be map, got %T", ce["data"])
+	}
+	if data["key"] != "value" {
+		t.Errorf("expected data.key 'value', got %v", data["key"])
+	}
+}
+
+func TestPipeline_CloudEventDetection_CELOverrides(t *testing.T) {
+	// Test CEL expression overrides on an existing CloudEvent
+	ceInput := `{"specversion":"1.0","type":"original.type","source":"original-source","id":"ce-123","data":{"orderId":"456","region":"us-west"}}`
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(ceInput), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			ID:     "data.orderId",
+			Source: `"service-" + data.region`,
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// ID and Source should be resolved from CEL
+	if ce["id"] != "456" {
+		t.Errorf("expected id '456', got %v", ce["id"])
+	}
+	if ce["source"] != "service-us-west" {
+		t.Errorf("expected source 'service-us-west', got %v", ce["source"])
+	}
+}
+
+func TestPipeline_CloudEventDetection_DataNotMap(t *testing.T) {
+	// Test when CE data field is not a map (fallback to originalInput parsing)
+	ceInput := `{"specversion":"1.0","type":"test","source":"test","id":"123","data":"string-data"}`
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(ceInput), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			Subject: "custom-subject",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if ce["subject"] != "custom-subject" {
+		t.Errorf("expected subject 'custom-subject', got %v", ce["subject"])
+	}
+}
+
+func TestPipeline_CloudEventDetection_CELDataContentTypeAndSchema(t *testing.T) {
+	// Test CEL expressions for DataContentType and DataSchema on existing CE
+	ceInput := `{"specversion":"1.0","type":"test","source":"test","id":"123","data":{"format":"xml","version":"v2"}}`
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(ceInput), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			DataContentType: `"application/" + data.format`,
+			DataSchema:      `"https://example.com/" + data.version + "/schema.json"`,
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if ce["datacontenttype"] != "application/xml" {
+		t.Errorf("expected datacontenttype 'application/xml', got %v", ce["datacontenttype"])
+	}
+	if ce["dataschema"] != "https://example.com/v2/schema.json" {
+		t.Errorf("expected dataschema 'https://example.com/v2/schema.json', got %v", ce["dataschema"])
+	}
+}
+
+func TestPipeline_CloudEventDetection_CELDataExtraction(t *testing.T) {
+	// Test CEL Data extraction on existing CE
+	ceInput := `{"specversion":"1.0","type":"test","source":"test","id":"123","data":{"payload":{"nested":"value"}}}`
+	src := &mockSource{
+		events: []source.Event{
+			{Key: []byte("k1"), Value: []byte(ceInput), Topic: "orders"},
+		},
+	}
+	sk := &mockSink{}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName: "test-flow",
+		CloudEvents: &CloudEventsOverrides{
+			Data: "data.payload",
+		},
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	if sk.count() != 1 {
+		t.Fatal("expected 1 delivered event")
+	}
+
+	var ce map[string]interface{}
+	if err := json.Unmarshal(sk.received[0].event, &ce); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	data, ok := ce["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected data to be map, got %T", ce["data"])
+	}
+	if data["nested"] != "value" {
+		t.Errorf("expected data.nested 'value', got %v", data["nested"])
+	}
+}
+
 func TestIsCloudEvent(t *testing.T) {
 	tests := []struct {
 		name     string
