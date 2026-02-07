@@ -25,17 +25,19 @@ import (
 // characteristics, not internal processing artifacts.
 //
 // CEL expressions:
-//   id: 'data.eventId + "-" + data.CTN'               // Combine fields for idempotency
-//   type: 'data.amount > 1000 ? "high-value" : "standard"'  // Conditional type
-//   source: '"service-" + data.region'                // Dynamic source
-//   subject: 'data.customerId'                        // Extract field
-//   data: 'data.payload'                              // Use specific nested field as data
-//   datacontenttype: '"application/json"'             // Static content type
-//   dataschema: '"https://example.com/schemas/v1/" + data.type + ".json"'  // Dynamic schema
+//
+//	id: 'data.eventId + "-" + data.CTN'               // Combine fields for idempotency
+//	type: 'data.amount > 1000 ? "high-value" : "standard"'  // Conditional type
+//	source: '"service-" + data.region'                // Dynamic source
+//	subject: 'data.customerId'                        // Extract field
+//	data: 'data.payload'                              // Use specific nested field as data
+//	datacontenttype: '"application/json"'             // Static content type
+//	dataschema: '"https://example.com/schemas/v1/" + data.type + ".json"'  // Dynamic schema
 //
 // Literal values (non-CEL):
-//   source: "my-service"    // Static string
-//   type: "order.created"   // Static type
+//
+//	source: "my-service"    // Static string
+//	type: "order.created"   // Static type
 type CloudEventsOverrides struct {
 	ID              string // CloudEvent ID (for idempotency/deduplication)
 	Source          string // CloudEvent source
@@ -62,7 +64,7 @@ type Pipeline struct {
 	interceptors *interceptor.Chain
 	sink         sink.Sink
 	dlq          *dlq.Handler
-	logger *slog.Logger
+	logger       *slog.Logger
 	// Compiled CEL programs for CloudEvent overrides (nil if using JSONPath)
 	ceIDProgram              cel.Program
 	ceSourceProgram          cel.Program
@@ -553,4 +555,3 @@ func evaluateCELValue(prg cel.Program, inputData map[string]interface{}) interfa
 	// Return the raw value
 	return out.Value()
 }
-
