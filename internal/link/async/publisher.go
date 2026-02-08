@@ -2,11 +2,12 @@ package async
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"time"
 
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/google/uuid"
 	"github.com/lsm/fiso/internal/dlq"
 )
 
@@ -25,22 +26,24 @@ func NewPublisher(broker dlq.Publisher, topic string) *Publisher {
 // Publish wraps the payload in a CloudEvent with a correlation ID and
 // publishes to the configured broker topic.
 func (p *Publisher) Publish(ctx context.Context, eventType string, payload []byte, correlationID string) error {
-	if correlationID == "" {
-		correlationID = generateID()
+	// Create CloudEvent using SDK
+	event := cloudevents.NewEvent()
+	event.SetID(uuid.New().String())
+	event.SetSource("fiso-link")
+	event.SetType(eventType)
+	event.SetTime(time.Now().UTC())
+	if err := event.SetData(cloudevents.ApplicationJSON, json.RawMessage(payload)); err != nil {
+		return fmt.Errorf("set event data: %w", err)
 	}
 
-	ce := map[string]interface{}{
-		"specversion": "1.0",
-		"id":          generateID(),
-		"source":      "fiso-link",
-		"type":        eventType,
-		"time":        time.Now().UTC().Format(time.RFC3339),
-		"data":        json.RawMessage(payload),
-	}
-
-	data, err := json.Marshal(ce)
+	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal cloudevent: %w", err)
+	}
+
+	// Generate correlation ID if not provided
+	if correlationID == "" {
+		correlationID = event.ID()
 	}
 
 	headers := map[string]string{
@@ -54,10 +57,4 @@ func (p *Publisher) Publish(ctx context.Context, eventType string, payload []byt
 // Close closes the underlying broker.
 func (p *Publisher) Close() error {
 	return p.broker.Close()
-}
-
-func generateID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }

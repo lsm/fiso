@@ -199,6 +199,9 @@ func convertFlowToCRD(flow *config.FlowDefinition, namespace string) *v1alpha1.F
 		if crd.Annotations == nil {
 			crd.Annotations = make(map[string]string)
 		}
+		if flow.CloudEvents.ID != "" {
+			crd.Annotations["fiso.io/cloudevents-id"] = flow.CloudEvents.ID
+		}
 		if flow.CloudEvents.Type != "" {
 			crd.Annotations["fiso.io/cloudevents-type"] = flow.CloudEvents.Type
 		}

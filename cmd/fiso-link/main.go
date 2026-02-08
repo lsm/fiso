@@ -35,8 +35,8 @@ func main() {
 func run() error {
 	// Parse CLI flags
 	var (
-		portFlag       = flag.Int("port", 0, "Override listen port (e.g., 8081)")
-		configFlag     = flag.String("config", "", "Path to config file")
+		portFlag        = flag.Int("port", 0, "Override listen port (e.g., 8081)")
+		configFlag      = flag.String("config", "", "Path to config file")
 		metricsPortFlag = flag.Int("metrics-port", 0, "Override metrics port")
 	)
 	flag.Parse()

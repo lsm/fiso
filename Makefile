@@ -5,16 +5,16 @@ IMAGE_REPO ?= ghcr.io/lsm
 IMAGE_TAG  ?= latest
 
 build:
-	go build -o bin/fiso-flow ./cmd/fiso-flow
+	go build -o tmp/fiso-flow ./cmd/fiso-flow
 
 build-link:
-	go build -o bin/fiso-link ./cmd/fiso-link
+	go build -o tmp/fiso-link ./cmd/fiso-link
 
 build-operator:
-	go build -o bin/fiso-operator ./cmd/fiso-operator
+	go build -o tmp/fiso-operator ./cmd/fiso-operator
 
 build-cli:
-	go build -o bin/fiso ./cmd/fiso
+	go build -o tmp/fiso ./cmd/fiso
 
 build-all: build build-link build-operator build-cli
 
@@ -79,6 +79,6 @@ compose-down:
 	docker compose down
 
 clean:
-	rm -rf bin/ dist/ coverage.out
+	rm -rf tmp/ dist/ coverage.out
 
 .DEFAULT_GOAL := build

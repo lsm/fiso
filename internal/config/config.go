@@ -114,17 +114,19 @@ type InterceptorConfig struct {
 // transforms). CEL enables field combination, conditionals, and computations.
 //
 // CEL examples:
-//   id: 'data.eventId + "-" + data.CTN'                    # Combine fields for idempotency
-//   type: 'data.amount > 1000 ? "high-value" : "standard"' # Conditional type
-//   source: '"service-" + data.region'                     # Dynamic source
-//   subject: 'data.customerId'                             # Extract field
-//   data: 'data.payload'                                   # Use specific nested field as data
-//   datacontenttype: '"application/json"'                  # Static content type
-//   dataschema: '"https://example.com/schemas/" + data.type + ".json"'  # Dynamic schema
+//
+//	id: 'data.eventId + "-" + data.CTN'                    # Combine fields for idempotency
+//	type: 'data.amount > 1000 ? "high-value" : "standard"' # Conditional type
+//	source: '"service-" + data.region'                     # Dynamic source
+//	subject: 'data.customerId'                             # Extract field
+//	data: 'data.payload'                                   # Use specific nested field as data
+//	datacontenttype: '"application/json"'                  # Static content type
+//	dataschema: '"https://example.com/schemas/" + data.type + ".json"'  # Dynamic schema
 //
 // Literal values (non-CEL):
-//   source: "my-service"    # Static string
-//   type: "order.created"   # Static type
+//
+//	source: "my-service"    # Static string
+//	type: "order.created"   # Static type
 type CloudEventsConfig struct {
 	ID              string `yaml:"id,omitempty"`              // CloudEvent ID for idempotency
 	Type            string `yaml:"type,omitempty"`            // CloudEvent type

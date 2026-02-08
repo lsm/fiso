@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/cel-go/common/types"
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/source"
@@ -2605,5 +2606,135 @@ func TestPipeline_WrapCloudEvent_LiteralDataFallback(t *testing.T) {
 	// Data should be the literal string value
 	if ce["data"] != "static-payload" {
 		t.Errorf("expected data 'static-payload', got %v", ce["data"])
+	}
+}
+
+func TestToNative(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected interface{}
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "types.Null",
+			input:    types.NullValue,
+			expected: nil,
+		},
+		{
+			name:     "types.Int",
+			input:    types.Int(42),
+			expected: int64(42),
+		},
+		{
+			name:     "types.Double",
+			input:    types.Double(3.14),
+			expected: float64(3.14),
+		},
+		{
+			name:     "types.String",
+			input:    types.String("hello"),
+			expected: "hello",
+		},
+		{
+			name:     "types.Bool true",
+			input:    types.Bool(true),
+			expected: true,
+		},
+		{
+			name:     "types.Bool false",
+			input:    types.Bool(false),
+			expected: false,
+		},
+		{
+			name:     "native string passthrough",
+			input:    "plain string",
+			expected: "plain string",
+		},
+		{
+			name:     "native int passthrough",
+			input:    123,
+			expected: 123,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := toNative(tc.input)
+			if result != tc.expected {
+				t.Errorf("toNative(%v) = %v, want %v", tc.input, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestToNative_Map(t *testing.T) {
+	// Create a CEL map using the types package
+	m := types.DefaultTypeAdapter.NativeToValue(map[string]interface{}{
+		"key1": "value1",
+		"key2": 42,
+		"nested": map[string]interface{}{
+			"inner": "data",
+		},
+	})
+
+	result := toNative(m)
+	resultMap, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+
+	if resultMap["key1"] != "value1" {
+		t.Errorf("expected key1='value1', got %v", resultMap["key1"])
+	}
+	if resultMap["key2"] != int64(42) {
+		t.Errorf("expected key2=42, got %v", resultMap["key2"])
+	}
+	nestedMap, ok := resultMap["nested"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected nested map, got %T", resultMap["nested"])
+	}
+	if nestedMap["inner"] != "data" {
+		t.Errorf("expected inner='data', got %v", nestedMap["inner"])
+	}
+}
+
+func TestToNative_List(t *testing.T) {
+	// Create a CEL list using the types package
+	list := types.DefaultTypeAdapter.NativeToValue([]interface{}{
+		"item1",
+		42,
+		true,
+		[]interface{}{"nested", "list"},
+	})
+
+	result := toNative(list)
+	resultList, ok := result.([]interface{})
+	if !ok {
+		t.Fatalf("expected []interface{}, got %T", result)
+	}
+
+	if len(resultList) != 4 {
+		t.Fatalf("expected 4 items, got %d", len(resultList))
+	}
+	if resultList[0] != "item1" {
+		t.Errorf("expected item1, got %v", resultList[0])
+	}
+	if resultList[1] != int64(42) {
+		t.Errorf("expected 42, got %v", resultList[1])
+	}
+	if resultList[2] != true {
+		t.Errorf("expected true, got %v", resultList[2])
+	}
+	nestedList, ok := resultList[3].([]interface{})
+	if !ok {
+		t.Fatalf("expected nested list, got %T", resultList[3])
+	}
+	if len(nestedList) != 2 {
+		t.Errorf("expected 2 nested items, got %d", len(nestedList))
 	}
 }

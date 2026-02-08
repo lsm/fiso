@@ -121,14 +121,14 @@ func TestPublish_WithEmptyPayload(t *testing.T) {
 	broker := &mockBroker{}
 	pub := NewPublisher(broker, "events")
 
-	// Test with empty payload - this should trigger the marshal error path
+	// Test with empty payload - this should trigger the set data error path
 	// because json.RawMessage cannot be empty
 	err := pub.Publish(context.Background(), "test.event", []byte{}, "corr-1")
 	if err == nil {
 		t.Fatal("expected error with empty payload")
 	}
-	if !strings.Contains(err.Error(), "marshal cloudevent") {
-		t.Errorf("expected 'marshal cloudevent' error, got: %v", err)
+	if !strings.Contains(err.Error(), "set event data") {
+		t.Errorf("expected 'set event data' error, got: %v", err)
 	}
 }
 
@@ -136,13 +136,13 @@ func TestPublish_WithInvalidJSONPayload(t *testing.T) {
 	broker := &mockBroker{}
 	pub := NewPublisher(broker, "events")
 
-	// Test with invalid JSON payload - this should also trigger marshal error
+	// Test with invalid JSON payload - this should also trigger set data error
 	err := pub.Publish(context.Background(), "test.event", []byte("invalid json"), "corr-1")
 	if err == nil {
 		t.Fatal("expected error with invalid JSON payload")
 	}
-	if !strings.Contains(err.Error(), "marshal cloudevent") {
-		t.Errorf("expected 'marshal cloudevent' error, got: %v", err)
+	if !strings.Contains(err.Error(), "set event data") {
+		t.Errorf("expected 'set event data' error, got: %v", err)
 	}
 }
 
@@ -263,39 +263,5 @@ func TestClose_Error(t *testing.T) {
 	}
 	if err.Error() != "close failed" {
 		t.Errorf("expected 'close failed' error, got %v", err)
-	}
-}
-
-func TestGenerateID(t *testing.T) {
-	// Call generateID multiple times
-	id1 := generateID()
-	id2 := generateID()
-	id3 := generateID()
-
-	// IDs should be non-empty
-	if id1 == "" {
-		t.Error("expected non-empty ID")
-	}
-	if id2 == "" {
-		t.Error("expected non-empty ID")
-	}
-	if id3 == "" {
-		t.Error("expected non-empty ID")
-	}
-
-	// IDs should be different
-	if id1 == id2 {
-		t.Error("expected different IDs from consecutive calls")
-	}
-	if id2 == id3 {
-		t.Error("expected different IDs from consecutive calls")
-	}
-
-	// ID format should contain hyphens (UUID-like)
-	if !strings.Contains(id1, "-") {
-		t.Errorf("expected UUID-like format with hyphens, got %q", id1)
-	}
-	if !strings.Contains(id2, "-") {
-		t.Errorf("expected UUID-like format with hyphens, got %q", id2)
 	}
 }
