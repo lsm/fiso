@@ -11,6 +11,7 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/ext"
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
@@ -552,6 +553,53 @@ func evaluateCELValue(prg cel.Program, inputData map[string]interface{}) interfa
 		return nil // Return nil on evaluation error
 	}
 
-	// Return the raw value
-	return out.Value()
+	// Convert CEL types to native Go types for JSON serialization
+	return toNative(out)
+}
+
+// toNative recursively converts CEL ref.Val types to native Go types
+// that can be serialized to JSON.
+func toNative(val interface{}) interface{} {
+	// Handle null values first
+	if _, ok := val.(types.Null); ok {
+		return nil
+	}
+
+	switch v := val.(type) {
+	case traits.Mapper:
+		it := v.Iterator()
+		m := make(map[string]interface{})
+		for it.HasNext() == types.True {
+			key := it.Next()
+			value := v.Get(key)
+			m[fmt.Sprint(key.Value())] = toNative(value)
+		}
+		return m
+	case traits.Lister:
+		it := v.Iterator()
+		var list []interface{}
+		for it.HasNext() == types.True {
+			elem := it.Next()
+			list = append(list, toNative(elem))
+		}
+		return list
+	default:
+		if rv, ok := val.(types.Int); ok {
+			return int64(rv)
+		}
+		if rv, ok := val.(types.Double); ok {
+			return float64(rv)
+		}
+		if rv, ok := val.(types.String); ok {
+			return string(rv)
+		}
+		if rv, ok := val.(types.Bool); ok {
+			return bool(rv)
+		}
+		// Fall back to Value() for other ref.Val types
+		if rv, ok := val.(interface{ Value() interface{} }); ok {
+			return rv.Value()
+		}
+		return val
+	}
 }

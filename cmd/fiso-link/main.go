@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -32,10 +33,21 @@ func main() {
 }
 
 func run() error {
+	// Parse CLI flags
+	var (
+		portFlag       = flag.Int("port", 0, "Override listen port (e.g., 8081)")
+		configFlag     = flag.String("config", "", "Path to config file")
+		metricsPortFlag = flag.Int("metrics-port", 0, "Override metrics port")
+	)
+	flag.Parse()
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	configPath := os.Getenv("FISO_LINK_CONFIG")
+	configPath := *configFlag
+	if configPath == "" {
+		configPath = os.Getenv("FISO_LINK_CONFIG")
+	}
 	if configPath == "" {
 		configPath = "/etc/fiso/link/config.yaml"
 	}
@@ -43,6 +55,14 @@ func run() error {
 	cfg, err := link.LoadConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Apply CLI overrides
+	if *portFlag > 0 {
+		cfg.ListenAddr = fmt.Sprintf(":%d", *portFlag)
+	}
+	if *metricsPortFlag > 0 {
+		cfg.MetricsAddr = fmt.Sprintf(":%d", *metricsPortFlag)
 	}
 
 	logger.Info("loaded config", "targets", len(cfg.Targets), "listenAddr", cfg.ListenAddr)
