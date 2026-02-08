@@ -373,9 +373,13 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 	// Apply CloudEvents overrides from config
 	if flowDef.CloudEvents != nil {
 		cfg.CloudEvents = &pipeline.CloudEventsOverrides{
-			Type:    flowDef.CloudEvents.Type,
-			Source:  flowDef.CloudEvents.Source,
-			Subject: flowDef.CloudEvents.Subject,
+			ID:              flowDef.CloudEvents.ID,
+			Type:            flowDef.CloudEvents.Type,
+			Source:          flowDef.CloudEvents.Source,
+			Subject:         flowDef.CloudEvents.Subject,
+			Data:            flowDef.CloudEvents.Data,
+			DataContentType: flowDef.CloudEvents.DataContentType,
+			DataSchema:      flowDef.CloudEvents.DataSchema,
 		}
 	}
 
