@@ -110,11 +110,29 @@ type InterceptorConfig struct {
 }
 
 // CloudEventsConfig holds overrides for the CloudEvents envelope fields.
-// Values starting with "$." are resolved as JSONPath expressions against the input event.
+// All fields support CEL expressions evaluated against the ORIGINAL input event (before
+// transforms). CEL enables field combination, conditionals, and computations.
+//
+// CEL examples:
+//   id: 'data.eventId + "-" + data.CTN'                    # Combine fields for idempotency
+//   type: 'data.amount > 1000 ? "high-value" : "standard"' # Conditional type
+//   source: '"service-" + data.region'                     # Dynamic source
+//   subject: 'data.customerId'                             # Extract field
+//   data: 'data.payload'                                   # Use specific nested field as data
+//   datacontenttype: '"application/json"'                  # Static content type
+//   dataschema: '"https://example.com/schemas/" + data.type + ".json"'  # Dynamic schema
+//
+// Literal values (non-CEL):
+//   source: "my-service"    # Static string
+//   type: "order.created"   # Static type
 type CloudEventsConfig struct {
-	Type    string `yaml:"type,omitempty"`
-	Source  string `yaml:"source,omitempty"`
-	Subject string `yaml:"subject,omitempty"`
+	ID              string `yaml:"id,omitempty"`              // CloudEvent ID for idempotency
+	Type            string `yaml:"type,omitempty"`            // CloudEvent type
+	Source          string `yaml:"source,omitempty"`          // CloudEvent source
+	Subject         string `yaml:"subject,omitempty"`         // CloudEvent subject (optional)
+	Data            string `yaml:"data,omitempty"`            // CloudEvent data (if empty, uses transformed payload)
+	DataContentType string `yaml:"datacontenttype,omitempty"` // CloudEvent datacontenttype (optional, default: application/json)
+	DataSchema      string `yaml:"dataschema,omitempty"`      // CloudEvent dataschema (optional)
 }
 
 // SourceConfig holds source configuration.
