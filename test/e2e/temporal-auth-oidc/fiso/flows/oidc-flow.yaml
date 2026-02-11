@@ -1,0 +1,41 @@
+name: oidc-auth-flow
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka:9092
+source:
+  type: kafka
+  config:
+    cluster: main
+    topic: oidc-test-events
+    consumerGroup: fiso-temporal-oidc-e2e
+    startOffset: earliest
+transform:
+  fields:
+    order_id: data.order_id
+    total: data.amount
+    customer_name: data.customer
+    status: '"pending"'
+cloudevents:
+  type: order.created
+  source: fiso-oidc-e2e
+  subject: "$.order_id"
+sink:
+  type: temporal
+  config:
+    hostPort: temporal:7233
+    namespace: default
+    taskQueue: oidc-test-queue
+    workflowType: ProcessOrder
+    workflowIdExpr: "order-{{.order_id}}"
+    auth:
+      oidc:
+        tokenURL: "http://mock-oauth2:8080/default/token"
+        clientID: "fiso-e2e-client"
+        clientSecretEnv: "OIDC_CLIENT_SECRET"
+        scopes:
+          - "temporal:write"
+errorHandling:
+  deadLetterTopic: fiso-dlq-oidc-e2e
+  maxRetries: 3

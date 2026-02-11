@@ -161,6 +161,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 15
+      temporal:
+        image: temporalio/temporal:latest
+        ports:
+          - 7233:7233
+        options: >-
+          --health-cmd "temporal operator cluster health --address localhost:7233"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -172,6 +181,7 @@ jobs:
         run: go test -tags integration -race -timeout 120s ./test/integration/...
         env:
           KAFKA_BROKERS: localhost:9092
+          TEMPORAL_HOST_PORT: localhost:7233
 
   cli-smoke:
     runs-on: ubuntu-latest
@@ -312,6 +322,32 @@ jobs:
 
       - name: Run Kafka → Temporal Signal E2E tests
         working-directory: test/e2e/kafka-temporal-signal
+        run: bash test.sh
+        env:
+          E2E_BUILD_FLAG: " "
+
+  e2e-temporal-auth-oidc:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+
+      - name: Build Docker images from pre-compiled binaries
+        run: |
+          chmod +x bin/fiso-flow bin/fiso-link
+          printf 'FROM alpine:3.20\nRUN apk add --no-cache ca-certificates tzdata\nCOPY fiso-flow /usr/local/bin/fiso-flow\nENTRYPOINT ["fiso-flow"]\n' \
+            | docker build -t fiso-flow:e2e -f - bin/
+          printf 'FROM alpine:3.20\nRUN apk add --no-cache ca-certificates tzdata\nCOPY fiso-link /usr/local/bin/fiso-link\nENTRYPOINT ["fiso-link"]\n' \
+            | docker build -t fiso-link:e2e -f - bin/
+
+      - name: Run Temporal OIDC Auth E2E tests
+        working-directory: test/e2e/temporal-auth-oidc
         run: bash test.sh
         env:
           E2E_BUILD_FLAG: " "

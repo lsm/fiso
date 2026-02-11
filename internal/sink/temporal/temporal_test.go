@@ -773,3 +773,309 @@ func TestToNative_CELTypes(t *testing.T) {
 		t.Errorf("expected strVal 'test-string', got %v", mc.lastArgs[3])
 	}
 }
+
+func TestConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantErr string
+	}{
+		{
+			name: "valid minimal config",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid with TLS CA only",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				TLS: TLSConfig{
+					Enabled: true,
+					CAFile:  "/path/to/ca.crt",
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid with mTLS",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				TLS: TLSConfig{
+					Enabled:  true,
+					CertFile: "/path/to/client.crt",
+					KeyFile:  "/path/to/client.key",
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid with static API key",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					APIKey: "my-api-key",
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid with dynamic API key",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					APIKeyEnv: "TEMPORAL_API_KEY",
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid with API key and TLS CA",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				TLS: TLSConfig{
+					Enabled: true,
+					CAFile:  "/path/to/ca.crt",
+				},
+				Auth: AuthConfig{
+					APIKey: "my-api-key",
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "TLS certFile without keyFile",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				TLS: TLSConfig{
+					CertFile: "/path/to/cert.pem",
+				},
+			},
+			wantErr: "tls.keyFile is required when certFile is specified",
+		},
+		{
+			name: "TLS keyFile without certFile",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				TLS: TLSConfig{
+					KeyFile: "/path/to/key.pem",
+				},
+			},
+			wantErr: "tls.certFile is required when keyFile is specified",
+		},
+		{
+			name: "both apiKey and apiKeyEnv",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					APIKey:    "key1",
+					APIKeyEnv: "ENV_VAR",
+				},
+			},
+			wantErr: "only one auth method allowed",
+		},
+		{
+			name: "API key and mTLS conflict",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					APIKey: "my-key",
+				},
+				TLS: TLSConfig{
+					CertFile: "/path/to/client.crt",
+					KeyFile:  "/path/to/client.key",
+				},
+			},
+			wantErr: "only one auth method allowed",
+		},
+		{
+			name: "apiKeyEnv and mTLS conflict",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					APIKeyEnv: "TEMPORAL_API_KEY",
+				},
+				TLS: TLSConfig{
+					CertFile: "/path/to/client.crt",
+					KeyFile:  "/path/to/client.key",
+				},
+			},
+			wantErr: "only one auth method allowed",
+		},
+		{
+			name: "valid with tokenFile",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					TokenFile: "/var/run/secrets/tokens/temporal-token",
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid with OIDC clientSecret",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					OIDC: &OIDCConfig{
+						TokenURL:     "https://login.microsoftonline.com/tenant/oauth2/v2.0/token",
+						ClientID:     "my-client-id",
+						ClientSecret: "my-secret",
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid with OIDC clientSecretEnv",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					OIDC: &OIDCConfig{
+						TokenURL:        "https://login.microsoftonline.com/tenant/oauth2/v2.0/token",
+						ClientID:        "my-client-id",
+						ClientSecretEnv: "AZURE_CLIENT_SECRET",
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "tokenFile and apiKey conflict",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					TokenFile: "/path/to/token",
+					APIKey:    "my-key",
+				},
+			},
+			wantErr: "only one auth method allowed",
+		},
+		{
+			name: "OIDC and apiKey conflict",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					APIKey: "my-key",
+					OIDC: &OIDCConfig{
+						TokenURL:     "https://example.com/token",
+						ClientID:     "id",
+						ClientSecret: "secret",
+					},
+				},
+			},
+			wantErr: "only one auth method allowed",
+		},
+		{
+			name: "OIDC and mTLS conflict",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				TLS: TLSConfig{
+					CertFile: "/path/to/cert",
+					KeyFile:  "/path/to/key",
+				},
+				Auth: AuthConfig{
+					OIDC: &OIDCConfig{
+						TokenURL:     "https://example.com/token",
+						ClientID:     "id",
+						ClientSecret: "secret",
+					},
+				},
+			},
+			wantErr: "only one auth method allowed",
+		},
+		{
+			name: "OIDC missing tokenURL",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					OIDC: &OIDCConfig{
+						ClientID:     "my-client-id",
+						ClientSecret: "my-secret",
+					},
+				},
+			},
+			wantErr: "auth.oidc.tokenURL is required",
+		},
+		{
+			name: "OIDC missing clientID",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					OIDC: &OIDCConfig{
+						TokenURL:     "https://example.com/token",
+						ClientSecret: "my-secret",
+					},
+				},
+			},
+			wantErr: "auth.oidc.clientID is required",
+		},
+		{
+			name: "OIDC missing both secrets",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					OIDC: &OIDCConfig{
+						TokenURL: "https://example.com/token",
+						ClientID: "my-client-id",
+					},
+				},
+			},
+			wantErr: "auth.oidc requires either clientSecret or clientSecretEnv",
+		},
+		{
+			name: "OIDC both clientSecret and clientSecretEnv",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					OIDC: &OIDCConfig{
+						TokenURL:        "https://example.com/token",
+						ClientID:        "my-client-id",
+						ClientSecret:    "secret1",
+						ClientSecretEnv: "SECRET_ENV",
+					},
+				},
+			},
+			wantErr: "auth.oidc.clientSecret and clientSecretEnv are mutually exclusive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() error = %v, want nil", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Validate() error = nil, want error containing %q", tt.wantErr)
+				} else if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.wantErr)
+				}
+			}
+		})
+	}
+}

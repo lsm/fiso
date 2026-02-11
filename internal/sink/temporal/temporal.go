@@ -3,6 +3,7 @@ package temporal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -45,6 +46,32 @@ type ParamConfig struct {
 	Expr string // CEL expression to extract the value from event data
 }
 
+// TLSConfig defines TLS settings for Temporal connections.
+type TLSConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	CAFile     string `yaml:"caFile,omitempty"`
+	CertFile   string `yaml:"certFile,omitempty"` // For mTLS
+	KeyFile    string `yaml:"keyFile,omitempty"`  // For mTLS
+	SkipVerify bool   `yaml:"skipVerify,omitempty"`
+}
+
+// AuthConfig defines authentication for Temporal connections.
+type AuthConfig struct {
+	APIKey    string      `yaml:"apiKey,omitempty"`    // Static API key
+	APIKeyEnv string      `yaml:"apiKeyEnv,omitempty"` // Env var name for dynamic API key (enables rotation)
+	TokenFile string      `yaml:"tokenFile,omitempty"` // Bearer token read from file per-request
+	OIDC      *OIDCConfig `yaml:"oidc,omitempty"`      // OIDC client credentials flow
+}
+
+// OIDCConfig defines OIDC client credentials flow for token acquisition.
+type OIDCConfig struct {
+	TokenURL        string   `yaml:"tokenURL"`                   // Token endpoint (e.g. https://login.microsoftonline.com/{tenantID}/oauth2/v2.0/token)
+	ClientID        string   `yaml:"clientID"`                   // OAuth2 client ID
+	ClientSecret    string   `yaml:"clientSecret,omitempty"`     // OAuth2 client secret
+	ClientSecretEnv string   `yaml:"clientSecretEnv,omitempty"` // Read client secret from env var
+	Scopes          []string `yaml:"scopes,omitempty"`           // OAuth2 scopes
+}
+
 // Config holds Temporal sink configuration.
 type Config struct {
 	HostPort       string
@@ -56,6 +83,60 @@ type Config struct {
 	SignalName     string // Required when Mode == ModeSignal
 	Timeout        time.Duration
 	Params         []ParamConfig // Typed workflow parameters (when set, replaces raw bytes)
+	TLS            TLSConfig     // Optional TLS configuration
+	Auth           AuthConfig    // Optional auth configuration
+}
+
+// Validate checks the Temporal configuration for errors.
+func (c *Config) Validate() error {
+	var errs []error
+
+	// TLS validation
+	if c.TLS.CertFile != "" && c.TLS.KeyFile == "" {
+		errs = append(errs, errors.New("tls.keyFile is required when certFile is specified"))
+	}
+	if c.TLS.KeyFile != "" && c.TLS.CertFile == "" {
+		errs = append(errs, errors.New("tls.certFile is required when keyFile is specified"))
+	}
+
+	// Count configured auth methods — only one is allowed
+	authCount := 0
+	if c.Auth.APIKey != "" {
+		authCount++
+	}
+	if c.Auth.APIKeyEnv != "" {
+		authCount++
+	}
+	if c.Auth.TokenFile != "" {
+		authCount++
+	}
+	if c.Auth.OIDC != nil {
+		authCount++
+	}
+	if c.TLS.CertFile != "" && c.TLS.KeyFile != "" {
+		authCount++
+	}
+	if authCount > 1 {
+		errs = append(errs, errors.New("only one auth method allowed: use one of apiKey, apiKeyEnv, tokenFile, oidc, or mTLS client certificates"))
+	}
+
+	// OIDC validation
+	if c.Auth.OIDC != nil {
+		if c.Auth.OIDC.TokenURL == "" {
+			errs = append(errs, errors.New("auth.oidc.tokenURL is required"))
+		}
+		if c.Auth.OIDC.ClientID == "" {
+			errs = append(errs, errors.New("auth.oidc.clientID is required"))
+		}
+		if c.Auth.OIDC.ClientSecret == "" && c.Auth.OIDC.ClientSecretEnv == "" {
+			errs = append(errs, errors.New("auth.oidc requires either clientSecret or clientSecretEnv"))
+		}
+		if c.Auth.OIDC.ClientSecret != "" && c.Auth.OIDC.ClientSecretEnv != "" {
+			errs = append(errs, errors.New("auth.oidc.clientSecret and clientSecretEnv are mutually exclusive"))
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // Sink delivers events by starting or signalling Temporal workflows.

@@ -293,6 +293,53 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 			tcfg.Mode = temporalsink.Mode(v)
 		}
 
+		// Parse TLS config
+		if tlsRaw, ok := flowDef.Sink.Config["tls"].(map[string]interface{}); ok {
+			if enabled, ok := tlsRaw["enabled"].(bool); ok {
+				tcfg.TLS.Enabled = enabled
+			}
+			if v := getString(tlsRaw, "caFile"); v != "" {
+				tcfg.TLS.CAFile = v
+			}
+			if v := getString(tlsRaw, "certFile"); v != "" {
+				tcfg.TLS.CertFile = v
+			}
+			if v := getString(tlsRaw, "keyFile"); v != "" {
+				tcfg.TLS.KeyFile = v
+			}
+			if skip, ok := tlsRaw["skipVerify"].(bool); ok {
+				tcfg.TLS.SkipVerify = skip
+			}
+		}
+
+		// Parse auth config
+		if authRaw, ok := flowDef.Sink.Config["auth"].(map[string]interface{}); ok {
+			if v := getString(authRaw, "apiKey"); v != "" {
+				tcfg.Auth.APIKey = v
+			}
+			if v := getString(authRaw, "apiKeyEnv"); v != "" {
+				tcfg.Auth.APIKeyEnv = v
+			}
+			if v := getString(authRaw, "tokenFile"); v != "" {
+				tcfg.Auth.TokenFile = v
+			}
+			if oidcRaw, ok := authRaw["oidc"].(map[string]interface{}); ok {
+				tcfg.Auth.OIDC = &temporalsink.OIDCConfig{
+					TokenURL:        getString(oidcRaw, "tokenURL"),
+					ClientID:        getString(oidcRaw, "clientID"),
+					ClientSecret:    getString(oidcRaw, "clientSecret"),
+					ClientSecretEnv: getString(oidcRaw, "clientSecretEnv"),
+				}
+				if scopesRaw, ok := oidcRaw["scopes"].([]interface{}); ok {
+					for _, s := range scopesRaw {
+						if str, ok := s.(string); ok {
+							tcfg.Auth.OIDC.Scopes = append(tcfg.Auth.OIDC.Scopes, str)
+						}
+					}
+				}
+			}
+		}
+
 		// Parse typed params for cross-SDK compatibility
 		if paramsRaw, ok := flowDef.Sink.Config["params"].([]interface{}); ok {
 			for _, p := range paramsRaw {

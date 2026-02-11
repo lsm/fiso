@@ -31,15 +31,45 @@ func newTemporalSDKClient(cfg temporalsink.Config) (*sdkAdapter, error) {
 		namespace = "default"
 	}
 
-	c, err := client.Dial(client.Options{
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid temporal config: %w", err)
+	}
+
+	opts := client.Options{
 		HostPort:  hostPort,
 		Namespace: namespace,
-	})
+	}
+
+	// Apply TLS configuration for server certificate verification
+	if cfg.TLS.Enabled || cfg.TLS.CAFile != "" {
+		tlsConfig, err := temporalsink.BuildTLSConfig(cfg.TLS)
+		if err != nil {
+			return nil, fmt.Errorf("tls config: %w", err)
+		}
+		opts.ConnectionOptions.TLS = tlsConfig
+	}
+
+	// Apply credentials (API key or mTLS)
+	creds, err := buildTemporalCredentials(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("credentials: %w", err)
+	}
+	if creds != nil {
+		opts.Credentials = creds
+	}
+
+	c, err := client.Dial(opts)
 	if err != nil {
 		return nil, fmt.Errorf("dial temporal at %s: %w", hostPort, err)
 	}
 
 	return &sdkAdapter{client: c}, nil
+}
+
+// buildTemporalCredentials creates Temporal credentials from config.
+// Returns nil if no authentication is configured.
+func buildTemporalCredentials(cfg temporalsink.Config) (client.Credentials, error) {
+	return temporalsink.BuildCredentials(cfg)
 }
 
 func (a *sdkAdapter) ExecuteWorkflow(ctx context.Context, opts temporalsink.StartWorkflowOptions, workflow string, args ...interface{}) (temporalsink.WorkflowRun, error) {

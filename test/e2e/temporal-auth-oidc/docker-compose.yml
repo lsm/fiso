@@ -1,0 +1,92 @@
+services:
+  # Kafka broker (KRaft mode, no ZooKeeper)
+  kafka:
+    image: apache/kafka:4.0.0
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Temporal dev server (in-memory, no external DB needed)
+  temporal:
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--port", "7233"]
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # Mock OAuth2/OIDC server — issues real JWTs via client_credentials grant
+  mock-oauth2:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    environment:
+      SERVER_PORT: "8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/default/.well-known/openid-configuration"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # External service (behind fiso-link)
+  external-api:
+    image: hashicorp/http-echo:latest
+    command: ["-text={\"enrichment\":\"from-external\"}", "-listen=:80"]
+
+  # Egress proxy — temporal-worker calls this to reach external-api
+  fiso-link:
+    image: fiso-link:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.link
+    volumes:
+      - ./fiso/link:/etc/fiso/link:ro
+    environment:
+      FISO_LINK_CONFIG: /etc/fiso/link/config.yaml
+    depends_on:
+      - external-api
+
+  # Temporal worker — runs workflow, logs WORKFLOW_COMPLETE
+  temporal-worker:
+    build:
+      context: ./temporal-worker
+    environment:
+      TEMPORAL_HOST: temporal:7233
+      FISO_LINK_ADDR: http://fiso-link:3500
+    depends_on:
+      temporal:
+        condition: service_healthy
+      fiso-link:
+        condition: service_started
+
+  # fiso-flow — consumes Kafka, acquires OIDC token, starts Temporal workflow
+  fiso-flow:
+    image: fiso-flow:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.flow
+    volumes:
+      - ./fiso/flows:/etc/fiso/flows:ro
+    environment:
+      FISO_CONFIG_DIR: /etc/fiso/flows
+      FISO_METRICS_ADDR: ":9090"
+      OIDC_CLIENT_SECRET: "e2e-test-secret"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      mock-oauth2:
+        condition: service_healthy
