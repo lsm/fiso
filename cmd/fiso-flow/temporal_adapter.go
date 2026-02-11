@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"log"
 
 	temporalsink "github.com/lsm/fiso/internal/sink/temporal"
 	"go.temporal.io/sdk/client"
@@ -40,26 +42,34 @@ func newTemporalSDKClient(cfg temporalsink.Config) (*sdkAdapter, error) {
 		Namespace: namespace,
 	}
 
-	// Explicitly disable TLS if requested (e.g., dev server with OIDC auth)
-	// This prevents SDK from auto-enabling TLS when credentials are provided
+	// Determine TLS configuration
+	var tlsConfig *tls.Config
 	if cfg.TLS.Disabled {
+		// Explicitly disable TLS (for dev servers with auth)
+		log.Printf("[temporal] TLS explicitly disabled for %s", hostPort)
 		opts.ConnectionOptions.TLSDisabled = true
 	} else if cfg.TLS.Enabled || cfg.TLS.CAFile != "" {
-		// Apply TLS configuration for server certificate verification
-		tlsConfig, err := temporalsink.BuildTLSConfig(cfg.TLS)
+		// Build TLS config for server certificate verification
+		var err error
+		tlsConfig, err = temporalsink.BuildTLSConfig(cfg.TLS)
 		if err != nil {
 			return nil, fmt.Errorf("tls config: %w", err)
 		}
 		opts.ConnectionOptions.TLS = tlsConfig
 	}
 
-	// Apply credentials (API key or mTLS)
+	// Apply credentials (API key, OIDC, or mTLS)
 	creds, err := buildTemporalCredentials(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("credentials: %w", err)
 	}
 	if creds != nil {
 		opts.Credentials = creds
+		// If credentials are set but TLS is not configured and not explicitly disabled,
+		// allow SDK auto-enable (default behavior). If TLS is explicitly disabled, the
+		// flag above will prevent auto-enable.
+		log.Printf("[temporal] Credentials configured, TLS: disabled=%v, config=%v",
+			cfg.TLS.Disabled, tlsConfig != nil)
 	}
 
 	c, err := client.Dial(opts)
