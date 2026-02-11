@@ -40,9 +40,12 @@ func newTemporalSDKClient(cfg temporalsink.Config) (*sdkAdapter, error) {
 		Namespace: namespace,
 	}
 
-	// Apply TLS configuration for server certificate verification
-	// Skip TLS setup if explicitly disabled (e.g., dev server with OIDC auth)
-	if !cfg.TLS.Disabled && (cfg.TLS.Enabled || cfg.TLS.CAFile != "") {
+	// Explicitly disable TLS if requested (e.g., dev server with OIDC auth)
+	// This prevents SDK from auto-enabling TLS when credentials are provided
+	if cfg.TLS.Disabled {
+		opts.ConnectionOptions.TLSDisabled = true
+	} else if cfg.TLS.Enabled || cfg.TLS.CAFile != "" {
+		// Apply TLS configuration for server certificate verification
 		tlsConfig, err := temporalsink.BuildTLSConfig(cfg.TLS)
 		if err != nil {
 			return nil, fmt.Errorf("tls config: %w", err)
