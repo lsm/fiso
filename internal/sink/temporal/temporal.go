@@ -84,7 +84,7 @@ type Config struct {
 	SignalName     string // Required when Mode == ModeSignal
 	Timeout        time.Duration
 	Params         []ParamConfig // Typed workflow parameters (when set, replaces raw bytes)
-	TLS            TLSConfig     // Optional TLS configuration
+	TLS            TLSConfig     `yaml:"tls"` // Optional TLS configuration
 	Auth           AuthConfig    // Optional auth configuration
 }
 
