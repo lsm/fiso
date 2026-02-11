@@ -48,6 +48,7 @@ type ParamConfig struct {
 
 // TLSConfig defines TLS settings for Temporal connections.
 type TLSConfig struct {
+	Disabled   bool   `yaml:"disabled,omitempty"` // Explicitly disable TLS (for dev/test)
 	Enabled    bool   `yaml:"enabled"`
 	CAFile     string `yaml:"caFile,omitempty"`
 	CertFile   string `yaml:"certFile,omitempty"` // For mTLS

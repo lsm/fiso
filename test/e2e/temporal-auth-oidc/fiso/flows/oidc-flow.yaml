@@ -29,6 +29,8 @@ sink:
     taskQueue: oidc-test-queue
     workflowType: ProcessOrder
     workflowIdExpr: "order-{{.order_id}}"
+    tls:
+      disabled: true  # Dev server doesn't use TLS
     auth:
       oidc:
         tokenURL: "http://mock-oauth2:8080/default/token"
