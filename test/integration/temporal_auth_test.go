@@ -22,7 +22,14 @@ func temporalHostPort() string {
 	return hp
 }
 
+func skipIfNoTemporal(t *testing.T) {
+	if os.Getenv("TEMPORAL_HOST_PORT") == "" {
+		t.Skip("Skipping Temporal integration test: TEMPORAL_HOST_PORT not set (run locally with: docker run -d -p 7233:7233 temporalio/auto-setup:latest)")
+	}
+}
+
 func TestTemporalAuth_NoAuth(t *testing.T) {
+	skipIfNoTemporal(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -50,6 +57,7 @@ func TestTemporalAuth_NoAuth(t *testing.T) {
 }
 
 func TestTemporalAuth_StaticAPIKey(t *testing.T) {
+	skipIfNoTemporal(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -91,6 +99,7 @@ func TestTemporalAuth_StaticAPIKey(t *testing.T) {
 }
 
 func TestTemporalAuth_DynamicAPIKeyFromEnv(t *testing.T) {
+	skipIfNoTemporal(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -135,6 +144,7 @@ func TestTemporalAuth_DynamicAPIKeyFromEnv(t *testing.T) {
 }
 
 func TestTemporalAuth_TokenFile(t *testing.T) {
+	skipIfNoTemporal(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
