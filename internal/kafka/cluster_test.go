@@ -79,7 +79,7 @@ func TestClusterConfig_Validate(t *testing.T) {
 		{
 			name:    "missing brokers",
 			cfg:     ClusterConfig{},
-			wantErr: "brokers are required",
+			wantErr: "at least one broker is required",
 		},
 		{
 			name: "invalid auth mechanism",
@@ -91,7 +91,7 @@ func TestClusterConfig_Validate(t *testing.T) {
 					Password:  "pass",
 				},
 			},
-			wantErr: "auth.mechanism \"INVALID\" is not valid",
+			wantErr: "unsupported SASL mechanism",
 		},
 		{
 			name: "auth mechanism without username",
@@ -102,7 +102,7 @@ func TestClusterConfig_Validate(t *testing.T) {
 					Password:  "pass",
 				},
 			},
-			wantErr: "auth.username is required",
+			wantErr: "username is required",
 		},
 		{
 			name: "auth mechanism without password",
@@ -113,7 +113,7 @@ func TestClusterConfig_Validate(t *testing.T) {
 					Username:  "user",
 				},
 			},
-			wantErr: "auth.password is required",
+			wantErr: "password is required",
 		},
 		{
 			name: "TLS certFile without keyFile",
@@ -124,7 +124,7 @@ func TestClusterConfig_Validate(t *testing.T) {
 					CertFile: "/path/to/cert.pem",
 				},
 			},
-			wantErr: "tls.keyFile is required when certFile is specified",
+			wantErr: "both certFile and keyFile must be specified together",
 		},
 		{
 			name: "TLS keyFile without certFile",
@@ -135,7 +135,7 @@ func TestClusterConfig_Validate(t *testing.T) {
 					KeyFile: "/path/to/key.pem",
 				},
 			},
-			wantErr: "tls.certFile is required when keyFile is specified",
+			wantErr: "both certFile and keyFile must be specified together",
 		},
 	}
 
@@ -151,6 +151,118 @@ func TestClusterConfig_Validate(t *testing.T) {
 					t.Errorf("Validate() error = nil, want error containing %q", tt.wantErr)
 				} else if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Errorf("Validate() error = %v, want error containing %q", err, tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
+}
+
+func TestClusterConfig_Validate_OAUTHBEARER(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     ClusterConfig
+		wantErr string
+	}{
+		{
+			name: "valid azure oauth",
+			cfg: ClusterConfig{
+				Brokers: []string{"localhost:9092"},
+				Auth: AuthConfig{
+					Mechanism: "OAUTHBEARER",
+					OAuth: &OAuthConfig{
+						Provider:        "azure",
+						TenantID:        "tenant-123",
+						ClientID:        "client-123",
+						ClientSecretEnv: "SECRET_ENV",
+						Scope:           "api://kafka/.default",
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "missing oauth config",
+			cfg: ClusterConfig{
+				Brokers: []string{"localhost:9092"},
+				Auth: AuthConfig{
+					Mechanism: "OAUTHBEARER",
+				},
+			},
+			wantErr: "oauth config is required",
+		},
+		{
+			name: "missing provider",
+			cfg: ClusterConfig{
+				Brokers: []string{"localhost:9092"},
+				Auth: AuthConfig{
+					Mechanism: "OAUTHBEARER",
+					OAuth:     &OAuthConfig{},
+				},
+			},
+			wantErr: "oauth.provider is required",
+		},
+		{
+			name: "missing clientId",
+			cfg: ClusterConfig{
+				Brokers: []string{"localhost:9092"},
+				Auth: AuthConfig{
+					Mechanism: "OAUTHBEARER",
+					OAuth: &OAuthConfig{
+						Provider: "azure",
+						TenantID: "tenant-123",
+					},
+				},
+			},
+			wantErr: "oauth.clientId is required",
+		},
+		{
+			name: "missing scope",
+			cfg: ClusterConfig{
+				Brokers: []string{"localhost:9092"},
+				Auth: AuthConfig{
+					Mechanism: "OAUTHBEARER",
+					OAuth: &OAuthConfig{
+						Provider: "azure",
+						TenantID: "tenant-123",
+						ClientID: "client-123",
+					},
+				},
+			},
+			wantErr: "oauth.scope is required",
+		},
+		{
+			name: "missing tenantId for azure",
+			cfg: ClusterConfig{
+				Brokers: []string{"localhost:9092"},
+				Auth: AuthConfig{
+					Mechanism: "OAUTHBEARER",
+					OAuth: &OAuthConfig{
+						Provider: "azure",
+						ClientID: "client-123",
+						Scope:    "api://kafka/.default",
+					},
+				},
+			},
+			wantErr: "oauth.tenantId is required for Azure",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected no error, got: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.wantErr)
+				} else if !contains(err.Error(), tt.wantErr) {
+					t.Errorf("expected error containing %q, got: %v", tt.wantErr, err)
 				}
 			}
 		})

@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -237,6 +238,82 @@ func TestSaslOption_AllMechanisms(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSaslOption_OAUTHBEARER(t *testing.T) {
+	t.Run("missing oauth config", func(t *testing.T) {
+		auth := AuthConfig{
+			Mechanism: "OAUTHBEARER",
+		}
+		_, err := saslOption(auth)
+		if err == nil {
+			t.Fatal("expected error for missing oauth config")
+		}
+		if !strings.Contains(err.Error(), "oauth config required") {
+			t.Errorf("expected 'oauth config required' error, got: %v", err)
+		}
+	})
+
+	t.Run("unsupported provider", func(t *testing.T) {
+		auth := AuthConfig{
+			Mechanism: "OAUTHBEARER",
+			OAuth: &OAuthConfig{
+				Provider: "unsupported",
+			},
+		}
+		_, err := saslOption(auth)
+		if err == nil {
+			t.Fatal("expected error for unsupported provider")
+		}
+		if !strings.Contains(err.Error(), "unsupported oauth provider") {
+			t.Errorf("expected 'unsupported oauth provider' error, got: %v", err)
+		}
+	})
+
+	t.Run("azure missing client secret env var", func(t *testing.T) {
+		auth := AuthConfig{
+			Mechanism: "OAUTHBEARER",
+			OAuth: &OAuthConfig{
+				Provider:        "azure",
+				TenantID:        "tenant-123",
+				ClientID:        "client-123",
+				ClientSecretEnv: "NONEXISTENT_SECRET_VAR",
+				Scope:           "api://kafka/.default",
+			},
+		}
+		_, err := saslOption(auth)
+		if err == nil {
+			t.Fatal("expected error for missing environment variable")
+		}
+		if !strings.Contains(err.Error(), "not set or empty") {
+			t.Errorf("expected 'not set or empty' error, got: %v", err)
+		}
+	})
+
+	t.Run("azure valid config with env var", func(t *testing.T) {
+		// Set test environment variable
+		envVar := "TEST_KAFKA_OAUTH_SECRET"
+		t.Setenv(envVar, "test-secret-value")
+
+		auth := AuthConfig{
+			Mechanism: "OAUTHBEARER",
+			OAuth: &OAuthConfig{
+				Provider:        "azure",
+				TenantID:        "tenant-123",
+				ClientID:        "client-123",
+				ClientSecretEnv: envVar,
+				Scope:           "api://kafka/.default",
+			},
+		}
+
+		opt, err := saslOption(auth)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if opt == nil {
+			t.Fatal("expected non-nil option")
+		}
+	})
 }
 
 func TestBuildTLSConfig_Basic(t *testing.T) {

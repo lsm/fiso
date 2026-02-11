@@ -1,13 +1,18 @@
 package kafka
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"os"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sasl"
+	"github.com/twmb/franz-go/pkg/sasl/oauth"
 	"github.com/twmb/franz-go/pkg/sasl/plain"
 	"github.com/twmb/franz-go/pkg/sasl/scram"
 )
@@ -62,9 +67,72 @@ func saslOption(auth AuthConfig) (kgo.Opt, error) {
 			Pass: auth.Password,
 		}.AsSha512Mechanism()
 
+	case "OAUTHBEARER":
+		if auth.OAuth == nil {
+			return nil, fmt.Errorf("oauth config required for OAUTHBEARER")
+		}
+		return createOAuthMechanism(auth.OAuth)
+
 	default:
 		return nil, fmt.Errorf("unsupported SASL mechanism: %s", auth.Mechanism)
 	}
+
+	return kgo.SASL(mechanism), nil
+}
+
+// createOAuthMechanism creates a Kafka SASL/OAUTHBEARER mechanism using the specified OAuth provider.
+func createOAuthMechanism(cfg *OAuthConfig) (kgo.Opt, error) {
+	switch cfg.Provider {
+	case "azure":
+		return createAzureOAuthMechanism(cfg)
+	default:
+		return nil, fmt.Errorf("unsupported oauth provider: %s", cfg.Provider)
+	}
+}
+
+// createAzureOAuthMechanism creates an OAUTHBEARER mechanism using Azure AD tokens.
+func createAzureOAuthMechanism(cfg *OAuthConfig) (kgo.Opt, error) {
+	var cred azcore.TokenCredential
+	var err error
+
+	if cfg.ClientSecretEnv != "" {
+		// Client credentials flow with secret from environment variable
+		clientSecret := os.Getenv(cfg.ClientSecretEnv)
+		if clientSecret == "" {
+			return nil, fmt.Errorf("environment variable %s is not set or empty", cfg.ClientSecretEnv)
+		}
+
+		cred, err = azidentity.NewClientSecretCredential(
+			cfg.TenantID,
+			cfg.ClientID,
+			clientSecret,
+			nil,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create azure client secret credential: %w", err)
+		}
+	} else {
+		// Managed identity or default credential chain (for AKS)
+		cred, err = azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			return nil, fmt.Errorf("create azure default credential: %w", err)
+		}
+	}
+
+	// Return OAUTHBEARER mechanism with token acquisition callback
+	mechanism := oauth.Oauth(func(ctx context.Context) (oauth.Auth, error) {
+		token, err := cred.GetToken(ctx, policy.TokenRequestOptions{
+			Scopes: []string{cfg.Scope},
+		})
+		if err != nil {
+			return oauth.Auth{}, fmt.Errorf("acquire azure token: %w", err)
+		}
+
+		return oauth.Auth{
+			Token:      token.Token,
+			Extensions: cfg.Extensions, // For Confluent Cloud (logicalCluster, identityPoolId)
+		}, nil
+	})
 
 	return kgo.SASL(mechanism), nil
 }
