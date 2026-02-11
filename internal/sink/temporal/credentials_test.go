@@ -536,11 +536,13 @@ func TestBuildCredentials_OIDC_Callback(t *testing.T) {
 		if r.URL.Path == "/token" {
 			// Return a mock token response
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{
 				"access_token": "mock-oidc-token-12345",
 				"token_type":   "Bearer",
 				"expires_in":   3600,
-			})
+			}); err != nil {
+				t.Errorf("failed to encode mock response: %v", err)
+			}
 			return
 		}
 		http.NotFound(w, r)
@@ -548,12 +550,12 @@ func TestBuildCredentials_OIDC_Callback(t *testing.T) {
 	defer mockOIDCServer.Close()
 
 	tests := []struct {
-		name       string
-		setupEnv   func(*testing.T)
-		config     func() Config
-		wantErr    string
-		wantToken  string
-		useBadURL  bool
+		name      string
+		setupEnv  func(*testing.T)
+		config    func() Config
+		wantErr   string
+		wantToken string
+		useBadURL bool
 	}{
 		{
 			name: "OIDC with static secret - callback invoked",
@@ -604,7 +606,7 @@ func TestBuildCredentials_OIDC_Callback(t *testing.T) {
 					},
 				}
 			},
-			wantErr: "acquire OIDC token",
+			wantErr:   "acquire OIDC token",
 			useBadURL: true,
 		},
 	}
@@ -739,8 +741,8 @@ func TestBuildCredentials_mTLS_LoadCert(t *testing.T) {
 			// For mTLS, the credentials are loaded immediately (not a callback),
 			// so we've already exercised the LoadX509KeyPair code path.
 			// Just verify we got valid credentials back.
-			if _, ok := creds.(client.Credentials); !ok {
-				t.Errorf("BuildCredentials() returned invalid credentials type: %T", creds)
+			if creds == nil {
+				t.Errorf("BuildCredentials() returned nil credentials")
 			}
 		})
 	}
@@ -764,8 +766,8 @@ func TestBuildCredentials_StaticAPIKey(t *testing.T) {
 
 	// Static API key credentials don't have a callback, so this just
 	// verifies the path is covered
-	if _, ok := creds.(client.Credentials); !ok {
-		t.Errorf("BuildCredentials() returned invalid credentials type: %T", creds)
+	if creds == nil {
+		t.Errorf("BuildCredentials() returned nil credentials")
 	}
 }
 
