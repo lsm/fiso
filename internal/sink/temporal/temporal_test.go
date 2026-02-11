@@ -1060,6 +1060,64 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			wantErr: "auth.oidc.clientSecret and clientSecretEnv are mutually exclusive",
 		},
+		{
+			name: "valid with Azure Workload Identity",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					Azure: &AzureConfig{
+						Scope: "api://temporal-app-id/.default",
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "Azure missing scope",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					Azure: &AzureConfig{
+						Scope: "",
+					},
+				},
+			},
+			wantErr: "auth.azure.scope is required",
+		},
+		{
+			name: "Azure and OIDC conflict",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					Azure: &AzureConfig{
+						Scope: "api://temporal/.default",
+					},
+					OIDC: &OIDCConfig{
+						TokenURL:     "https://example.com/token",
+						ClientID:     "id",
+						ClientSecret: "secret",
+					},
+				},
+			},
+			wantErr: "only one auth method allowed",
+		},
+		{
+			name: "Azure and apiKey conflict",
+			cfg: Config{
+				TaskQueue:    "test-queue",
+				WorkflowType: "TestWorkflow",
+				Auth: AuthConfig{
+					Azure: &AzureConfig{
+						Scope: "api://temporal/.default",
+					},
+					APIKey: "my-key",
+				},
+			},
+			wantErr: "only one auth method allowed",
+		},
 	}
 
 	for _, tt := range tests {

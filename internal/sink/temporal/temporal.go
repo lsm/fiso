@@ -58,10 +58,11 @@ type TLSConfig struct {
 
 // AuthConfig defines authentication for Temporal connections.
 type AuthConfig struct {
-	APIKey    string      `yaml:"apiKey,omitempty"`    // Static API key
-	APIKeyEnv string      `yaml:"apiKeyEnv,omitempty"` // Env var name for dynamic API key (enables rotation)
-	TokenFile string      `yaml:"tokenFile,omitempty"` // Bearer token read from file per-request
-	OIDC      *OIDCConfig `yaml:"oidc,omitempty"`      // OIDC client credentials flow
+	APIKey    string       `yaml:"apiKey,omitempty"`    // Static API key
+	APIKeyEnv string       `yaml:"apiKeyEnv,omitempty"` // Env var name for dynamic API key (enables rotation)
+	TokenFile string       `yaml:"tokenFile,omitempty"` // Bearer token read from file per-request
+	OIDC      *OIDCConfig  `yaml:"oidc,omitempty"`      // OIDC client credentials flow
+	Azure     *AzureConfig `yaml:"azure,omitempty"`     // Azure Workload Identity / Managed Identity
 }
 
 // OIDCConfig defines OIDC client credentials flow for token acquisition.
@@ -71,6 +72,16 @@ type OIDCConfig struct {
 	ClientSecret    string   `yaml:"clientSecret,omitempty"`    // OAuth2 client secret
 	ClientSecretEnv string   `yaml:"clientSecretEnv,omitempty"` // Read client secret from env var
 	Scopes          []string `yaml:"scopes,omitempty"`          // OAuth2 scopes
+}
+
+// AzureConfig defines Azure Workload Identity authentication.
+// Uses azidentity.DefaultAzureCredential which supports:
+//   - Azure Workload Identity (AKS with federated token)
+//   - Azure Managed Identity (VM/ACI)
+//   - Service Principal with client secret (local dev)
+//   - Azure CLI credentials (local dev)
+type AzureConfig struct {
+	Scope string `yaml:"scope"` // OAuth scope for token request (e.g., "api://{temporal-app-id}/.default")
 }
 
 // Config holds Temporal sink configuration.
@@ -114,11 +125,14 @@ func (c *Config) Validate() error {
 	if c.Auth.OIDC != nil {
 		authCount++
 	}
+	if c.Auth.Azure != nil {
+		authCount++
+	}
 	if c.TLS.CertFile != "" && c.TLS.KeyFile != "" {
 		authCount++
 	}
 	if authCount > 1 {
-		errs = append(errs, errors.New("only one auth method allowed: use one of apiKey, apiKeyEnv, tokenFile, oidc, or mTLS client certificates"))
+		errs = append(errs, errors.New("only one auth method allowed: use one of apiKey, apiKeyEnv, tokenFile, oidc, azure, or mTLS client certificates"))
 	}
 
 	// OIDC validation
@@ -134,6 +148,13 @@ func (c *Config) Validate() error {
 		}
 		if c.Auth.OIDC.ClientSecret != "" && c.Auth.OIDC.ClientSecretEnv != "" {
 			errs = append(errs, errors.New("auth.oidc.clientSecret and clientSecretEnv are mutually exclusive"))
+		}
+	}
+
+	// Azure validation
+	if c.Auth.Azure != nil {
+		if c.Auth.Azure.Scope == "" {
+			errs = append(errs, errors.New("auth.azure.scope is required"))
 		}
 	}
 

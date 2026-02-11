@@ -341,6 +341,11 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 					}
 				}
 			}
+			if azureRaw, ok := authRaw["azure"].(map[string]interface{}); ok {
+				tcfg.Auth.Azure = &temporalsink.AzureConfig{
+					Scope: getString(azureRaw, "scope"),
+				}
+			}
 		}
 
 		// Parse typed params for cross-SDK compatibility

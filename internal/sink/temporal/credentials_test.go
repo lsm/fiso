@@ -783,3 +783,61 @@ func TestBuildCredentials_NoAuth(t *testing.T) {
 		t.Errorf("BuildCredentials() = %v, want nil (no auth configured)", creds)
 	}
 }
+
+// TestBuildCredentials_Azure tests Azure Workload Identity credential building.
+func TestBuildCredentials_Azure(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T) Config
+		wantCreds bool
+		wantErr   string
+	}{
+		{
+			name: "Azure with valid scope",
+			setup: func(t *testing.T) Config {
+				return Config{
+					Auth: AuthConfig{
+						Azure: &AzureConfig{
+							Scope: "api://temporal-app-id/.default",
+						},
+					},
+				}
+			},
+			wantCreds: true,
+			wantErr:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := tt.setup(t)
+			creds, err := BuildCredentials(cfg)
+
+			// Check error expectations
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Errorf("BuildCredentials() error = nil, want error containing %q", tt.wantErr)
+					return
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("BuildCredentials() error = %q, want error containing %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+
+			// No error expected
+			if err != nil {
+				t.Errorf("BuildCredentials() unexpected error = %v", err)
+				return
+			}
+
+			// Check credentials expectations
+			if tt.wantCreds && creds == nil {
+				t.Error("BuildCredentials() returned nil credentials, want non-nil")
+			}
+			if !tt.wantCreds && creds != nil {
+				t.Error("BuildCredentials() returned non-nil credentials, want nil")
+			}
+		})
+	}
+}

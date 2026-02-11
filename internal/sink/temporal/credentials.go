@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"go.temporal.io/sdk/client"
 	"golang.org/x/oauth2/clientcredentials"
 )
@@ -40,6 +42,24 @@ func BuildCredentials(cfg Config) (client.Credentials, error) {
 				return "", fmt.Errorf("read token file %s: %w", filePath, err)
 			}
 			return strings.TrimSpace(string(token)), nil
+		}), nil
+	}
+
+	// Azure Workload Identity / Managed Identity authentication
+	if cfg.Auth.Azure != nil {
+		cred, err := azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			return nil, fmt.Errorf("create azure credential: %w", err)
+		}
+		scope := cfg.Auth.Azure.Scope
+		return client.NewAPIKeyDynamicCredentials(func(ctx context.Context) (string, error) {
+			token, err := cred.GetToken(ctx, policy.TokenRequestOptions{
+				Scopes: []string{scope},
+			})
+			if err != nil {
+				return "", fmt.Errorf("acquire azure token: %w", err)
+			}
+			return token.Token, nil
 		}), nil
 	}
 
