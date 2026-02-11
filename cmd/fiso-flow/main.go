@@ -295,6 +295,9 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 
 		// Parse TLS config
 		if tlsRaw, ok := flowDef.Sink.Config["tls"].(map[string]interface{}); ok {
+			if disabled, ok := tlsRaw["disabled"].(bool); ok {
+				tcfg.TLS.Disabled = disabled
+			}
 			if enabled, ok := tlsRaw["enabled"].(bool); ok {
 				tcfg.TLS.Enabled = enabled
 			}
