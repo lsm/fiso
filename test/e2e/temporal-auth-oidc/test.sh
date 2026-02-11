@@ -10,8 +10,8 @@ echo "Starting services... ($BUILD_FLAG)"
 docker compose up -d $BUILD_FLAG --wait --wait-timeout 120
 echo ""
 
-echo "Waiting for Kafka to be ready..."
-sleep 5
+echo "Waiting for Kafka and OAuth2 server to be ready..."
+sleep 10
 
 echo "Creating test topic..."
 docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
