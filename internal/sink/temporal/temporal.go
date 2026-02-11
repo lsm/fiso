@@ -65,11 +65,11 @@ type AuthConfig struct {
 
 // OIDCConfig defines OIDC client credentials flow for token acquisition.
 type OIDCConfig struct {
-	TokenURL        string   `yaml:"tokenURL"`                   // Token endpoint (e.g. https://login.microsoftonline.com/{tenantID}/oauth2/v2.0/token)
-	ClientID        string   `yaml:"clientID"`                   // OAuth2 client ID
-	ClientSecret    string   `yaml:"clientSecret,omitempty"`     // OAuth2 client secret
+	TokenURL        string   `yaml:"tokenURL"`                  // Token endpoint (e.g. https://login.microsoftonline.com/{tenantID}/oauth2/v2.0/token)
+	ClientID        string   `yaml:"clientID"`                  // OAuth2 client ID
+	ClientSecret    string   `yaml:"clientSecret,omitempty"`    // OAuth2 client secret
 	ClientSecretEnv string   `yaml:"clientSecretEnv,omitempty"` // Read client secret from env var
-	Scopes          []string `yaml:"scopes,omitempty"`           // OAuth2 scopes
+	Scopes          []string `yaml:"scopes,omitempty"`          // OAuth2 scopes
 }
 
 // Config holds Temporal sink configuration.
