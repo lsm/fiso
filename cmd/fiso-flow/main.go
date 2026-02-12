@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -31,6 +32,12 @@ import (
 	unifiedxform "github.com/lsm/fiso/internal/transform/unified"
 )
 
+var logLevel string
+
+func init() {
+	flag.StringVar(&logLevel, "log-level", "", "Log level (debug, info, warn, error). Can also be set via FISO_LOG_LEVEL env var.")
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -39,8 +46,13 @@ func main() {
 }
 
 func run() error {
-	logger := observability.NewLogger("fiso-flow", slog.LevelInfo)
+	flag.Parse()
+
+	level := observability.GetLogLevel(logLevel)
+	logger := observability.NewLogger("fiso-flow", level)
 	slog.SetDefault(logger)
+
+	slog.Debug("starting fiso-flow", "log_level", level.String())
 
 	configDir := os.Getenv("FISO_CONFIG_DIR")
 	if configDir == "" {

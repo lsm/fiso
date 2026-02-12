@@ -38,11 +38,15 @@ func run() error {
 		portFlag        = flag.Int("port", 0, "Override listen port (e.g., 8081)")
 		configFlag      = flag.String("config", "", "Path to config file")
 		metricsPortFlag = flag.Int("metrics-port", 0, "Override metrics port")
+		logLevelFlag    = flag.String("log-level", "", "Log level (debug, info, warn, error). Can also be set via FISO_LOG_LEVEL env var.")
 	)
 	flag.Parse()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	level := observability.GetLogLevel(*logLevelFlag)
+	logger := observability.NewLogger("fiso-link", level)
 	slog.SetDefault(logger)
+
+	slog.Debug("starting fiso-link", "log_level", level.String())
 
 	configPath := *configFlag
 	if configPath == "" {

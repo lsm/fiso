@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -27,12 +28,17 @@ import (
 
 var scheme = runtime.NewScheme()
 
+var logLevel string
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(fisov1alpha1.AddToScheme(scheme))
 }
 
 func main() {
+	flag.StringVar(&logLevel, "log-level", "", "Log level (debug, info, warn, error). Can also be set via FISO_LOG_LEVEL env var.")
+	flag.Parse()
+
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -40,8 +46,11 @@ func main() {
 }
 
 func run() error {
-	logger := observability.NewLogger("fiso-operator", slog.LevelInfo)
+	level := observability.GetLogLevel(logLevel)
+	logger := observability.NewLogger("fiso-operator", level)
 	slog.SetDefault(logger)
+
+	slog.Debug("starting fiso-operator", "log_level", level.String())
 
 	mode := os.Getenv("FISO_OPERATOR_MODE")
 	if mode == "" {
