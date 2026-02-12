@@ -5,10 +5,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"math/rand/v2"
 	"net/http"
 	"time"
+
+	"github.com/lsm/fiso/internal/correlation"
 )
 
 // RetryConfig controls retry behavior for failed deliveries.
@@ -30,6 +33,7 @@ type Config struct {
 type Sink struct {
 	client *http.Client
 	config Config
+	logger *slog.Logger
 }
 
 // NewSink creates a new HTTP sink.
@@ -53,11 +57,17 @@ func NewSink(cfg Config) (*Sink, error) {
 	return &Sink{
 		client: &http.Client{Timeout: 30 * time.Second},
 		config: cfg,
+		logger: slog.Default(),
 	}, nil
 }
 
 // Deliver sends the event payload to the configured HTTP endpoint.
 func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]string) error {
+	start := time.Now()
+
+	// Extract correlation ID from headers
+	corrID := correlation.ExtractOrGenerate(headers)
+
 	var lastErr error
 
 	for attempt := 0; attempt < s.config.Retry.MaxAttempts; attempt++ {
@@ -72,16 +82,32 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 
 		err := s.doRequest(ctx, event, headers)
 		if err == nil {
+			s.logger.Info("event delivered",
+				"correlation_id", corrID.Value,
+				"target", s.config.URL,
+				"latency_ms", time.Since(start).Milliseconds(),
+			)
 			return nil
 		}
 		lastErr = err
 
 		// Don't retry on permanent errors (4xx except 429)
 		if isPermanent(err) {
+			s.logger.Error("delivery failed",
+				"correlation_id", corrID.Value,
+				"target", s.config.URL,
+				"error", err,
+			)
 			return err
 		}
 	}
 
+	s.logger.Error("delivery failed after retries",
+		"correlation_id", corrID.Value,
+		"target", s.config.URL,
+		"attempts", s.config.Retry.MaxAttempts,
+		"error", lastErr,
+	)
 	return fmt.Errorf("delivery failed after %d attempts: %w", s.config.Retry.MaxAttempts, lastErr)
 }
 

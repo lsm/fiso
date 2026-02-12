@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/ext"
+	"github.com/lsm/fiso/internal/correlation"
 )
 
 // WorkflowClient abstracts the Temporal SDK client for testability.
@@ -167,6 +169,7 @@ type Sink struct {
 	config        Config
 	timeout       time.Duration
 	paramPrograms []cel.Program // Compiled CEL programs for typed params
+	logger        *slog.Logger
 }
 
 // NewSink creates a new Temporal sink with the given client.
@@ -223,6 +226,7 @@ func NewSink(client WorkflowClient, cfg Config) (*Sink, error) {
 		config:        cfg,
 		timeout:       timeout,
 		paramPrograms: paramPrograms,
+		logger:        slog.Default(),
 	}, nil
 }
 
@@ -231,12 +235,22 @@ func NewSink(client WorkflowClient, cfg Config) (*Sink, error) {
 // When no params are configured, the entire CloudEvent is sent as a structured map,
 // allowing Java/Kotlin workflows to deserialize it directly.
 func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]string) error {
+	start := time.Now()
+
+	// Extract correlation ID from headers
+	corrID := correlation.ExtractOrGenerate(headers)
+
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
 	// Parse the CloudEvent for workflow ID resolution and args
 	var eventData map[string]interface{}
 	if err := json.Unmarshal(event, &eventData); err != nil {
+		s.logger.Error("delivery failed",
+			"correlation_id", corrID.Value,
+			"target", s.config.WorkflowType,
+			"error", err,
+		)
 		return fmt.Errorf("parse cloudevent: %w", err)
 	}
 
@@ -255,6 +269,11 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		for i, prg := range s.paramPrograms {
 			out, _, err := prg.Eval(activation)
 			if err != nil {
+				s.logger.Error("delivery failed",
+					"correlation_id", corrID.Value,
+					"target", s.config.WorkflowType,
+					"error", err,
+				)
 				return fmt.Errorf("eval param[%d]: %w", i, err)
 			}
 			args[i] = toNative(out)
@@ -273,8 +292,20 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		}
 		_, err := s.client.ExecuteWorkflow(ctx, opts, s.config.WorkflowType, args...)
 		if err != nil {
+			s.logger.Error("delivery failed",
+				"correlation_id", corrID.Value,
+				"target", s.config.WorkflowType,
+				"workflow_id", workflowID,
+				"error", err,
+			)
 			return fmt.Errorf("start workflow %s: %w", workflowID, err)
 		}
+		s.logger.Info("event delivered",
+			"correlation_id", corrID.Value,
+			"target", s.config.WorkflowType,
+			"workflow_id", workflowID,
+			"latency_ms", time.Since(start).Milliseconds(),
+		)
 		return nil
 
 	case ModeSignal:
@@ -287,11 +318,28 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		}
 		err := s.client.SignalWorkflow(ctx, workflowID, "", s.config.SignalName, signalArg)
 		if err != nil {
+			s.logger.Error("delivery failed",
+				"correlation_id", corrID.Value,
+				"target", s.config.WorkflowType,
+				"workflow_id", workflowID,
+				"error", err,
+			)
 			return fmt.Errorf("signal workflow %s: %w", workflowID, err)
 		}
+		s.logger.Info("event delivered",
+			"correlation_id", corrID.Value,
+			"target", s.config.WorkflowType,
+			"workflow_id", workflowID,
+			"latency_ms", time.Since(start).Milliseconds(),
+		)
 		return nil
 
 	default:
+		s.logger.Error("delivery failed",
+			"correlation_id", corrID.Value,
+			"target", s.config.WorkflowType,
+			"error", fmt.Errorf("unsupported mode: %s", s.config.Mode),
+		)
 		return fmt.Errorf("unsupported mode: %s", s.config.Mode)
 	}
 }

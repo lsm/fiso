@@ -3,7 +3,10 @@ package kafka
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"time"
 
+	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/kafka"
 	kafkasource "github.com/lsm/fiso/internal/source/kafka"
 )
@@ -24,6 +27,7 @@ type Config struct {
 type Sink struct {
 	publisher publisher
 	topic     string
+	logger    *slog.Logger
 }
 
 // NewSink creates a new Kafka sink.
@@ -43,12 +47,33 @@ func NewSink(cfg Config) (*Sink, error) {
 	return &Sink{
 		publisher: pub,
 		topic:     cfg.Topic,
+		logger:    slog.Default(),
 	}, nil
 }
 
 // Deliver sends an event to the configured Kafka topic.
 func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]string) error {
-	return s.publisher.Publish(ctx, s.topic, nil, event, headers)
+	start := time.Now()
+
+	// Extract correlation ID from headers
+	corrID := correlation.ExtractOrGenerate(headers)
+
+	err := s.publisher.Publish(ctx, s.topic, nil, event, headers)
+	if err != nil {
+		s.logger.Error("delivery failed",
+			"correlation_id", corrID.Value,
+			"target", s.topic,
+			"error", err,
+		)
+		return err
+	}
+
+	s.logger.Info("event delivered",
+		"correlation_id", corrID.Value,
+		"target", s.topic,
+		"latency_ms", time.Since(start).Milliseconds(),
+	)
+	return nil
 }
 
 // Close shuts down the Kafka publisher.

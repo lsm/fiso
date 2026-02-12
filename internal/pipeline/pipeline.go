@@ -13,6 +13,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/ext"
+	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/sink"
@@ -124,7 +125,16 @@ func (p *Pipeline) Run(ctx context.Context) error {
 }
 
 func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
+	start := time.Now()
+
+	// Get correlation ID from event or extract from headers as fallback
+	corrID := correlation.ID{Value: evt.CorrelationID, Source: "event"}
+	if corrID.Value == "" {
+		corrID = correlation.ExtractOrGenerate(evt.Headers)
+	}
+
 	originalPayload := evt.Value // preserve for CE field resolution
+	inputBytes := len(evt.Value)
 	payload := evt.Value
 
 	// Transform
@@ -135,6 +145,11 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 			return err
 		}
 		payload = transformed
+		p.logger.Debug("transform completed",
+			"correlation_id", corrID.Value,
+			"input_bytes", inputBytes,
+			"output_bytes", len(payload),
+		)
 	}
 
 	// Run interceptors
@@ -170,10 +185,18 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 	headers := map[string]string{
 		"Content-Type": "application/cloudevents+json",
 	}
+	headers = correlation.AddToHeaders(headers, corrID)
+
 	if err := p.sink.Deliver(ctx, wrapped, headers); err != nil {
 		p.sendToDLQ(ctx, evt, "SINK_DELIVERY_FAILED", err.Error())
 		return err
 	}
+
+	p.logger.Info("event delivered",
+		"correlation_id", corrID.Value,
+		"flow", p.config.FlowName,
+		"latency_ms", time.Since(start).Milliseconds(),
+	)
 
 	return nil
 }
@@ -427,10 +450,12 @@ func (p *Pipeline) sendToDLQ(ctx context.Context, evt source.Event, code, messag
 		ErrorCode:     code,
 		ErrorMessage:  message,
 		FlowName:      p.config.FlowName,
+		CorrelationID: evt.CorrelationID,
 	}
 	if err := p.dlq.Send(ctx, evt.Key, evt.Value, info); err != nil {
 		p.logger.Error("failed to send to DLQ",
 			"flow", p.config.FlowName,
+			"correlation_id", evt.CorrelationID,
 			"error", err,
 		)
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/link"
@@ -101,6 +102,18 @@ func NewHandler(cfg Config) *Handler {
 //   - /link/{targetName}/{path...}  — sync forward proxy
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+
+	// Extract correlation ID from incoming request headers
+	headers := make(map[string]string)
+	for k, vv := range r.Header {
+		if len(vv) > 0 {
+			headers[k] = vv[0]
+		}
+	}
+	corrID := correlation.ExtractOrGenerate(headers)
+
+	// Add correlation ID to response headers
+	w.Header().Set(correlation.HeaderCorrelationID, corrID.Value)
 
 	// Parse route: /link/{targetName}/{path...}
 	trimmed := strings.TrimPrefix(r.URL.Path, "/link/")
@@ -203,6 +216,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Add correlation ID to upstream request
+		req.Header.Set(correlation.HeaderCorrelationID, corrID.Value)
+
 		// Inject auth headers
 		if creds != nil {
 			for k, v := range creds.Headers {
@@ -260,6 +276,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
+
+	// Log successful proxy request
+	h.logger.Info("proxy request completed",
+		"correlation_id", corrID.Value,
+		"target", targetName,
+		"method", r.Method,
+		"status", resp.StatusCode,
+		"latency_ms", time.Since(start).Milliseconds(),
+	)
 
 	h.copyResponse(w, resp)
 }

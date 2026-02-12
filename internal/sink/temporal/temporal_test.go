@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -195,6 +196,7 @@ func TestDeliver_UnsupportedMode(t *testing.T) {
 		client:  mc,
 		config:  Config{Mode: "invalid", TaskQueue: "q", WorkflowType: "W"},
 		timeout: 5 * time.Second,
+		logger:  slog.Default(),
 	}
 	err := s.Deliver(context.Background(), []byte("{}"), nil)
 	if err == nil {

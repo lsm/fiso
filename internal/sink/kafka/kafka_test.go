@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 
 	intkafka "github.com/lsm/fiso/internal/kafka"
@@ -65,6 +66,7 @@ func TestSink_Deliver_Success(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	event := []byte(`{"id":"evt-1","data":"hello"}`)
@@ -97,6 +99,7 @@ func TestSink_Deliver_Error(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	err := s.Deliver(context.Background(), []byte(`{}`), nil)
@@ -113,6 +116,7 @@ func TestSink_Deliver_NilHeaders(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	err := s.Deliver(context.Background(), []byte(`{}`), nil)
@@ -130,6 +134,7 @@ func TestSink_Close(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	err := s.Close()
@@ -182,6 +187,7 @@ func TestSink_Deliver_EmptyEvent(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	emptyEvent := []byte{}
@@ -200,6 +206,7 @@ func TestSink_Deliver_ContextCancellation(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -220,6 +227,7 @@ func TestSink_Deliver_ContextTimeout(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1)
@@ -239,6 +247,7 @@ func TestSink_Deliver_LargeEvent(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	// Create a large event (1MB)
@@ -262,6 +271,7 @@ func TestSink_Deliver_MultipleHeaders(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	headers := map[string]string{
@@ -293,6 +303,7 @@ func TestSink_Deliver_SpecialCharactersInEvent(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	specialEvent := []byte(`{"data":"Test with unicode: \u2764\ufe0f, newlines:\n, tabs:\t, quotes:\""}`)
@@ -312,6 +323,7 @@ func TestSink_Deliver_EmptyHeaders(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	emptyHeaders := map[string]string{}
@@ -330,6 +342,7 @@ func TestSink_Deliver_BinaryData(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	// Test with binary data that's not valid UTF-8
@@ -376,6 +389,7 @@ func TestSink_Deliver_PublishErrorWrapped(t *testing.T) {
 	s := &Sink{
 		publisher: mp,
 		topic:     "test-topic",
+		logger:    slog.Default(),
 	}
 
 	err := s.Deliver(context.Background(), []byte(`{}`), nil)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/source"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -106,6 +107,18 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 			for _, h := range record.Headers {
 				evt.Headers[h.Key] = string(h.Value)
 			}
+
+			// Extract or generate correlation ID
+			corrID := correlation.ExtractOrGenerate(evt.Headers)
+			evt.CorrelationID = corrID.Value
+
+			s.logger.Info("event received",
+				"correlation_id", corrID.Value,
+				"correlation_source", corrID.Source,
+				"topic", record.Topic,
+				"offset", record.Offset,
+				"partition", record.Partition,
+			)
 
 			if err := handler(ctx, evt); err != nil {
 				s.logger.Error("handler error", "topic", record.Topic, "offset", record.Offset, "error", err)

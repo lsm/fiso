@@ -3,8 +3,10 @@ package grpc
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/lsm/fiso/internal/correlation"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -24,6 +26,7 @@ type Config struct {
 type Sink struct {
 	conn    *grpc.ClientConn
 	timeout time.Duration
+	logger  *slog.Logger
 }
 
 // NewSink creates a new gRPC sink.
@@ -48,12 +51,18 @@ func NewSink(cfg Config) (*Sink, error) {
 	return &Sink{
 		conn:    conn,
 		timeout: cfg.Timeout,
+		logger:  slog.Default(),
 	}, nil
 }
 
 // Deliver sends the event via gRPC. It uses a generic unary invoker
 // with the method path "/fiso.v1.EventService/Deliver".
 func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]string) error {
+	start := time.Now()
+
+	// Extract correlation ID from headers
+	corrID := correlation.ExtractOrGenerate(headers)
+
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
@@ -65,8 +74,19 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 	var resp []byte
 	err := s.conn.Invoke(ctx, "/fiso.v1.EventService/Deliver", event, &resp, grpc.ForceCodec(rawCodec{}))
 	if err != nil {
+		s.logger.Error("delivery failed",
+			"correlation_id", corrID.Value,
+			"target", s.conn.Target(),
+			"error", err,
+		)
 		return fmt.Errorf("grpc deliver: %w", err)
 	}
+
+	s.logger.Info("event delivered",
+		"correlation_id", corrID.Value,
+		"target", s.conn.Target(),
+		"latency_ms", time.Since(start).Milliseconds(),
+	)
 	return nil
 }
 

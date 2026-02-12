@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"sync"
 	"testing"
@@ -78,7 +79,7 @@ func TestSink_Deliver(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 
-	s := &Sink{conn: conn, timeout: 5e9}
+	s := &Sink{conn: conn, timeout: 5e9, logger: slog.Default()}
 
 	event := []byte(`{"id":"123","type":"test.event"}`)
 	headers := map[string]string{
@@ -117,7 +118,7 @@ func TestSink_MultipleDeliveries(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 
-	s := &Sink{conn: conn, timeout: 5e9}
+	s := &Sink{conn: conn, timeout: 5e9, logger: slog.Default()}
 
 	for i := 0; i < 5; i++ {
 		if err := s.Deliver(context.Background(), []byte(`{"n":1}`), nil); err != nil {
@@ -145,7 +146,7 @@ func TestSink_Close(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 
-	s := &Sink{conn: conn, timeout: 5e9}
+	s := &Sink{conn: conn, timeout: 5e9, logger: slog.Default()}
 	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
