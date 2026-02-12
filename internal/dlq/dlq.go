@@ -55,13 +55,13 @@ func (h *Handler) Send(ctx context.Context, key, value []byte, info FailureInfo)
 	topic := h.topicFn(info.FlowName)
 
 	headers := map[string]string{
-		"fiso-original-topic":  info.OriginalTopic,
-		"fiso-error-code":      info.ErrorCode,
-		"fiso-error-message":   info.ErrorMessage,
-		"fiso-retry-count":     fmt.Sprintf("%d", info.RetryCount),
-		"fiso-failed-at":       time.Now().UTC().Format(time.RFC3339),
-		"fiso-flow-name":       info.FlowName,
-		"fiso-correlation-id":  info.CorrelationID,
+		"fiso-original-topic": info.OriginalTopic,
+		"fiso-error-code":     info.ErrorCode,
+		"fiso-error-message":  info.ErrorMessage,
+		"fiso-retry-count":    fmt.Sprintf("%d", info.RetryCount),
+		"fiso-failed-at":      time.Now().UTC().Format(time.RFC3339),
+		"fiso-flow-name":      info.FlowName,
+		"fiso-correlation-id": info.CorrelationID,
 	}
 
 	if err := h.publisher.Publish(ctx, topic, key, value, headers); err != nil {

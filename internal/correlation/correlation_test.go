@@ -144,29 +144,29 @@ func TestExtractOrGenerate_Priority(t *testing.T) {
 
 func TestExtractTraceID(t *testing.T) {
 	tests := []struct {
-		name       string
+		name        string
 		traceparent string
-		expected   string
+		expected    string
 	}{
 		{
-			name:       "valid W3C traceparent",
+			name:        "valid W3C traceparent",
 			traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-			expected:   "4bf92f3577b34da6a3ce929d0e0e4736",
+			expected:    "4bf92f3577b34da6a3ce929d0e0e4736",
 		},
 		{
-			name:       "invalid traceparent - too short trace ID",
+			name:        "invalid traceparent - too short trace ID",
 			traceparent: "00-4bf92f3577b34da6-00f067aa0ba902b7-01",
-			expected:   "",
+			expected:    "",
 		},
 		{
-			name:       "invalid traceparent - missing parent ID",
+			name:        "invalid traceparent - missing parent ID",
 			traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736",
-			expected:   "4bf92f3577b34da6a3ce929d0e0e4736",
+			expected:    "4bf92f3577b34da6a3ce929d0e0e4736",
 		},
 		{
-			name:       "empty string",
+			name:        "empty string",
 			traceparent: "",
-			expected:   "",
+			expected:    "",
 		},
 	}
 
