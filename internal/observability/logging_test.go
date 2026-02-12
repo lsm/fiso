@@ -2,7 +2,6 @@ package observability
 
 import (
 	"log/slog"
-	"os"
 	"testing"
 )
 
@@ -50,10 +49,6 @@ func TestParseLogLevel(t *testing.T) {
 }
 
 func TestGetLogLevel(t *testing.T) {
-	// Save and restore env var
-	origEnv := os.Getenv("FISO_LOG_LEVEL")
-	defer os.Setenv("FISO_LOG_LEVEL", origEnv)
-
 	tests := []struct {
 		name      string
 		flagLevel string
@@ -68,7 +63,10 @@ func TestGetLogLevel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("FISO_LOG_LEVEL", tt.envLevel)
+			// Reset env var for each test
+			if tt.envLevel != "" {
+				t.Setenv("FISO_LOG_LEVEL", tt.envLevel)
+			}
 			got := GetLogLevel(tt.flagLevel)
 			if got != tt.expected {
 				t.Errorf("GetLogLevel(%q) = %v, want %v (env=%q)", tt.flagLevel, got, tt.expected, tt.envLevel)
