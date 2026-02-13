@@ -14,6 +14,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // Config holds tracing configuration.
@@ -45,7 +46,7 @@ func GetConfig(serviceName string) Config {
 func Initialize(cfg Config, logger *slog.Logger) (trace.Tracer, func(context.Context) error, error) {
 	if !cfg.Enabled {
 		logger.Info("tracing disabled, using no-op tracer")
-		return trace.NewNoopTracerProvider().Tracer(cfg.ServiceName), func(ctx context.Context) error { return nil }, nil
+		return noop.NewTracerProvider().Tracer(cfg.ServiceName), func(ctx context.Context) error { return nil }, nil
 	}
 
 	logger.Info("initializing tracing", "endpoint", cfg.Endpoint, "service", cfg.ServiceName)

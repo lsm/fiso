@@ -10,6 +10,7 @@ import (
 	"github.com/lsm/fiso/internal/tracing"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -58,7 +59,7 @@ func NewSink(cfg Config) (*Sink, error) {
 		conn:    conn,
 		timeout: cfg.Timeout,
 		logger:  slog.Default(),
-		tracer:  trace.NewNoopTracerProvider().Tracer("grpc-sink"),
+		tracer:  noop.NewTracerProvider().Tracer("grpc-sink"),
 	}, nil
 }
 

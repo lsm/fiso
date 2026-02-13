@@ -22,6 +22,7 @@ import (
 	"github.com/lsm/fiso/internal/tracing"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // Handler is the HTTP forward proxy for Fiso-Link.
@@ -76,7 +77,7 @@ func NewHandler(cfg Config) *Handler {
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
 		logger: cfg.Logger,
-		tracer: trace.NewNoopTracerProvider().Tracer("proxy-handler"),
+		tracer: noop.NewTracerProvider().Tracer("proxy-handler"),
 	}
 
 	// Initialize Kafka handler if pool or publisher provided

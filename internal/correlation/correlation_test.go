@@ -1,8 +1,143 @@
 package correlation
 
 import (
+	"context"
 	"testing"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
+
+func init() {
+	// Initialize the global propagator for tests
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+}
+
+func TestExtractTraceContext_NilHeaders(t *testing.T) {
+	ctx := context.Background()
+
+	result := ExtractTraceContext(ctx, nil)
+
+	if result != ctx {
+		t.Error("expected same context when headers is nil")
+	}
+}
+
+func TestExtractTraceContext_EmptyHeaders(t *testing.T) {
+	ctx := context.Background()
+	headers := map[string]string{}
+
+	result := ExtractTraceContext(ctx, headers)
+
+	// Should return a valid context even with empty headers
+	if result == nil {
+		t.Error("expected non-nil context")
+	}
+}
+
+func TestExtractTraceContext_WithTraceparent(t *testing.T) {
+	ctx := context.Background()
+	headers := map[string]string{
+		HeaderTraceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+	}
+
+	result := ExtractTraceContext(ctx, headers)
+
+	// Verify trace context was extracted
+	span := trace.SpanFromContext(result)
+	if !span.SpanContext().IsValid() {
+		t.Error("expected valid span context from traceparent header")
+	}
+
+	expectedTraceID := "4bf92f3577b34da6a3ce929d0e0e4736"
+	if span.SpanContext().TraceID().String() != expectedTraceID {
+		t.Errorf("expected trace ID %s, got %s", expectedTraceID, span.SpanContext().TraceID().String())
+	}
+}
+
+func TestInjectTraceContext_NilHeaders(t *testing.T) {
+	ctx := context.Background()
+
+	result := InjectTraceContext(ctx, nil)
+
+	if result == nil {
+		t.Error("expected headers map to be created")
+	}
+}
+
+func TestInjectTraceContext_ExistingHeaders(t *testing.T) {
+	ctx := context.Background()
+	headers := map[string]string{
+		"existing-header": "existing-value",
+	}
+
+	result := InjectTraceContext(ctx, headers)
+
+	if result["existing-header"] != "existing-value" {
+		t.Error("expected existing header to be preserved")
+	}
+}
+
+func TestInjectTraceContext_WithSpan(t *testing.T) {
+	// Create a context with a valid trace context
+	traceID, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	spanID, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
+	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), spanContext)
+
+	headers := map[string]string{}
+	result := InjectTraceContext(ctx, headers)
+
+	// Verify traceparent header was injected
+	if result[HeaderTraceparent] == "" {
+		t.Error("expected traceparent header to be injected")
+	}
+
+	// Verify the injected traceparent contains the trace ID
+	expected := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	if result[HeaderTraceparent] != expected {
+		t.Errorf("expected traceparent %s, got %s", expected, result[HeaderTraceparent])
+	}
+}
+
+func TestInjectExtractRoundTrip(t *testing.T) {
+	// Create a context with a valid trace context
+	traceID, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	spanID, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
+	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+	originalCtx := trace.ContextWithSpanContext(context.Background(), spanContext)
+
+	// Inject trace context into headers
+	headers := map[string]string{}
+	headers = InjectTraceContext(originalCtx, headers)
+
+	// Extract trace context from headers into a new context
+	newCtx := ExtractTraceContext(context.Background(), headers)
+
+	// Verify the trace context was preserved
+	originalSpan := trace.SpanFromContext(originalCtx)
+	newSpan := trace.SpanFromContext(newCtx)
+
+	if originalSpan.SpanContext().TraceID() != newSpan.SpanContext().TraceID() {
+		t.Errorf("expected trace ID to be preserved, original: %s, new: %s",
+			originalSpan.SpanContext().TraceID(), newSpan.SpanContext().TraceID())
+	}
+}
+
 
 func TestExtractOrGenerate_FisoHeader(t *testing.T) {
 	headers := map[string]string{

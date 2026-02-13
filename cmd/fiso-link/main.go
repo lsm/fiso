@@ -15,7 +15,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/link"
@@ -173,9 +172,7 @@ func run() error {
 	}
 	handler := proxy.NewHandler(handlerCfg)
 	// Set tracer for instrumentation
-	if t, ok := tracer.(trace.Tracer); ok {
-		handler.SetTracer(t)
-	}
+	handler.SetTracer(tracer)
 
 	// Health server
 	health := observability.NewHealthServer()
