@@ -54,7 +54,7 @@ services:
 
   # Debezium Server - captures changes from PostgreSQL and sends to HTTP sink (Fiso Link)
   debezium-server:
-    image: debezium/server:2.7
+    image: debezium/server:2.7.3.Final
     hostname: debezium-server
     container_name: debezium-server
     volumes:
