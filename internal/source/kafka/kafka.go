@@ -11,6 +11,7 @@ import (
 	"github.com/lsm/fiso/internal/tracing"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // Config holds Kafka source configuration.
@@ -79,7 +80,7 @@ func NewSource(cfg Config, logger *slog.Logger) (*Source, error) {
 		client: client,
 		topic:  cfg.Topic,
 		logger: logger,
-		tracer: trace.NewNoopTracerProvider().Tracer("kafka-source"),
+		tracer: noop.NewTracerProvider().Tracer("kafka-source"),
 	}, nil
 }
 
