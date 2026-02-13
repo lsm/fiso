@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/source"
 
 	"google.golang.org/grpc"
@@ -105,13 +106,25 @@ func (eh *eventHandler) handle(_ interface{}, stream grpc.ServerStream) error {
 		}
 	}
 
+	// Get context from stream and extract trace context and correlation ID
+	ctx := stream.Context()
+	ctx = correlation.ExtractTraceContext(ctx, headers)
+	corrID := correlation.ExtractOrGenerate(headers)
+
 	evt := source.Event{
-		Value:   data,
-		Headers: headers,
-		Topic:   "grpc",
+		Value:        data,
+		Headers:      headers,
+		Topic:        "grpc",
+		CorrelationID: corrID.Value,
 	}
 
-	if err := eh.handler(stream.Context(), evt); err != nil {
+	eh.logger.Info("event received",
+		"correlation_id", corrID.Value,
+		"correlation_source", corrID.Source,
+		"topic", "grpc",
+	)
+
+	if err := eh.handler(ctx, evt); err != nil {
 		eh.logger.Error("handler error", "error", err)
 		return err
 	}

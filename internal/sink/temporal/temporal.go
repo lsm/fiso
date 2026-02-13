@@ -308,6 +308,10 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 
 	switch s.config.Mode {
 	case ModeStart:
+		// Pass args directly to preserve backward compatibility with existing workflows.
+		// - With typed params: individual args passed as variadic args
+		// - Without params: CloudEvent map as single arg
+		// Correlation ID and trace context are logged and available via span attributes.
 		opts := StartWorkflowOptions{
 			ID:        workflowID,
 			TaskQueue: s.config.TaskQueue,
@@ -334,14 +338,17 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 
 	case ModeSignal:
 		span.SetAttributes(tracing.SignalNameAttr(s.config.SignalName))
-		// For signals, pass args as a single value (first arg) or the whole slice
-		var signalArg interface{}
+		// For signals, pass payload directly to preserve backward compatibility.
+		// - Single arg: passed directly
+		// - Multiple args: passed as slice
+		// Correlation ID and trace context are logged and available via span attributes.
+		var payload interface{}
 		if len(args) == 1 {
-			signalArg = args[0]
+			payload = args[0]
 		} else {
-			signalArg = args
+			payload = args
 		}
-		err := s.client.SignalWorkflow(ctx, workflowID, "", s.config.SignalName, signalArg)
+		err := s.client.SignalWorkflow(ctx, workflowID, "", s.config.SignalName, payload)
 		if err != nil {
 			tracing.SetSpanError(span, err)
 			s.logger.Error("delivery failed",

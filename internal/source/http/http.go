@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/source"
 )
 
@@ -72,13 +73,23 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 			}
 		}
 
+		// Extract trace context and correlation ID from headers
+		ctx := correlation.ExtractTraceContext(r.Context(), headers)
+		corrID := correlation.ExtractOrGenerate(headers)
+
 		evt := source.Event{
-			Value:   body,
-			Headers: headers,
-			Topic:   "http",
+			Value:        body,
+			Headers:      headers,
+			Topic:        "http",
+			CorrelationID: corrID.Value,
 		}
 
-		if err := handler(r.Context(), evt); err != nil {
+		s.logger.Info("event received",
+			"correlation_id", corrID.Value,
+			"correlation_source", corrID.Source,
+		)
+
+		if err := handler(ctx, evt); err != nil {
 			s.logger.Error("handler error", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
