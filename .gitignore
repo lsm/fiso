@@ -4,3 +4,8 @@ dist/
 .env
 tmp/
 coverage.html
+
+# Build artifacts
+fiso-flow
+fiso-link
+fiso-operator
