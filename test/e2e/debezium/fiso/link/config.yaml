@@ -1,0 +1,61 @@
+# Fiso-Link Configuration for Debezium CDC E2E Testing
+# Receives Debezium events via HTTP and forwards to Kafka
+
+listenAddr: "0.0.0.0:3500"
+metricsAddr: ":9090"
+
+# Kafka clusters for CDC event publishing
+kafka:
+  clusters:
+    main:
+      brokers:
+        - "kafka:9092"
+
+# Link targets - CDC events from Debezium
+targets:
+  # Target for orders CDC events
+  # Debezium sends events to /link/orders-cdc
+  - name: orders-cdc
+    protocol: kafka
+    kafka:
+      cluster: main
+      topic: orders-cdc
+      # Extract key from Debezium event payload
+      # Debezium events have structure: {"payload": {"after": {"id": ...}, "before": ...}}
+      key:
+        type: payload
+        # Debezium primary key is typically in payload.after.id or payload.before.id
+        field: payload.after.id
+      headers:
+        source: "debezium-cdc"
+        connector: "postgresql"
+        table: "orders"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 2
+      resetTimeout: "10s"
+    retry:
+      maxAttempts: 3
+      backoff: exponential
+      initialInterval: "100ms"
+      maxInterval: "1s"
+      jitter: 0.1
+
+  # Target for any CDC events (catch-all for testing)
+  - name: cdc-events
+    protocol: kafka
+    kafka:
+      cluster: main
+      topic: cdc-events
+      key:
+        type: uuid
+      headers:
+        source: "debezium-cdc"
+    circuitBreaker:
+      enabled: true
+      failureThreshold: 5
+      successThreshold: 2
+      resetTimeout: "10s"
+    retry:
+      maxAttempts: 3

@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  # PostgreSQL source database with logical replication enabled
+  postgres:
+    image: postgres:16-alpine
+    hostname: postgres
+    container_name: debezium-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: testdb
+      # Enable logical replication for Debezium
+      POSTGRES_INITDB_ARGS: "--wal-level=logical"
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d testdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_replication_slots=4"
+      - "-c"
+      - "max_wal_senders=4"
+
+  # Kafka broker - final destination for CDC events (KRaft mode, no Zookeeper)
+  kafka:
+    image: apache/kafka:4.0.0
+    hostname: kafka
+    container_name: debezium-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Debezium Server - captures changes from PostgreSQL and sends to HTTP sink (Fiso Link)
+  debezium-server:
+    image: debezium/server:2.7
+    hostname: debezium-server
+    container_name: debezium-server
+    volumes:
+      - ./debezium/application.properties:/debezium/conf/application.properties:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fiso-link:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/q/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Fiso-Link - HTTP endpoint receiving Debezium events, forwarding to Kafka
+  fiso-link:
+    image: fiso-link:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.link
+    hostname: fiso-link
+    container_name: debezium-fiso-link
+    ports:
+      - "3500:3500"
+      - "9090:9090"
+    volumes:
+      - ./fiso/link/config.yaml:/etc/fiso/link/config.yaml:ro
+    environment:
+      FISO_LINK_CONFIG: /etc/fiso/link/config.yaml
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9090"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # User service - consumes Kafka events and verifies CDC data arrived
+  user-service:
+    build:
+      context: ./user-service
+    hostname: user-service
+    container_name: debezium-user-service
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8082"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  default:
+    name: debezium-cdc-test
+    driver: bridge
