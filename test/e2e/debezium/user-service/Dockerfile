@@ -1,6 +1,6 @@
 FROM golang:1.23-alpine AS builder
 WORKDIR /app
-COPY go.mod main.go ./
+COPY go.mod go.sum main.go ./
 RUN CGO_ENABLED=0 go build -o /bin/user-service .
 
 FROM alpine:3.20
