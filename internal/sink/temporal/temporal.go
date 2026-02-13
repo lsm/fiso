@@ -16,6 +16,7 @@ import (
 	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/tracing"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // WorkflowClient abstracts the Temporal SDK client for testability.
@@ -230,7 +231,7 @@ func NewSink(client WorkflowClient, cfg Config) (*Sink, error) {
 		timeout:       timeout,
 		paramPrograms: paramPrograms,
 		logger:        slog.Default(),
-		tracer:        trace.NewNoopTracerProvider().Tracer("temporal-sink"),
+		tracer:        noop.NewTracerProvider().Tracer("temporal-sink"),
 	}, nil
 }
 

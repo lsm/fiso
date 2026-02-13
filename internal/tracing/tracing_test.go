@@ -22,8 +22,7 @@ func TestGetConfig_Defaults(t *testing.T) {
 }
 
 func TestGetConfig_EnabledFromEnv(t *testing.T) {
-	os.Setenv("FISO_OTEL_ENABLED", "true")
-	defer os.Unsetenv("FISO_OTEL_ENABLED")
+	t.Setenv("FISO_OTEL_ENABLED", "true")
 
 	cfg := GetConfig("test-service")
 
@@ -33,8 +32,7 @@ func TestGetConfig_EnabledFromEnv(t *testing.T) {
 }
 
 func TestGetConfig_CustomEndpoint(t *testing.T) {
-	os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "custom-endpoint:4317")
-	defer os.Unsetenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "custom-endpoint:4317")
 
 	cfg := GetConfig("test-service")
 
@@ -60,11 +58,9 @@ func TestGetConfig_CaseInsensitive(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.envVal != "" {
-				os.Setenv("FISO_OTEL_ENABLED", tt.envVal)
-			} else {
-				os.Unsetenv("FISO_OTEL_ENABLED")
+				t.Setenv("FISO_OTEL_ENABLED", tt.envVal)
 			}
-			defer os.Unsetenv("FISO_OTEL_ENABLED")
+			// When envVal is empty, we don't set the env var at all (it's unset by default)
 
 			cfg := GetConfig("test-service")
 

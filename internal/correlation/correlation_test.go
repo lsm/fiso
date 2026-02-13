@@ -138,7 +138,6 @@ func TestInjectExtractRoundTrip(t *testing.T) {
 	}
 }
 
-
 func TestExtractOrGenerate_FisoHeader(t *testing.T) {
 	headers := map[string]string{
 		HeaderCorrelationID:  "fiso-id-123",

@@ -11,6 +11,7 @@ import (
 	kafkasource "github.com/lsm/fiso/internal/source/kafka"
 	"github.com/lsm/fiso/internal/tracing"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // publisher abstracts the kafka publisher for testing.
@@ -51,7 +52,7 @@ func NewSink(cfg Config) (*Sink, error) {
 		publisher: pub,
 		topic:     cfg.Topic,
 		logger:    slog.Default(),
-		tracer:    trace.NewNoopTracerProvider().Tracer("kafka-sink"),
+		tracer:    noop.NewTracerProvider().Tracer("kafka-sink"),
 	}, nil
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/lsm/fiso/internal/tracing"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // RetryConfig controls retry behavior for failed deliveries.
@@ -65,7 +66,7 @@ func NewSink(cfg Config) (*Sink, error) {
 		},
 		config: cfg,
 		logger: slog.Default(),
-		tracer: trace.NewNoopTracerProvider().Tracer("http-sink"),
+		tracer: noop.NewTracerProvider().Tracer("http-sink"),
 	}, nil
 }
 
