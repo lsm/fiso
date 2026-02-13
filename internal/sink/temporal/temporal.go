@@ -14,6 +14,8 @@ import (
 	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/ext"
 	"github.com/lsm/fiso/internal/correlation"
+	"github.com/lsm/fiso/internal/tracing"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // WorkflowClient abstracts the Temporal SDK client for testability.
@@ -170,6 +172,7 @@ type Sink struct {
 	timeout       time.Duration
 	paramPrograms []cel.Program // Compiled CEL programs for typed params
 	logger        *slog.Logger
+	tracer        trace.Tracer
 }
 
 // NewSink creates a new Temporal sink with the given client.
@@ -227,7 +230,13 @@ func NewSink(client WorkflowClient, cfg Config) (*Sink, error) {
 		timeout:       timeout,
 		paramPrograms: paramPrograms,
 		logger:        slog.Default(),
+		tracer:        trace.NewNoopTracerProvider().Tracer("temporal-sink"),
 	}, nil
+}
+
+// SetTracer sets the tracer for the sink.
+func (s *Sink) SetTracer(tracer trace.Tracer) {
+	s.tracer = tracer
 }
 
 // Deliver sends an event to Temporal as a workflow start or signal.
@@ -240,12 +249,22 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 	// Extract correlation ID from headers
 	corrID := correlation.ExtractOrGenerate(headers)
 
+	// Start span for delivery
+	ctx, span := tracing.StartSpan(ctx, s.tracer, tracing.SpanTemporalInvoke,
+		trace.WithAttributes(
+			tracing.WorkflowTypeAttr(s.config.WorkflowType),
+			tracing.CorrelationAttr(corrID.Value),
+		),
+	)
+	defer span.End()
+
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
 	// Parse the CloudEvent for workflow ID resolution and args
 	var eventData map[string]interface{}
 	if err := json.Unmarshal(event, &eventData); err != nil {
+		tracing.SetSpanError(span, err)
 		s.logger.Error("delivery failed",
 			"correlation_id", corrID.Value,
 			"target", s.config.WorkflowType,
@@ -255,6 +274,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 	}
 
 	workflowID := s.resolveWorkflowID(eventData)
+	span.SetAttributes(tracing.WorkflowIDAttr(workflowID))
 
 	// Determine workflow arguments: typed params or the whole CloudEvent
 	var args []interface{}
@@ -269,6 +289,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		for i, prg := range s.paramPrograms {
 			out, _, err := prg.Eval(activation)
 			if err != nil {
+				tracing.SetSpanError(span, err)
 				s.logger.Error("delivery failed",
 					"correlation_id", corrID.Value,
 					"target", s.config.WorkflowType,
@@ -292,6 +313,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		}
 		_, err := s.client.ExecuteWorkflow(ctx, opts, s.config.WorkflowType, args...)
 		if err != nil {
+			tracing.SetSpanError(span, err)
 			s.logger.Error("delivery failed",
 				"correlation_id", corrID.Value,
 				"target", s.config.WorkflowType,
@@ -300,6 +322,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 			)
 			return fmt.Errorf("start workflow %s: %w", workflowID, err)
 		}
+		tracing.SetSpanOK(span)
 		s.logger.Info("event delivered",
 			"correlation_id", corrID.Value,
 			"target", s.config.WorkflowType,
@@ -309,6 +332,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		return nil
 
 	case ModeSignal:
+		span.SetAttributes(tracing.SignalNameAttr(s.config.SignalName))
 		// For signals, pass args as a single value (first arg) or the whole slice
 		var signalArg interface{}
 		if len(args) == 1 {
@@ -318,6 +342,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		}
 		err := s.client.SignalWorkflow(ctx, workflowID, "", s.config.SignalName, signalArg)
 		if err != nil {
+			tracing.SetSpanError(span, err)
 			s.logger.Error("delivery failed",
 				"correlation_id", corrID.Value,
 				"target", s.config.WorkflowType,
@@ -326,6 +351,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 			)
 			return fmt.Errorf("signal workflow %s: %w", workflowID, err)
 		}
+		tracing.SetSpanOK(span)
 		s.logger.Info("event delivered",
 			"correlation_id", corrID.Value,
 			"target", s.config.WorkflowType,
@@ -335,12 +361,14 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		return nil
 
 	default:
+		err := fmt.Errorf("unsupported mode: %s", s.config.Mode)
+		tracing.SetSpanError(span, err)
 		s.logger.Error("delivery failed",
 			"correlation_id", corrID.Value,
 			"target", s.config.WorkflowType,
-			"error", fmt.Errorf("unsupported mode: %s", s.config.Mode),
+			"error", err,
 		)
-		return fmt.Errorf("unsupported mode: %s", s.config.Mode)
+		return err
 	}
 }
 

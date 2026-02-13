@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/lsm/fiso/internal/correlation"
+	"github.com/lsm/fiso/internal/tracing"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -27,6 +30,7 @@ type Sink struct {
 	conn    *grpc.ClientConn
 	timeout time.Duration
 	logger  *slog.Logger
+	tracer  trace.Tracer
 }
 
 // NewSink creates a new gRPC sink.
@@ -42,6 +46,8 @@ func NewSink(cfg Config) (*Sink, error) {
 	if !cfg.TLS {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
+	// Add OTel gRPC instrumentation
+	opts = append(opts, grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
 
 	conn, err := grpc.NewClient(cfg.Address, opts...)
 	if err != nil {
@@ -52,7 +58,13 @@ func NewSink(cfg Config) (*Sink, error) {
 		conn:    conn,
 		timeout: cfg.Timeout,
 		logger:  slog.Default(),
+		tracer:  trace.NewNoopTracerProvider().Tracer("grpc-sink"),
 	}, nil
+}
+
+// SetTracer sets the tracer for the sink.
+func (s *Sink) SetTracer(tracer trace.Tracer) {
+	s.tracer = tracer
 }
 
 // Deliver sends the event via gRPC. It uses a generic unary invoker
@@ -63,8 +75,20 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 	// Extract correlation ID from headers
 	corrID := correlation.ExtractOrGenerate(headers)
 
+	// Start span for delivery
+	ctx, span := tracing.StartSpan(ctx, s.tracer, tracing.SpanGRPCDeliver,
+		trace.WithAttributes(
+			tracing.GRPCMethodAttr("/fiso.v1.EventService/Deliver"),
+			tracing.CorrelationAttr(corrID.Value),
+		),
+	)
+	defer span.End()
+
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
+
+	// Inject trace context into headers for propagation
+	headers = correlation.InjectTraceContext(ctx, headers)
 
 	// Convert headers to gRPC metadata
 	md := metadata.New(headers)
@@ -74,6 +98,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 	var resp []byte
 	err := s.conn.Invoke(ctx, "/fiso.v1.EventService/Deliver", event, &resp, grpc.ForceCodec(rawCodec{}))
 	if err != nil {
+		tracing.SetSpanError(span, err)
 		s.logger.Error("delivery failed",
 			"correlation_id", corrID.Value,
 			"target", s.conn.Target(),
@@ -82,6 +107,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		return fmt.Errorf("grpc deliver: %w", err)
 	}
 
+	tracing.SetSpanOK(span)
 	s.logger.Info("event delivered",
 		"correlation_id", corrID.Value,
 		"target", s.conn.Target(),

@@ -19,6 +19,9 @@ import (
 	"github.com/lsm/fiso/internal/link/discovery"
 	"github.com/lsm/fiso/internal/link/ratelimit"
 	"github.com/lsm/fiso/internal/link/retry"
+	"github.com/lsm/fiso/internal/tracing"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Handler is the HTTP forward proxy for Fiso-Link.
@@ -32,6 +35,7 @@ type Handler struct {
 	client       *http.Client
 	logger       *slog.Logger
 	kafkaHandler *KafkaHandler // Optional: For Kafka targets
+	tracer       trace.Tracer
 }
 
 // Config configures the proxy handler.
@@ -68,9 +72,11 @@ func NewHandler(cfg Config) *Handler {
 		resolver:    cfg.Resolver,
 		metrics:     cfg.Metrics,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
 		logger: cfg.Logger,
+		tracer: trace.NewNoopTracerProvider().Tracer("proxy-handler"),
 	}
 
 	// Initialize Kafka handler if pool or publisher provided
@@ -98,6 +104,11 @@ func NewHandler(cfg Config) *Handler {
 	return h
 }
 
+// SetTracer sets the tracer for the handler.
+func (h *Handler) SetTracer(tracer trace.Tracer) {
+	h.tracer = tracer
+}
+
 // ServeHTTP handles proxy requests. Routes:
 //   - /link/{targetName}/{path...}  — sync forward proxy
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +122,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	corrID := correlation.ExtractOrGenerate(headers)
+
+	// Extract trace context from incoming request
+	ctx := correlation.ExtractTraceContext(r.Context(), headers)
 
 	// Add correlation ID to response headers
 	w.Header().Set(correlation.HeaderCorrelationID, corrID.Value)
@@ -145,6 +159,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Start span for proxy request
+	ctx, span := tracing.StartSpan(ctx, h.tracer, tracing.SpanProxyRequest,
+		trace.WithAttributes(
+			tracing.TargetNameAttr(targetName),
+			tracing.HTTPMethodAttr(r.Method),
+			tracing.CorrelationAttr(corrID.Value),
+		),
+	)
+	defer span.End()
+
 	// Check allowed paths
 	if !h.isPathAllowed(target, proxyPath) {
 		http.Error(w, "path not allowed", http.StatusForbidden)
@@ -174,16 +198,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve host
-	resolvedHost, err := h.resolver.Resolve(r.Context(), target.Host)
+	resolvedHost, err := h.resolver.Resolve(ctx, target.Host)
 	if err != nil {
+		tracing.SetSpanError(span, err)
 		h.logger.Error("resolve error", "target", targetName, "error", err)
 		http.Error(w, "failed to resolve host", http.StatusBadGateway)
 		return
 	}
 
 	// Get auth credentials
-	creds, err := h.auth.GetCredentials(r.Context(), targetName)
+	creds, err := h.auth.GetCredentials(ctx, targetName)
 	if err != nil {
+		tracing.SetSpanError(span, err)
 		h.logger.Error("auth error", "target", targetName, "error", err)
 		http.Error(w, "auth error", http.StatusInternalServerError)
 		return
@@ -199,12 +225,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		upstreamURL += "?" + r.URL.RawQuery
 	}
 
+	span.SetAttributes(tracing.HTTPTargetAttr(upstreamURL))
+
 	// Execute with retry
 	var resp *http.Response
 	retryCfg := h.buildRetryConfig(target)
 
-	retryErr := retry.Do(r.Context(), retryCfg, func() error {
-		req, reqErr := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, r.Body)
+	retryErr := retry.Do(ctx, retryCfg, func() error {
+		req, reqErr := http.NewRequestWithContext(ctx, r.Method, upstreamURL, r.Body)
 		if reqErr != nil {
 			return retry.Permanent(reqErr)
 		}
@@ -218,6 +246,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Add correlation ID to upstream request
 		req.Header.Set(correlation.HeaderCorrelationID, corrID.Value)
+
+		// Inject trace context into headers
+		outboundHeaders := make(map[string]string)
+		for k, vv := range req.Header {
+			if len(vv) > 0 {
+				outboundHeaders[k] = vv[0]
+			}
+		}
+		correlation.InjectTraceContext(ctx, outboundHeaders)
+		for k, v := range outboundHeaders {
+			req.Header.Set(k, v)
+		}
 
 		// Inject auth headers
 		if creds != nil {
@@ -248,6 +288,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	status := "error"
 	if resp != nil {
 		status = strconv.Itoa(resp.StatusCode)
+		span.SetAttributes(tracing.HTTPStatusAttr(resp.StatusCode))
 	}
 	if h.metrics != nil {
 		h.metrics.RequestsTotal.WithLabelValues(targetName, r.Method, status, "sync").Inc()
@@ -267,6 +308,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if retryErr != nil {
+		tracing.SetSpanError(span, retryErr)
 		if resp != nil {
 			// Forward the error response from upstream
 			h.copyResponse(w, resp)
@@ -276,6 +318,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
+
+	tracing.SetSpanOK(span)
 
 	// Log successful proxy request
 	h.logger.Info("proxy request completed",

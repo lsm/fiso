@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/lsm/fiso/internal/config"
 	"github.com/lsm/fiso/internal/dlq"
@@ -28,6 +29,7 @@ import (
 	grpcsource "github.com/lsm/fiso/internal/source/grpc"
 	httpsource "github.com/lsm/fiso/internal/source/http"
 	"github.com/lsm/fiso/internal/source/kafka"
+	"github.com/lsm/fiso/internal/tracing"
 	"github.com/lsm/fiso/internal/transform"
 	unifiedxform "github.com/lsm/fiso/internal/transform/unified"
 )
@@ -53,6 +55,18 @@ func run() error {
 	slog.SetDefault(logger)
 
 	slog.Debug("starting fiso-flow", "log_level", level.String())
+
+	// Initialize tracing
+	tracerCfg := tracing.GetConfig("fiso-flow")
+	tracer, tracerShutdown, err := tracing.Initialize(tracerCfg, logger)
+	if err != nil {
+		return fmt.Errorf("initialize tracing: %w", err)
+	}
+	defer func() {
+		if err := tracerShutdown(context.Background()); err != nil {
+			logger.Error("tracer shutdown error", "error", err)
+		}
+	}()
 
 	configDir := os.Getenv("FISO_CONFIG_DIR")
 	if configDir == "" {
@@ -124,7 +138,7 @@ func run() error {
 	runners := make([]*flowRunner, 0, len(flows))
 	for name, def := range flows {
 		logger.Info("building flow", "name", name)
-		p, err := buildPipeline(def, logger, httpPool)
+		p, err := buildPipeline(def, logger, httpPool, tracer)
 		if err != nil {
 			return fmt.Errorf("build pipeline %s: %w", name, err)
 		}
@@ -192,7 +206,7 @@ func run() error {
 	return nil
 }
 
-func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool *httpsource.ServerPool) (*pipeline.Pipeline, error) {
+func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool *httpsource.ServerPool, tracer trace.Tracer) (*pipeline.Pipeline, error) {
 	// Build source
 	var src source.Source
 	var propagateErrors bool
@@ -223,6 +237,8 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		if err != nil {
 			return nil, fmt.Errorf("kafka source: %w", err)
 		}
+		// Set tracer for instrumentation
+		s.SetTracer(tracer)
 		src = s
 
 	case "grpc":
@@ -282,6 +298,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		if err != nil {
 			return nil, fmt.Errorf("http sink: %w", err)
 		}
+		httpSink.SetTracer(tracer)
 		sk = httpSink
 
 	case "temporal":
@@ -381,6 +398,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		if err != nil {
 			return nil, fmt.Errorf("temporal sink: %w", err)
 		}
+		tSink.SetTracer(tracer)
 		sk = tSink
 
 	case "kafka":
@@ -404,6 +422,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		if err != nil {
 			return nil, fmt.Errorf("kafka sink: %w", err)
 		}
+		kSink.SetTracer(tracer)
 		sk = kSink
 
 	default:

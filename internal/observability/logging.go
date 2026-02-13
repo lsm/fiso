@@ -1,9 +1,12 @@
 package observability
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"strings"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // NewLogger creates a structured JSON logger for Fiso components.
@@ -12,6 +15,54 @@ func NewLogger(component string, level slog.Level) *slog.Logger {
 		Level: level,
 	})
 	return slog.New(handler).With("component", component)
+}
+
+// TraceLogger wraps a logger to automatically add trace context from the context.
+type TraceLogger struct {
+	logger *slog.Logger
+}
+
+// NewTraceLogger creates a new TraceLogger that extracts trace_id and span_id from context.
+func NewTraceLogger(logger *slog.Logger) *TraceLogger {
+	return &TraceLogger{logger: logger}
+}
+
+// WithTraceContext returns a logger with trace_id and span_id attributes if a valid span exists in context.
+func (l *TraceLogger) WithTraceContext(ctx context.Context) *slog.Logger {
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().IsValid() {
+		return l.logger
+	}
+
+	return l.logger.With(
+		"trace_id", span.SpanContext().TraceID().String(),
+		"span_id", span.SpanContext().SpanID().String(),
+	)
+}
+
+// Debug logs at debug level with trace context.
+func (l *TraceLogger) Debug(ctx context.Context, msg string, args ...any) {
+	l.WithTraceContext(ctx).Debug(msg, args...)
+}
+
+// Info logs at info level with trace context.
+func (l *TraceLogger) Info(ctx context.Context, msg string, args ...any) {
+	l.WithTraceContext(ctx).Info(msg, args...)
+}
+
+// Warn logs at warn level with trace context.
+func (l *TraceLogger) Warn(ctx context.Context, msg string, args ...any) {
+	l.WithTraceContext(ctx).Warn(msg, args...)
+}
+
+// Error logs at error level with trace context.
+func (l *TraceLogger) Error(ctx context.Context, msg string, args ...any) {
+	l.WithTraceContext(ctx).Error(msg, args...)
+}
+
+// With returns a new TraceLogger with additional key-value pairs.
+func (l *TraceLogger) With(args ...any) *TraceLogger {
+	return &TraceLogger{logger: l.logger.With(args...)}
 }
 
 // ParseLogLevel parses a log level string into slog.Level.

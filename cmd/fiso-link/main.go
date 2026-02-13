@@ -14,6 +14,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/link"
@@ -23,6 +25,7 @@ import (
 	"github.com/lsm/fiso/internal/link/proxy"
 	"github.com/lsm/fiso/internal/link/ratelimit"
 	"github.com/lsm/fiso/internal/observability"
+	"github.com/lsm/fiso/internal/tracing"
 )
 
 func main() {
@@ -47,6 +50,18 @@ func run() error {
 	slog.SetDefault(logger)
 
 	slog.Debug("starting fiso-link", "log_level", level.String())
+
+	// Initialize tracing
+	tracerCfg := tracing.GetConfig("fiso-link")
+	tracer, tracerShutdown, err := tracing.Initialize(tracerCfg, logger)
+	if err != nil {
+		return fmt.Errorf("initialize tracing: %w", err)
+	}
+	defer func() {
+		if err := tracerShutdown(context.Background()); err != nil {
+			logger.Error("tracer shutdown error", "error", err)
+		}
+	}()
 
 	configPath := *configFlag
 	if configPath == "" {
@@ -157,6 +172,10 @@ func run() error {
 		KafkaPool:     publisherPool,
 	}
 	handler := proxy.NewHandler(handlerCfg)
+	// Set tracer for instrumentation
+	if t, ok := tracer.(trace.Tracer); ok {
+		handler.SetTracer(t)
+	}
 
 	// Health server
 	health := observability.NewHealthServer()
@@ -174,7 +193,8 @@ func run() error {
 
 	// Proxy server
 	proxyMux := http.NewServeMux()
-	proxyMux.Handle("/link/", handler)
+	// Wrap handler with otelhttp middleware for automatic trace extraction
+	proxyMux.Handle("/link/", otelhttp.NewHandler(handler, "proxy"))
 
 	proxyServer := &http.Server{
 		Addr:    cfg.ListenAddr,

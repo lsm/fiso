@@ -8,7 +8,9 @@ import (
 	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/source"
+	"github.com/lsm/fiso/internal/tracing"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Config holds Kafka source configuration.
@@ -32,6 +34,7 @@ type Source struct {
 	client consumer
 	topic  string
 	logger *slog.Logger
+	tracer trace.Tracer
 }
 
 // NewSource creates a new Kafka source.
@@ -76,7 +79,13 @@ func NewSource(cfg Config, logger *slog.Logger) (*Source, error) {
 		client: client,
 		topic:  cfg.Topic,
 		logger: logger,
+		tracer: trace.NewNoopTracerProvider().Tracer("kafka-source"),
 	}, nil
+}
+
+// SetTracer sets the tracer for the source.
+func (s *Source) SetTracer(tracer trace.Tracer) {
+	s.tracer = tracer
 }
 
 // Start begins consuming events from Kafka. Blocks until ctx is cancelled.
@@ -112,6 +121,19 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 			corrID := correlation.ExtractOrGenerate(evt.Headers)
 			evt.CorrelationID = corrID.Value
 
+			// Extract trace context from Kafka headers
+			recordCtx := correlation.ExtractTraceContext(ctx, evt.Headers)
+
+			// Start consumer span
+			spanCtx, span := tracing.StartSpan(recordCtx, s.tracer, tracing.SpanKafkaConsume,
+				trace.WithAttributes(
+					tracing.KafkaTopicAttr(record.Topic),
+					tracing.KafkaPartitionAttr(record.Partition),
+					tracing.KafkaOffsetAttr(record.Offset),
+					tracing.CorrelationAttr(corrID.Value),
+				),
+			)
+
 			s.logger.Info("event received",
 				"correlation_id", corrID.Value,
 				"correlation_source", corrID.Source,
@@ -120,7 +142,9 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 				"partition", record.Partition,
 			)
 
-			if err := handler(ctx, evt); err != nil {
+			if err := handler(spanCtx, evt); err != nil {
+				tracing.SetSpanError(span, err)
+				span.End()
 				s.logger.Error("handler error", "topic", record.Topic, "offset", record.Offset, "error", err)
 				return
 			}
@@ -128,8 +152,12 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 			// Commit offset after successful handler execution (at-least-once)
 			s.client.MarkCommitRecords(record)
 			if err := s.client.CommitMarkedOffsets(ctx); err != nil {
+				tracing.SetSpanError(span, err)
 				s.logger.Error("commit error", "topic", record.Topic, "offset", record.Offset, "error", err)
+			} else {
+				tracing.SetSpanOK(span)
 			}
+			span.End()
 		})
 
 		// Check for cancellation after processing the batch, ensuring

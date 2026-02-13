@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/lsm/fiso/internal/correlation"
+	"github.com/lsm/fiso/internal/tracing"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // RetryConfig controls retry behavior for failed deliveries.
@@ -34,6 +37,7 @@ type Sink struct {
 	client *http.Client
 	config Config
 	logger *slog.Logger
+	tracer trace.Tracer
 }
 
 // NewSink creates a new HTTP sink.
@@ -55,10 +59,19 @@ func NewSink(cfg Config) (*Sink, error) {
 	}
 
 	return &Sink{
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		},
 		config: cfg,
 		logger: slog.Default(),
+		tracer: trace.NewNoopTracerProvider().Tracer("http-sink"),
 	}, nil
+}
+
+// SetTracer sets the tracer for the sink.
+func (s *Sink) SetTracer(tracer trace.Tracer) {
+	s.tracer = tracer
 }
 
 // Deliver sends the event payload to the configured HTTP endpoint.
@@ -68,6 +81,16 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 	// Extract correlation ID from headers
 	corrID := correlation.ExtractOrGenerate(headers)
 
+	// Start span for delivery
+	ctx, span := tracing.StartSpan(ctx, s.tracer, tracing.SpanHTTPDeliver,
+		trace.WithAttributes(
+			tracing.HTTPTargetAttr(s.config.URL),
+			tracing.HTTPMethodAttr(s.config.Method),
+			tracing.CorrelationAttr(corrID.Value),
+		),
+	)
+	defer span.End()
+
 	var lastErr error
 
 	for attempt := 0; attempt < s.config.Retry.MaxAttempts; attempt++ {
@@ -75,6 +98,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 			delay := s.backoff(attempt)
 			select {
 			case <-ctx.Done():
+				tracing.SetSpanError(span, ctx.Err())
 				return fmt.Errorf("context cancelled during retry backoff: %w", ctx.Err())
 			case <-time.After(delay):
 			}
@@ -82,6 +106,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 
 		err := s.doRequest(ctx, event, headers)
 		if err == nil {
+			tracing.SetSpanOK(span)
 			s.logger.Info("event delivered",
 				"correlation_id", corrID.Value,
 				"target", s.config.URL,
@@ -93,6 +118,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 
 		// Don't retry on permanent errors (4xx except 429)
 		if isPermanent(err) {
+			tracing.SetSpanError(span, err)
 			s.logger.Error("delivery failed",
 				"correlation_id", corrID.Value,
 				"target", s.config.URL,
@@ -102,6 +128,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		}
 	}
 
+	tracing.SetSpanError(span, lastErr)
 	s.logger.Error("delivery failed after retries",
 		"correlation_id", corrID.Value,
 		"target", s.config.URL,
@@ -128,6 +155,12 @@ func (s *Sink) doRequest(ctx context.Context, event []byte, headers map[string]s
 		req.Header.Set(k, v)
 	}
 	// Apply per-event headers (can override static)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	// Inject trace context into headers for propagation
+	correlation.InjectTraceContext(ctx, headers)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

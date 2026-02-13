@@ -9,6 +9,8 @@ import (
 	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/kafka"
 	kafkasource "github.com/lsm/fiso/internal/source/kafka"
+	"github.com/lsm/fiso/internal/tracing"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // publisher abstracts the kafka publisher for testing.
@@ -28,6 +30,7 @@ type Sink struct {
 	publisher publisher
 	topic     string
 	logger    *slog.Logger
+	tracer    trace.Tracer
 }
 
 // NewSink creates a new Kafka sink.
@@ -48,7 +51,13 @@ func NewSink(cfg Config) (*Sink, error) {
 		publisher: pub,
 		topic:     cfg.Topic,
 		logger:    slog.Default(),
+		tracer:    trace.NewNoopTracerProvider().Tracer("kafka-sink"),
 	}, nil
+}
+
+// SetTracer sets the tracer for the sink.
+func (s *Sink) SetTracer(tracer trace.Tracer) {
+	s.tracer = tracer
 }
 
 // Deliver sends an event to the configured Kafka topic.
@@ -58,8 +67,21 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 	// Extract correlation ID from headers
 	corrID := correlation.ExtractOrGenerate(headers)
 
+	// Start span for delivery
+	ctx, span := tracing.StartSpan(ctx, s.tracer, tracing.SpanKafkaPublish,
+		trace.WithAttributes(
+			tracing.KafkaTopicAttr(s.topic),
+			tracing.CorrelationAttr(corrID.Value),
+		),
+	)
+	defer span.End()
+
+	// Inject trace context into headers for propagation
+	headers = correlation.InjectTraceContext(ctx, headers)
+
 	err := s.publisher.Publish(ctx, s.topic, nil, event, headers)
 	if err != nil {
+		tracing.SetSpanError(span, err)
 		s.logger.Error("delivery failed",
 			"correlation_id", corrID.Value,
 			"target", s.topic,
@@ -68,6 +90,7 @@ func (s *Sink) Deliver(ctx context.Context, event []byte, headers map[string]str
 		return err
 	}
 
+	tracing.SetSpanOK(span)
 	s.logger.Info("event delivered",
 		"correlation_id", corrID.Value,
 		"target", s.topic,
