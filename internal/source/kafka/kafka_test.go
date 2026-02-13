@@ -11,6 +11,7 @@ import (
 	intkafka "github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/source"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // mockConsumer implements the consumer interface for testing.
@@ -425,5 +426,17 @@ func TestSource_Start_MultipleRecords(t *testing.T) {
 	defer mc.mu.Unlock()
 	if len(mc.committed) < 3 {
 		t.Errorf("expected 3 commits, got %d", len(mc.committed))
+	}
+}
+
+func TestSetTracer(t *testing.T) {
+	mc := &mockConsumer{}
+	s := &Source{client: mc, topic: "test-topic", logger: slog.Default()}
+
+	tracer := noop.NewTracerProvider().Tracer("test-tracer")
+	s.SetTracer(tracer)
+
+	if s.tracer == nil {
+		t.Error("expected tracer to be set")
 	}
 }

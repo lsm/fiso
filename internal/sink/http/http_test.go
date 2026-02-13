@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 func TestDeliver_Success(t *testing.T) {
@@ -397,5 +399,20 @@ func TestBackoff(t *testing.T) {
 	}
 	if delay10 < 800*time.Millisecond {
 		t.Errorf("backoff(10) = %v, expected >= 800ms (MaxInterval 1s - 20%% jitter)", delay10)
+	}
+}
+
+func TestSetTracer(t *testing.T) {
+	s, err := NewSink(Config{URL: "http://localhost:8080"})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	tracer := noop.NewTracerProvider().Tracer("test-tracer")
+	s.SetTracer(tracer)
+
+	if s.tracer == nil {
+		t.Error("expected tracer to be set")
 	}
 }

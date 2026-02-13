@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	intkafka "github.com/lsm/fiso/internal/kafka"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // mockPublisher implements the publisher interface for testing.
@@ -399,5 +400,21 @@ func TestSink_Deliver_PublishErrorWrapped(t *testing.T) {
 	// Verify the error is returned as-is from publisher (no wrapping in Deliver)
 	if err.Error() != "kafka publish: broker not available" {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestSetTracer(t *testing.T) {
+	mp := &mockPublisher{}
+	s := &Sink{
+		publisher: mp,
+		topic:     "test-topic",
+		logger:    slog.Default(),
+	}
+
+	tracer := noop.NewTracerProvider().Tracer("test-tracer")
+	s.SetTracer(tracer)
+
+	if s.tracer == nil {
+		t.Error("expected tracer to be set")
 	}
 }

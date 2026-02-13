@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -226,3 +227,18 @@ func TestNewSink_CustomTimeout(t *testing.T) {
 
 // Ensure Sink satisfies io.Closer
 var _ io.Closer = (*Sink)(nil)
+
+func TestSetTracer(t *testing.T) {
+	s, err := NewSink(Config{Address: "localhost:50051"})
+	if err != nil {
+		t.Fatalf("failed to create sink: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	tracer := noop.NewTracerProvider().Tracer("test-tracer")
+	s.SetTracer(tracer)
+
+	if s.tracer == nil {
+		t.Error("expected tracer to be set")
+	}
+}
