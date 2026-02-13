@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/link"
@@ -129,6 +130,9 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = r.Body.Close()
 
+	// Track start time for latency logging
+	start := time.Now()
+
 	// Build Kafka headers from HTTP headers + static headers
 	kafkaHeaders := make(map[string]string)
 	for k, v := range r.Header {
@@ -145,6 +149,9 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			kafkaHeaders[k] = v
 		}
 	}
+
+	// Extract correlation ID from headers
+	corrID := correlation.ExtractOrGenerate(kafkaHeaders)
 
 	// Generate key
 	keyStrategy := link.KeyStrategy{}
@@ -196,6 +203,13 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if h.metrics != nil {
 				h.metrics.RequestsTotal.WithLabelValues(target.Name, "POST", "200", "kafka").Inc()
 			}
+			// Log successful Kafka publish
+			h.logger.Info("kafka publish completed",
+				"correlation_id", corrID.Value,
+				"target", targetName,
+				"topic", topic,
+				"latency_ms", time.Since(start).Milliseconds(),
+			)
 			w.WriteHeader(http.StatusOK)
 			_, _ = fmt.Fprintf(w, `{"status":"published","topic":"%s"}`, topic)
 			return
