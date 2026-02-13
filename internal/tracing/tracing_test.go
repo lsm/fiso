@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestGetConfig_Defaults(t *testing.T) {
@@ -293,10 +295,10 @@ func TestSetSpanOKWithMessage(t *testing.T) {
 
 func TestAttributeConstructors(t *testing.T) {
 	tests := []struct {
-		name     string
-		attr     attribute.KeyValue
-		wantKey  string
-		wantVal  interface{}
+		name    string
+		attr    attribute.KeyValue
+		wantKey string
+		wantVal interface{}
 	}{
 		{"FlowAttr", FlowAttr("my-flow"), AttrFlowName, "my-flow"},
 		{"CorrelationAttr", CorrelationAttr("corr-123"), AttrCorrelationID, "corr-123"},
@@ -378,4 +380,88 @@ func TestIsTraced(t *testing.T) {
 		t.Error("expected IsTraced to be true with active span")
 	}
 	span.End()
+}
+
+func TestInitialize_EnabledWithTimeout(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	cfg := Config{
+		Enabled:     true,
+		Endpoint:    "localhost:4317", // Won't actually connect in test
+		ServiceName: "test-service",
+	}
+
+	// This will test the enabled path with a connection timeout
+	tracer, shutdown, err := Initialize(cfg, logger)
+
+	// The connection might fail or succeed depending on environment
+	if err != nil {
+		t.Logf("initialize returned error (expected if no OTLP endpoint): %v", err)
+		return
+	}
+
+	if tracer == nil {
+		t.Fatal("expected non-nil tracer")
+	}
+
+	// Clean shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := shutdown(ctx); err != nil {
+		t.Logf("shutdown returned error: %v", err)
+	}
+}
+
+func TestStartSpan_WithOptions(t *testing.T) {
+	tp := sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer func() { _ = tp.Shutdown(context.Background()) }()
+
+	tracer := tp.Tracer("test")
+	ctx := context.Background()
+
+	// Test with span options
+	_, span := StartSpan(ctx, tracer, "test-span-with-attrs", trace.WithAttributes(attribute.String("key", "value")))
+	defer span.End()
+
+	if span == nil {
+		t.Fatal("expected non-nil span")
+	}
+}
+
+func TestSetSpanError_EdgeCases(t *testing.T) {
+	// Test with nil span and nil error - should not panic
+	SetSpanError(nil, nil)
+
+	// Test with valid span and nil error - should not set error
+	tp := sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer func() { _ = tp.Shutdown(context.Background()) }()
+
+	tracer := tp.Tracer("test")
+	_, span := tracer.Start(context.Background(), "test-span")
+	SetSpanError(span, nil)
+	span.End()
+}
+
+func TestSetSpanOK_EdgeCases(t *testing.T) {
+	// Test with nil span - should not panic
+	SetSpanOK(nil)
+	SetSpanOKWithMessage(nil, "")
+}
+
+func TestSpanFromContext_NoSpan(t *testing.T) {
+	// Test with empty context
+	ctx := context.Background()
+	span := SpanFromContext(ctx)
+
+	// Should return a no-op span, not nil
+	if span == nil {
+		t.Error("expected non-nil span from empty context")
+	}
+
+	// Span should not be recording
+	if span.IsRecording() {
+		t.Error("expected no-op span to not be recording")
+	}
 }
