@@ -78,9 +78,9 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 		corrID := correlation.ExtractOrGenerate(headers)
 
 		evt := source.Event{
-			Value:        body,
-			Headers:      headers,
-			Topic:        "http",
+			Value:         body,
+			Headers:       headers,
+			Topic:         "http",
 			CorrelationID: corrID.Value,
 		}
 

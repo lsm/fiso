@@ -112,9 +112,9 @@ func (eh *eventHandler) handle(_ interface{}, stream grpc.ServerStream) error {
 	corrID := correlation.ExtractOrGenerate(headers)
 
 	evt := source.Event{
-		Value:        data,
-		Headers:      headers,
-		Topic:        "grpc",
+		Value:         data,
+		Headers:       headers,
+		Topic:         "grpc",
 		CorrelationID: corrID.Value,
 	}
 
