@@ -12,8 +12,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: testdb
-      # Enable logical replication for Debezium
-      POSTGRES_INITDB_ARGS: "--wal-level=logical"
     volumes:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
