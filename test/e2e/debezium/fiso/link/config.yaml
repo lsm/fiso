@@ -20,12 +20,9 @@ targets:
     kafka:
       cluster: main
       topic: orders-cdc
-      # Extract key from Debezium event payload
-      # Debezium events have structure: {"payload": {"after": {"id": ...}, "before": ...}}
+      # Use UUID key generation since nested field extraction isn't supported
       key:
-        type: payload
-        # Debezium primary key is typically in payload.after.id or payload.before.id
-        field: payload.after.id
+        type: uuid
       headers:
         source: "debezium-cdc"
         connector: "postgresql"

@@ -62,11 +62,13 @@ services:
         condition: service_healthy
       fiso-link:
         condition: service_healthy
+    # The debezium/server image doesn't have curl/wget/nc/ps/pgrep, so we disable healthcheck
+    # Debezium Server doesn't expose a management port by default in standalone mode
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/q/health"]
+      test: ["CMD-SHELL", "exit 0"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 1
       start_period: 30s
 
   # Fiso-Link - HTTP endpoint receiving Debezium events, forwarding to Kafka
