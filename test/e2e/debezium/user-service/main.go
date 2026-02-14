@@ -64,7 +64,7 @@ func main() {
 		kgo.SeedBrokers(brokers),
 		kgo.ConsumeTopics("orders-cdc"),
 		kgo.ConsumerGroup("debezium-cdc-consumer"),
-		kgo.ResetOffsetOldest(),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create Kafka client: %v", err)
@@ -115,10 +115,9 @@ func consumeCDCEvents(ctx context.Context) {
 				continue
 			}
 
-			iter := fetches.RecordIter()
-			for record := range iter {
+			fetches.EachRecord(func(record *kgo.Record) {
 				processCDCRecord(record.Value, string(record.Key))
-			}
+			})
 		}
 	}
 }
