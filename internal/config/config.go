@@ -16,7 +16,7 @@ import (
 var (
 	validSourceTypes      = map[string]bool{"kafka": true, "grpc": true, "http": true}
 	validSinkTypes        = map[string]bool{"http": true, "grpc": true, "temporal": true, "kafka": true}
-	validInterceptorTypes = map[string]bool{"wasm": true, "grpc": true}
+	validInterceptorTypes = map[string]bool{"wasm": true, "grpc": true, "wasmer-app": true}
 )
 
 // Validate checks the FlowDefinition for configuration errors.
@@ -75,6 +75,25 @@ func (f *FlowDefinition) Validate() error {
 		if ic.Type == "wasm" {
 			if _, ok := ic.Config["module"].(string); !ok {
 				errs = append(errs, fmt.Errorf("interceptors[%d].config.module is required for wasm interceptor", i))
+			}
+			// Validate runtime if specified
+			if runtime, ok := ic.Config["runtime"].(string); ok {
+				validRuntimes := map[string]bool{"wazero": true, "wasmer": true}
+				if !validRuntimes[runtime] {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.runtime must be 'wazero' or 'wasmer', got %q", i, runtime))
+				}
+			}
+		}
+		if ic.Type == "wasmer-app" {
+			if _, ok := ic.Config["module"].(string); !ok {
+				errs = append(errs, fmt.Errorf("interceptors[%d].config.module is required for wasmer-app interceptor", i))
+			}
+			// Validate execution mode if specified
+			if exec, ok := ic.Config["execution"].(string); ok {
+				validModes := map[string]bool{"perRequest": true, "longRunning": true, "pooled": true}
+				if !validModes[exec] {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.execution must be 'perRequest', 'longRunning', or 'pooled', got %q", i, exec))
+				}
 			}
 		}
 	}

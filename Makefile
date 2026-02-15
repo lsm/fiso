@@ -1,22 +1,38 @@
-.PHONY: build build-link build-operator build-cli build-all test test-integration e2e-operator lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all compose-up compose-down
+.PHONY: build build-link build-operator build-cli build-all test test-integration e2e-operator lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all compose-up compose-down build-wasmer build-wasmer-all build-pure
 
 MODULE := github.com/lsm/fiso
 IMAGE_REPO ?= ghcr.io/lsm
 IMAGE_TAG  ?= latest
 
+# Standard builds (wazero only, no CGO)
 build:
-	go build -o tmp/fiso-flow ./cmd/fiso-flow
+	CGO_ENABLED=0 go build -o tmp/fiso-flow ./cmd/fiso-flow
 
 build-link:
-	go build -o tmp/fiso-link ./cmd/fiso-link
+	CGO_ENABLED=0 go build -o tmp/fiso-link ./cmd/fiso-link
 
 build-operator:
-	go build -o tmp/fiso-operator ./cmd/fiso-operator
+	CGO_ENABLED=0 go build -o tmp/fiso-operator ./cmd/fiso-operator
 
 build-cli:
-	go build -o tmp/fiso ./cmd/fiso
+	CGO_ENABLED=0 go build -o tmp/fiso ./cmd/fiso
 
 build-all: build build-link build-operator build-cli
+
+# Pure Go builds (no CGO, wazero only)
+build-pure: build-all
+
+# Wasmer-enabled builds (requires CGO)
+build-wasmer:
+	CGO_ENABLED=1 go build -tags wasmer -o tmp/fiso-wasmer ./cmd/fiso-wasmer
+
+build-flow-wasmer:
+	CGO_ENABLED=1 go build -tags wasmer -o tmp/fiso-flow-wasmer ./cmd/fiso-flow-wasmer
+
+build-unified:
+	CGO_ENABLED=1 go build -tags wasmer -o tmp/fiso-unified ./cmd/fiso-unified
+
+build-wasmer-all: build-wasmer build-flow-wasmer build-unified
 
 test:
 	go test -race -coverprofile=coverage.out -covermode=atomic $$(go list ./... | grep -v /cmd/ | grep -v /test/e2e/)
