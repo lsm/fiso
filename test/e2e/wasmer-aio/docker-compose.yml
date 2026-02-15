@@ -1,0 +1,29 @@
+services:
+  # Backend service for both Flow and Link
+  backend-service:
+    build:
+      context: ./backend-service
+
+  # fiso-wasmer-aio: All-in-one with Flow + Wasmer + Link
+  fiso-wasmer-aio:
+    image: fiso-wasmer-aio:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.wasmer-aio
+    ports:
+      - "8080:8080"  # Flow HTTP source
+      - "3500:3500"  # Link proxy
+      - "9000:9000"  # Wasmer app
+      - "9090:9090"  # Metrics
+    volumes:
+      - ./fiso/flows:/etc/fiso/flows:ro
+      - ./fiso/link:/etc/fiso/link:ro
+      - ./fiso/aio:/etc/fiso/aio:ro
+      - ./module:/etc/fiso/modules:ro
+      - ./wasmer-app:/etc/fiso/wasmer-apps:ro
+    environment:
+      FISO_AIO_CONFIG: /etc/fiso/aio/config.yaml
+      FISO_CONFIG_DIR: /etc/fiso/flows
+      FISO_LINK_CONFIG: /etc/fiso/link/config.yaml
+    depends_on:
+      - backend-service

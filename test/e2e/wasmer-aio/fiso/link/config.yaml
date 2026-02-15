@@ -1,0 +1,8 @@
+listenAddr: ":3500"
+metricsAddr: ":9091"
+targets:
+  - name: api
+    protocol: http
+    host: backend-service
+    port: 8080
+    basePath: /api

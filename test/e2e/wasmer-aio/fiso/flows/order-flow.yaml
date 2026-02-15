@@ -1,0 +1,16 @@
+name: order-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8080"
+    path: /events/order
+interceptors:
+  - type: wasm
+    config:
+      module: /etc/fiso/modules/transform.wasm
+      runtime: wasmer
+sink:
+  type: http
+  config:
+    url: http://backend-service:8080/orders
+    method: POST

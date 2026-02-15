@@ -1,0 +1,15 @@
+services:
+  # fiso-wasmer standalone binary running a WASIX HTTP server
+  fiso-wasmer:
+    image: fiso-wasmer:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.wasmer
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./http-server:/etc/fiso/modules:ro
+      - ./config:/etc/fiso/config:ro
+    environment:
+      FISO_WASMER_CONFIG: /etc/fiso/config/wasmer.yaml
+    command: ["-config", "/etc/fiso/config/wasmer.yaml"]

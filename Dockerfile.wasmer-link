@@ -1,0 +1,27 @@
+# Wasmer + Link-enabled build (requires CGO/llvm)
+FROM golang:1.25-alpine AS builder
+
+# Install build dependencies for CGO/llvm (Wasmer requires CGO)
+RUN apk add --no-cache gcc musl-dev llvm-dev
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=1 GOOS=linux go build -tags wasmer -o /bin/fiso-wasmer-link ./cmd/fiso-wasmer-link
+
+FROM alpine:3.20
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata libstdc++
+
+COPY --from=builder /bin/fiso-wasmer-link /usr/local/bin/fiso-wasmer-link
+
+RUN adduser -D -u 1000 fiso
+USER fiso
+
+EXPOSE 3500 9090
+
+ENTRYPOINT ["fiso-wasmer-link"]

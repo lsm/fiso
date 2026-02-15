@@ -1,0 +1,20 @@
+# fiso-wasmer-aio unified configuration
+
+flow:
+  configDir: /etc/fiso/flows
+  metricsAddr: ":9090"
+
+link:
+  configPath: /etc/fiso/link/config.yaml
+  listenAddr: ":3500"
+
+wasmer:
+  apps:
+    - name: processor
+      module: /etc/fiso/wasmer-apps/processor.wasm
+      port: 9000
+      execution: longRunning
+      memoryMB: 64
+      env:
+        APP_NAME: "fiso-wasmer-aio-processor"
+        LOG_LEVEL: "info"

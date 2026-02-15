@@ -1,4 +1,4 @@
-.PHONY: build build-link build-operator build-cli build-all test test-integration e2e-operator lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all compose-up compose-down build-wasmer build-wasmer-all build-pure build-wasmer-link build-wasmer-aio
+.PHONY: build build-link build-operator build-cli build-all test test-integration e2e-operator e2e-wasmer-standalone e2e-flow-wasmer e2e-wasmer-link e2e-wasmer-aio e2e-all lint clean coverage-check fmt-check mod-check vulncheck checks docker docker-flow docker-link docker-operator docker-all docker-wasmer docker-flow-wasmer docker-wasmer-link docker-wasmer-aio compose-up compose-down build-wasmer build-wasmer-all build-pure build-wasmer-link build-wasmer-aio
 
 MODULE := github.com/lsm/fiso
 IMAGE_REPO ?= ghcr.io/lsm
@@ -80,6 +80,20 @@ vulncheck:
 e2e-operator:
 	bash test/e2e/operator/test.sh
 
+e2e-wasmer-standalone:
+	bash test/e2e/wasmer-standalone/test.sh
+
+e2e-flow-wasmer:
+	bash test/e2e/flow-wasmer/test.sh
+
+e2e-wasmer-link:
+	bash test/e2e/wasmer-link/test.sh
+
+e2e-wasmer-aio:
+	bash test/e2e/wasmer-aio/test.sh
+
+e2e-all: e2e-operator e2e-wasmer-standalone e2e-flow-wasmer e2e-wasmer-link e2e-wasmer-aio
+
 checks: fmt-check mod-check vulncheck
 
 docker: docker-flow
@@ -94,6 +108,19 @@ docker-operator:
 	docker build -f Dockerfile.operator -t $(IMAGE_REPO)/fiso-operator:$(IMAGE_TAG) .
 
 docker-all: docker-flow docker-link docker-operator
+
+# Wasmer-enabled Docker builds (requires CGO/llvm)
+docker-wasmer:
+	docker build -f Dockerfile.wasmer -t $(IMAGE_REPO)/fiso-wasmer:$(IMAGE_TAG) .
+
+docker-flow-wasmer:
+	docker build -f Dockerfile.flow-wasmer -t $(IMAGE_REPO)/fiso-flow-wasmer:$(IMAGE_TAG) .
+
+docker-wasmer-link:
+	docker build -f Dockerfile.wasmer-link -t $(IMAGE_REPO)/fiso-wasmer-link:$(IMAGE_TAG) .
+
+docker-wasmer-aio:
+	docker build -f Dockerfile.wasmer-aio -t $(IMAGE_REPO)/fiso-wasmer-aio:$(IMAGE_TAG) .
 
 compose-up:
 	docker compose up -d

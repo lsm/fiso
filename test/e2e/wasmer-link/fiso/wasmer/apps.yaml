@@ -1,0 +1,9 @@
+apps:
+  - name: request-interceptor
+    module: /etc/fiso/modules/intercept.wasm
+    port: 9001
+    execution: longRunning
+    memoryMB: 32
+    env:
+      INTERCEPT_MODE: "request-response"
+      LOG_LEVEL: "debug"

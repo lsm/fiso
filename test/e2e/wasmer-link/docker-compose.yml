@@ -1,0 +1,24 @@
+services:
+  # Backend service that the link proxies to
+  backend-service:
+    build:
+      context: ./backend-service
+
+  # fiso-wasmer-link: combined Link + Wasmer support
+  fiso-wasmer-link:
+    image: fiso-wasmer-link:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.wasmer-link
+    ports:
+      - "3500:3500"
+      - "9091:9091"
+    volumes:
+      - ./fiso/link:/etc/fiso/link:ro
+      - ./fiso/wasmer:/etc/fiso/wasmer:ro
+      - ./module:/etc/fiso/modules:ro
+    environment:
+      FISO_LINK_CONFIG: /etc/fiso/link/config.yaml
+      FISO_WASMER_CONFIG: /etc/fiso/wasmer/apps.yaml
+    depends_on:
+      - backend-service

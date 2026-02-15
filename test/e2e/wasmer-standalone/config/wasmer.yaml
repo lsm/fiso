@@ -1,0 +1,11 @@
+apps:
+  - name: http-server
+    module: /etc/fiso/modules/server.wasm
+    port: 9000
+    execution: longRunning
+    memoryMB: 64
+    env:
+      SERVER_NAME: "fiso-wasmer-e2e"
+      LOG_LEVEL: "info"
+    healthCheck: /health
+    healthCheckInterval: 10s
