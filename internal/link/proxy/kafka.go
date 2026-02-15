@@ -12,7 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/dlq"
+	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/kafka"
+	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	"github.com/lsm/fiso/internal/link/ratelimit"
@@ -20,13 +22,14 @@ import (
 
 // KafkaHandler handles Kafka target publishing.
 type KafkaHandler struct {
-	publisher   dlq.Publisher        // Single publisher (deprecated, for backwards compat)
-	pool        *kafka.PublisherPool // Publisher pool for per-cluster publishing
-	targets     *link.TargetStore
-	breakers    map[string]*circuitbreaker.Breaker
-	rateLimiter *ratelimit.Limiter
-	metrics     *link.Metrics
-	logger      *slog.Logger
+	publisher    dlq.Publisher              // Single publisher (deprecated, for backwards compat)
+	pool         *kafka.PublisherPool       // Publisher pool for per-cluster publishing
+	targets      *link.TargetStore
+	breakers     map[string]*circuitbreaker.Breaker
+	rateLimiter  *ratelimit.Limiter
+	metrics      *link.Metrics
+	logger       *slog.Logger
+	interceptors *linkinterceptor.Registry // Interceptor registry
 }
 
 // NewKafkaHandler creates a new Kafka handler with a single publisher.
@@ -66,6 +69,26 @@ func NewKafkaHandlerWithPool(pool *kafka.PublisherPool, targets *link.TargetStor
 		rateLimiter: rateLimiter,
 		metrics:     metrics,
 		logger:      logger,
+	}
+}
+
+// NewKafkaHandlerWithInterceptors creates a new Kafka handler with interceptor support.
+func NewKafkaHandlerWithInterceptors(pool *kafka.PublisherPool, targets *link.TargetStore,
+	breakers map[string]*circuitbreaker.Breaker, rateLimiter *ratelimit.Limiter,
+	metrics *link.Metrics, logger *slog.Logger, interceptors *linkinterceptor.Registry) *KafkaHandler {
+
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	return &KafkaHandler{
+		pool:         pool,
+		targets:      targets,
+		breakers:     breakers,
+		rateLimiter:  rateLimiter,
+		metrics:      metrics,
+		logger:       logger,
+		interceptors: interceptors,
 	}
 }
 
@@ -132,6 +155,39 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Track start time for latency logging
 	start := time.Now()
+
+	// Build headers map for interceptor processing
+	httpHeaders := make(map[string]string)
+	for k, v := range r.Header {
+		if len(v) > 0 {
+			httpHeaders[k] = v[0]
+		}
+	}
+
+	// Run outbound interceptors (before publishing to Kafka)
+	if h.interceptors != nil && len(body) > 0 {
+		icReq := &interceptor.Request{
+			Payload:   body,
+			Headers:   httpHeaders,
+			Direction: interceptor.Outbound,
+		}
+
+		icResult, icErr := h.interceptors.ProcessOutbound(r.Context(), targetName, icReq)
+		if icErr != nil {
+			h.logger.Error("outbound interceptor error", "target", targetName, "error", icErr)
+			if h.metrics != nil {
+				h.metrics.RequestsTotal.WithLabelValues(targetName, "POST", "500", "kafka").Inc()
+			}
+			http.Error(w, "interceptor error", http.StatusInternalServerError)
+			return
+		}
+
+		body = icResult.Payload
+		// Update headers from interceptor result
+		for k, v := range icResult.Headers {
+			r.Header.Set(k, v)
+		}
+	}
 
 	// Build Kafka headers from HTTP headers + static headers
 	kafkaHeaders := make(map[string]string)

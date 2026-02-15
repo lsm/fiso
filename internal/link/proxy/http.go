@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,7 +14,9 @@ import (
 
 	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/dlq"
+	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/kafka"
+	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/auth"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
@@ -37,6 +41,7 @@ type Handler struct {
 	logger       *slog.Logger
 	kafkaHandler *KafkaHandler // Optional: For Kafka targets
 	tracer       trace.Tracer
+	interceptors *linkinterceptor.Registry // Interceptor registry
 }
 
 // Config configures the proxy handler.
@@ -48,9 +53,10 @@ type Config struct {
 	Resolver       discovery.Resolver
 	Metrics        *link.Metrics
 	Logger         *slog.Logger
-	KafkaPublisher dlq.Publisher        // Deprecated: use KafkaPool instead
-	KafkaRegistry  *kafka.Registry      // Named Kafka cluster registry
-	KafkaPool      *kafka.PublisherPool // Kafka publisher connection pool
+	KafkaPublisher dlq.Publisher              // Deprecated: use KafkaPool instead
+	KafkaRegistry  *kafka.Registry            // Named Kafka cluster registry
+	KafkaPool      *kafka.PublisherPool       // Kafka publisher connection pool
+	Interceptors   *linkinterceptor.Registry  // Interceptor registry
 }
 
 // NewHandler creates a new HTTP proxy handler.
@@ -66,29 +72,31 @@ func NewHandler(cfg Config) *Handler {
 	}
 
 	h := &Handler{
-		targets:     cfg.Targets,
-		breakers:    cfg.Breakers,
-		rateLimiter: cfg.RateLimiter,
-		auth:        cfg.Auth,
-		resolver:    cfg.Resolver,
-		metrics:     cfg.Metrics,
+		targets:      cfg.Targets,
+		breakers:     cfg.Breakers,
+		rateLimiter:  cfg.RateLimiter,
+		auth:         cfg.Auth,
+		resolver:     cfg.Resolver,
+		metrics:      cfg.Metrics,
 		client: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
-		logger: cfg.Logger,
-		tracer: noop.NewTracerProvider().Tracer("proxy-handler"),
+		logger:       cfg.Logger,
+		tracer:       noop.NewTracerProvider().Tracer("proxy-handler"),
+		interceptors: cfg.Interceptors,
 	}
 
 	// Initialize Kafka handler if pool or publisher provided
 	if cfg.KafkaPool != nil {
-		h.kafkaHandler = NewKafkaHandlerWithPool(
+		h.kafkaHandler = NewKafkaHandlerWithInterceptors(
 			cfg.KafkaPool,
 			cfg.Targets,
 			cfg.Breakers,
 			cfg.RateLimiter,
 			cfg.Metrics,
 			cfg.Logger,
+			cfg.Interceptors,
 		)
 	} else if cfg.KafkaPublisher != nil {
 		// Backwards compatibility: single publisher
@@ -216,6 +224,47 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read request body for interceptor processing
+	var requestBody []byte
+	if r.Body != nil {
+		requestBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			h.logger.Error("read request body error", "target", targetName, "error", err)
+			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			return
+		}
+		_ = r.Body.Close()
+	}
+
+	// Run outbound interceptors (before upstream request)
+	if h.interceptors != nil && len(requestBody) > 0 {
+		outboundHeaders := make(map[string]string)
+		for k, vv := range r.Header {
+			if len(vv) > 0 {
+				outboundHeaders[k] = vv[0]
+			}
+		}
+
+		icReq := &interceptor.Request{
+			Payload:   requestBody,
+			Headers:   outboundHeaders,
+			Direction: interceptor.Outbound,
+		}
+
+		icResult, icErr := h.interceptors.ProcessOutbound(ctx, targetName, icReq)
+		if icErr != nil {
+			h.logger.Error("outbound interceptor error", "target", targetName, "error", icErr)
+			http.Error(w, "interceptor error", http.StatusInternalServerError)
+			return
+		}
+
+		requestBody = icResult.Payload
+		// Update headers from interceptor result
+		for k, v := range icResult.Headers {
+			r.Header.Set(k, v)
+		}
+	}
+
 	// Build upstream URL
 	scheme := target.Protocol
 	if scheme == "" {
@@ -233,7 +282,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	retryCfg := h.buildRetryConfig(target)
 
 	retryErr := retry.Do(ctx, retryCfg, func() error {
-		req, reqErr := http.NewRequestWithContext(ctx, r.Method, upstreamURL, r.Body)
+		req, reqErr := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(requestBody))
 		if reqErr != nil {
 			return retry.Permanent(reqErr)
 		}
@@ -331,7 +380,58 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"latency_ms", time.Since(start).Milliseconds(),
 	)
 
-	h.copyResponse(w, resp)
+	h.copyResponseWithInterceptors(ctx, w, resp, targetName)
+}
+
+// copyResponseWithInterceptors copies the response to the writer, optionally running inbound interceptors.
+func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.ResponseWriter, resp *http.Response, targetName string) {
+	defer func() { _ = resp.Body.Close() }()
+
+	// Read response body
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		h.logger.Error("read response body error", "target", targetName, "error", err)
+		http.Error(w, "failed to read response", http.StatusInternalServerError)
+		return
+	}
+
+	// Run inbound interceptors (after upstream response)
+	if h.interceptors != nil && len(responseBody) > 0 {
+		inboundHeaders := make(map[string]string)
+		for k, vv := range resp.Header {
+			if len(vv) > 0 {
+				inboundHeaders[k] = vv[0]
+			}
+		}
+
+		icReq := &interceptor.Request{
+			Payload:   responseBody,
+			Headers:   inboundHeaders,
+			Direction: interceptor.Inbound,
+		}
+
+		icResult, icErr := h.interceptors.ProcessInbound(ctx, targetName, icReq)
+		if icErr != nil {
+			h.logger.Error("inbound interceptor error", "target", targetName, "error", icErr)
+			http.Error(w, "interceptor error", http.StatusInternalServerError)
+			return
+		}
+
+		responseBody = icResult.Payload
+		// Update headers from interceptor result
+		for k, v := range icResult.Headers {
+			resp.Header.Set(k, v)
+		}
+	}
+
+	// Copy headers
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(responseBody)
 }
 
 func (h *Handler) copyResponse(w http.ResponseWriter, resp *http.Response) {

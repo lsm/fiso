@@ -13,6 +13,10 @@ type Metrics struct {
 	RetriesTotal     *prometheus.CounterVec
 	AuthRefreshTotal *prometheus.CounterVec
 	RateLimitedTotal *prometheus.CounterVec
+	// Interceptor metrics
+	InterceptorInvocations *prometheus.CounterVec
+	InterceptorDuration    *prometheus.HistogramVec
+	InterceptorErrors      *prometheus.CounterVec
 }
 
 // NewMetrics registers and returns Fiso-Link metrics.
@@ -44,5 +48,38 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "fiso_link_rate_limited_total",
 			Help: "Total requests rejected by rate limiting.",
 		}, []string{"target"}),
+		// Interceptor metrics
+		InterceptorInvocations: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "fiso_link_interceptor_invocations_total",
+			Help: "Total interceptor invocations.",
+		}, []string{"target", "module", "phase", "success"}),
+		InterceptorDuration: f.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "fiso_link_interceptor_duration_seconds",
+			Help:    "Interceptor invocation duration in seconds.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"target", "module", "phase"}),
+		InterceptorErrors: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "fiso_link_interceptor_errors_total",
+			Help: "Total interceptor errors.",
+		}, []string{"target", "module", "phase"}),
 	}
+}
+
+// RecordInterceptorInvocation records metrics for an interceptor invocation.
+func (m *Metrics) RecordInterceptorInvocation(target, module, phase string, success bool, durationSeconds float64) {
+	if m == nil {
+		return
+	}
+	m.InterceptorInvocations.WithLabelValues(target, module, phase, boolString(success)).Inc()
+	m.InterceptorDuration.WithLabelValues(target, module, phase).Observe(durationSeconds)
+	if !success {
+		m.InterceptorErrors.WithLabelValues(target, module, phase).Inc()
+	}
+}
+
+func boolString(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }

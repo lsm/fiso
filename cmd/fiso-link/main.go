@@ -18,6 +18,7 @@ import (
 
 	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/link"
+	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link/auth"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	"github.com/lsm/fiso/internal/link/discovery"
@@ -158,6 +159,19 @@ func run() error {
 	// Build target store
 	store := link.NewTargetStore(cfg.Targets)
 
+	// Initialize interceptor registry
+	interceptorRegistry := linkinterceptor.NewRegistry(metrics, logger)
+	defer func() {
+		if err := interceptorRegistry.Close(); err != nil {
+			logger.Error("failed to close interceptor registry", "error", err)
+		}
+	}()
+
+	// Load interceptors from configuration
+	if err := interceptorRegistry.Load(context.Background(), cfg.Targets); err != nil {
+		return fmt.Errorf("load interceptors: %w", err)
+	}
+
 	// Build proxy handler
 	handlerCfg := proxy.Config{
 		Targets:       store,
@@ -169,6 +183,7 @@ func run() error {
 		Logger:        logger,
 		KafkaRegistry: clusterRegistry,
 		KafkaPool:     publisherPool,
+		Interceptors:  interceptorRegistry,
 	}
 	handler := proxy.NewHandler(handlerCfg)
 	// Set tracer for instrumentation

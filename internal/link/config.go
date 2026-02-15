@@ -24,7 +24,21 @@ type LinkTarget struct {
 	Retry          RetryConfig          `yaml:"retry"`
 	RateLimit      RateLimitConfig      `yaml:"rateLimit"`
 	AllowedPaths   []string             `yaml:"allowedPaths"`
-	Kafka          *KafkaConfig         `yaml:"kafka,omitempty"` // Kafka-specific settings
+	Kafka          *KafkaConfig         `yaml:"kafka,omitempty"`   // Kafka-specific settings
+	Interceptors   []InterceptorConfig  `yaml:"interceptors"`      // Interceptor chain configuration
+}
+
+// InterceptorConfig defines a single interceptor in the chain.
+type InterceptorConfig struct {
+	Type   string                 `yaml:"type"`             // "wasm" (future: "lua", "native")
+	Config map[string]interface{} `yaml:"config"`           // Interceptor-specific configuration
+}
+
+// WASMInterceptorConfig defines WASM-specific interceptor configuration.
+type WASMInterceptorConfig struct {
+	Module    string `yaml:"module"`    // Path to WASM module file
+	Phase     string `yaml:"phase"`     // "outbound" or "inbound" (default: outbound)
+	FailOpen  bool   `yaml:"failOpen"`  // Continue on error if true (default: false)
 }
 
 // AuthConfig defines authentication settings for a target.
@@ -350,6 +364,19 @@ func (c *Config) Validate() error {
 		}
 		if t.RateLimit.Burst < 0 {
 			errs = append(errs, fmt.Errorf("%s: rateLimit.burst must be >= 0", prefix))
+		}
+
+		// Validate interceptors
+		for j, ic := range t.Interceptors {
+			icPrefix := fmt.Sprintf("%s: interceptors[%d]", prefix, j)
+			if ic.Type == "" {
+				errs = append(errs, fmt.Errorf("%s: type is required", icPrefix))
+				continue
+			}
+			validInterceptorTypes := map[string]bool{"wasm": true}
+			if !validInterceptorTypes[ic.Type] {
+				errs = append(errs, fmt.Errorf("%s: type %q is not valid (must be one of: wasm)", icPrefix, ic.Type))
+			}
 		}
 	}
 
