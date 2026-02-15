@@ -16,11 +16,10 @@ import (
 // WasmerRuntime implements Runtime using the Wasmer WebAssembly runtime with WASIX support.
 // Requires CGO and the wasmer build tag.
 type WasmerRuntime struct {
-	mu     sync.Mutex
-	store  *wasmer.Store
-	module *wasmer.Module
-	config Config
-	closed bool
+	mu               sync.RWMutex
+	serializedModule []byte
+	config           Config
+	closed           bool
 }
 
 // NewWasmerRuntime creates a new Wasmer runtime for per-request WASM execution.
@@ -33,29 +32,53 @@ func NewWasmerRuntime(ctx context.Context, wasmBytes []byte, cfg Config) (*Wasme
 
 	engine := wasmer.NewEngineWithConfig(config)
 	store := wasmer.NewStore(engine)
+	defer store.Close()
 
 	// Compile the module
 	module, err := wasmer.NewModule(store, wasmBytes)
 	if err != nil {
 		return nil, fmt.Errorf("compile wasm module: %w", err)
 	}
+	defer module.Close()
+
+	// Serialize the module to allow concurrent instantiation
+	serialized, err := module.Serialize()
+	if err != nil {
+		return nil, fmt.Errorf("serialize wasm module: %w", err)
+	}
 
 	return &WasmerRuntime{
-		store:  store,
-		module: module,
-		config: cfg,
+		serializedModule: serialized,
+		config:           cfg,
 	}, nil
 }
 
 // Call invokes the WASM module with input and returns the output.
 // Uses WASI stdin/stdout for communication.
 func (w *WasmerRuntime) Call(ctx context.Context, input []byte) ([]byte, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
+	w.mu.RLock()
 	if w.closed {
+		w.mu.RUnlock()
 		return nil, fmt.Errorf("runtime is closed")
 	}
+	w.mu.RUnlock()
+
+	// Create a fresh store and engine for this execution to ensure thread safety
+	// as Wasmer Store is not thread-safe.
+	config := wasmer.NewConfig()
+	config.UseCraneliftCompiler()
+	config.UseUniversalEngine()
+
+	engine := wasmer.NewEngineWithConfig(config)
+	store := wasmer.NewStore(engine)
+	defer store.Close()
+
+	// Deserialize module
+	module, err := wasmer.DeserializeModule(store, w.serializedModule)
+	if err != nil {
+		return nil, fmt.Errorf("deserialize module: %w", err)
+	}
+	defer module.Close()
 
 	// Create a temporary file for stdin input (wasmer-go doesn't have direct stdin injection)
 	tmpDir := os.TempDir()
@@ -73,7 +96,8 @@ func (w *WasmerRuntime) Call(ctx context.Context, input []byte) ([]byte, error) 
 		builder.Environment(key, value)
 	}
 
-	// Map stdin file as /stdin
+	// Map stdin file as /stdin and pass as argument for guest to read
+	// This requires the guest module to check for --stdin-file argument
 	builder.MapDirectory("stdin", tmpDir)
 	builder.Argument("--stdin-file")
 	builder.Argument("/stdin/" + filepath.Base(stdinFile))
@@ -93,13 +117,13 @@ func (w *WasmerRuntime) Call(ctx context.Context, input []byte) ([]byte, error) 
 	}
 
 	// Generate import object from WASI environment
-	importObject, err := wasiEnv.GenerateImportObject(w.store, w.module)
+	importObject, err := wasiEnv.GenerateImportObject(store, module)
 	if err != nil {
 		return nil, fmt.Errorf("generate imports: %w", err)
 	}
 
 	// Instantiate module
-	instance, err := wasmer.NewInstance(w.module, importObject)
+	instance, err := wasmer.NewInstance(module, importObject)
 	if err != nil {
 		return nil, fmt.Errorf("instantiate module: %w", err)
 	}
@@ -165,13 +189,7 @@ func (w *WasmerRuntime) Close() error {
 	}
 	w.closed = true
 
-	if w.module != nil {
-		w.module.Close()
-	}
-	if w.store != nil {
-		w.store.Close()
-	}
-
+	// serializedModule doesn't need explicit closing
 	return nil
 }
 

@@ -18,7 +18,14 @@ type wasmOutput struct {
 }
 
 func main() {
-	input, err := io.ReadAll(os.Stdin)
+	var input []byte
+	var err error
+
+	if len(os.Args) > 2 && os.Args[1] == "--stdin-file" {
+		input, err = os.ReadFile(os.Args[2])
+	} else {
+		input, err = io.ReadAll(os.Stdin)
+	}
 	if err != nil {
 		os.Exit(1)
 	}

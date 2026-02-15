@@ -29,7 +29,14 @@ func main() {
 		mode = "request"
 	}
 
-	input, err := io.ReadAll(os.Stdin)
+	var input []byte
+	var err error
+
+	if len(os.Args) > 2 && os.Args[1] == "--stdin-file" {
+		input, err = os.ReadFile(os.Args[2])
+	} else {
+		input, err = io.ReadAll(os.Stdin)
+	}
 	if err != nil {
 		log.Printf("error reading input: %v", err)
 		os.Exit(1)
