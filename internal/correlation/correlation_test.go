@@ -355,3 +355,111 @@ func TestAddToHeaders_Overwrites(t *testing.T) {
 		t.Errorf("expected new-id-456, got %s", headers[HeaderCorrelationID])
 	}
 }
+
+func TestHeaderCarrier_Get(t *testing.T) {
+	tests := []struct {
+		name     string
+		carrier  headerCarrier
+		key      string
+		expected string
+	}{
+		{
+			name:     "nil carrier returns empty",
+			carrier:  nil,
+			key:      "test-key",
+			expected: "",
+		},
+		{
+			name:     "key exists",
+			carrier:  headerCarrier{"test-key": "test-value"},
+			key:      "test-key",
+			expected: "test-value",
+		},
+		{
+			name:     "key does not exist",
+			carrier:  headerCarrier{"other-key": "other-value"},
+			key:      "test-key",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.carrier.Get(tt.key)
+			if result != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestHeaderCarrier_Set(t *testing.T) {
+	t.Run("nil carrier does nothing", func(t *testing.T) {
+		var carrier headerCarrier = nil
+		carrier.Set("key", "value")
+		// Should not panic
+	})
+
+	t.Run("set value on carrier", func(t *testing.T) {
+		carrier := headerCarrier{}
+		carrier.Set("key", "value")
+		if carrier["key"] != "value" {
+			t.Errorf("expected value, got %s", carrier["key"])
+		}
+	})
+}
+
+func TestHeaderCarrier_Keys(t *testing.T) {
+	t.Run("nil carrier returns nil", func(t *testing.T) {
+		var carrier headerCarrier = nil
+		keys := carrier.Keys()
+		if keys != nil {
+			t.Errorf("expected nil, got %v", keys)
+		}
+	})
+
+	t.Run("empty carrier returns empty slice", func(t *testing.T) {
+		carrier := headerCarrier{}
+		keys := carrier.Keys()
+		if len(keys) != 0 {
+			t.Errorf("expected empty slice, got %v", keys)
+		}
+	})
+
+	t.Run("carrier with keys returns all keys", func(t *testing.T) {
+		carrier := headerCarrier{
+			"key1": "value1",
+			"key2": "value2",
+			"key3": "value3",
+		}
+		keys := carrier.Keys()
+		if len(keys) != 3 {
+			t.Errorf("expected 3 keys, got %d", len(keys))
+		}
+		// Verify all keys are present
+		keySet := make(map[string]bool)
+		for _, k := range keys {
+			keySet[k] = true
+		}
+		for k := range carrier {
+			if !keySet[k] {
+				t.Errorf("key %s not found in Keys()", k)
+			}
+		}
+	})
+}
+
+func TestHeaderConstants(t *testing.T) {
+	if HeaderCorrelationID != "fiso-correlation-id" {
+		t.Errorf("expected fiso-correlation-id, got %s", HeaderCorrelationID)
+	}
+	if HeaderXCorrelationID != "x-correlation-id" {
+		t.Errorf("expected x-correlation-id, got %s", HeaderXCorrelationID)
+	}
+	if HeaderXRequestID != "x-request-id" {
+		t.Errorf("expected x-request-id, got %s", HeaderXRequestID)
+	}
+	if HeaderTraceparent != "traceparent" {
+		t.Errorf("expected traceparent, got %s", HeaderTraceparent)
+	}
+}

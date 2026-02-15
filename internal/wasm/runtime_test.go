@@ -183,3 +183,164 @@ func TestMockAppRuntime_ImplementsInterface(t *testing.T) {
 	// This test verifies that MockAppRuntime implements the AppRuntime interface
 	var _ AppRuntime = &MockAppRuntime{MockRuntime: &MockRuntime{rtype: RuntimeWasmer}}
 }
+
+func TestMockRuntime_Call(t *testing.T) {
+	mock := &MockRuntime{
+		callResp: []byte(`{"result":"success"}`),
+		rtype:    RuntimeWazero,
+	}
+
+	ctx := context.Background()
+	resp, err := mock.Call(ctx, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Call failed: %v", err)
+	}
+	if string(resp) != `{"result":"success"}` {
+		t.Errorf("Call() = %q, want %q", resp, `{"result":"success"}`)
+	}
+	if mock.callCount != 1 {
+		t.Errorf("callCount = %d, want 1", mock.callCount)
+	}
+}
+
+func TestMockRuntime_CallError(t *testing.T) {
+	mock := &MockRuntime{
+		callErr: context.DeadlineExceeded,
+		rtype:   RuntimeWazero,
+	}
+
+	ctx := context.Background()
+	_, err := mock.Call(ctx, []byte(`{}`))
+	if err != context.DeadlineExceeded {
+		t.Errorf("Call() error = %v, want %v", err, context.DeadlineExceeded)
+	}
+}
+
+func TestMockRuntime_Close(t *testing.T) {
+	mock := &MockRuntime{rtype: RuntimeWazero}
+
+	if err := mock.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+	if !mock.closed {
+		t.Error("expected closed to be true after Close()")
+	}
+}
+
+func TestMockRuntime_CloseError(t *testing.T) {
+	mock := &MockRuntime{
+		closeErr: context.Canceled,
+		rtype:    RuntimeWazero,
+	}
+
+	if err := mock.Close(); err != context.Canceled {
+		t.Errorf("Close() error = %v, want %v", err, context.Canceled)
+	}
+}
+
+func TestMockRuntime_Type(t *testing.T) {
+	tests := []struct {
+		name     string
+		rtype    RuntimeType
+		expected RuntimeType
+	}{
+		{"wazero", RuntimeWazero, RuntimeWazero},
+		{"wasmer", RuntimeWasmer, RuntimeWasmer},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &MockRuntime{rtype: tt.rtype}
+			if mock.Type() != tt.expected {
+				t.Errorf("Type() = %q, want %q", mock.Type(), tt.expected)
+			}
+		})
+	}
+}
+
+func TestMockAppRuntime_Start(t *testing.T) {
+	mock := &MockAppRuntime{
+		MockRuntime: &MockRuntime{rtype: RuntimeWasmer},
+		addr:        "127.0.0.1:8080",
+	}
+
+	ctx := context.Background()
+	addr, err := mock.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if addr != "127.0.0.1:8080" {
+		t.Errorf("Start() addr = %q, want %q", addr, "127.0.0.1:8080")
+	}
+	if !mock.running {
+		t.Error("expected running to be true after Start()")
+	}
+}
+
+func TestMockAppRuntime_StartError(t *testing.T) {
+	mock := &MockAppRuntime{
+		MockRuntime: &MockRuntime{rtype: RuntimeWasmer},
+		startErr:    context.DeadlineExceeded,
+	}
+
+	ctx := context.Background()
+	_, err := mock.Start(ctx)
+	if err != context.DeadlineExceeded {
+		t.Errorf("Start() error = %v, want %v", err, context.DeadlineExceeded)
+	}
+}
+
+func TestMockAppRuntime_Stop(t *testing.T) {
+	mock := &MockAppRuntime{
+		MockRuntime: &MockRuntime{rtype: RuntimeWasmer},
+		running:     true,
+	}
+
+	ctx := context.Background()
+	if err := mock.Stop(ctx); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if mock.running {
+		t.Error("expected running to be false after Stop()")
+	}
+}
+
+func TestMockAppRuntime_StopError(t *testing.T) {
+	mock := &MockAppRuntime{
+		MockRuntime: &MockRuntime{rtype: RuntimeWasmer},
+		running:     true,
+		stopErr:     context.Canceled,
+	}
+
+	ctx := context.Background()
+	if err := mock.Stop(ctx); err != context.Canceled {
+		t.Errorf("Stop() error = %v, want %v", err, context.Canceled)
+	}
+}
+
+func TestMockAppRuntime_Addr(t *testing.T) {
+	mock := &MockAppRuntime{
+		MockRuntime: &MockRuntime{rtype: RuntimeWasmer},
+		addr:        "127.0.0.1:9090",
+	}
+
+	if mock.Addr() != "127.0.0.1:9090" {
+		t.Errorf("Addr() = %q, want %q", mock.Addr(), "127.0.0.1:9090")
+	}
+}
+
+func TestMockAppRuntime_IsRunning(t *testing.T) {
+	mock := &MockAppRuntime{
+		MockRuntime: &MockRuntime{rtype: RuntimeWasmer},
+		running:     true,
+	}
+
+	if !mock.IsRunning() {
+		t.Error("IsRunning() = false, want true")
+	}
+
+	mock.running = false
+	if mock.IsRunning() {
+		t.Error("IsRunning() = true, want false")
+	}
+}

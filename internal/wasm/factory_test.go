@@ -5,8 +5,10 @@ package wasm
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestNewFactory(t *testing.T) {
@@ -122,4 +124,91 @@ func TestDefaultFactory_Create_EmptyRuntimeType(t *testing.T) {
 func TestFactory_Interface(t *testing.T) {
 	// Verify DefaultFactory implements Factory interface
 	var _ Factory = NewFactory()
+}
+
+func TestDefaultFactory_Create_ValidWazero(t *testing.T) {
+	factory := NewFactory()
+	ctx := context.Background()
+
+	// Build a valid WASM module for testing
+	wasmPath := buildTestWASMModule(t, filepath.Join("../interceptor/wasm/testdata", "enrich"))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	// Write to a temp file
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "module.wasm")
+	if err := os.WriteFile(tmpFile, wasmBytes, 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	cfg := Config{
+		Type:       RuntimeWazero,
+		ModulePath: tmpFile,
+	}
+
+	rt, err := factory.Create(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer rt.Close()
+
+	if rt.Type() != RuntimeWazero {
+		t.Errorf("Type() = %q, want %q", rt.Type(), RuntimeWazero)
+	}
+}
+
+func TestDefaultFactory_Create_WithConfigOptions(t *testing.T) {
+	factory := NewFactory()
+	ctx := context.Background()
+
+	// Build a valid WASM module for testing
+	wasmPath := buildTestWASMModule(t, filepath.Join("../interceptor/wasm/testdata", "enrich"))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	// Write to a temp file
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "module.wasm")
+	if err := os.WriteFile(tmpFile, wasmBytes, 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	cfg := Config{
+		Type:        RuntimeWazero,
+		ModulePath:  tmpFile,
+		ModuleType:  ModuleTypeTransform,
+		Execution:   ExecutionPerRequest,
+		MemoryLimit: 64 * 1024 * 1024,
+		Timeout:     30 * time.Second,
+		Env:         map[string]string{"FOO": "bar"},
+	}
+
+	rt, err := factory.Create(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer rt.Close()
+
+	if rt.Type() != RuntimeWazero {
+		t.Errorf("Type() = %q, want %q", rt.Type(), RuntimeWazero)
+	}
+}
+
+// buildTestWASMModule is a helper that compiles a Go source file to a WASM binary.
+func buildTestWASMModule(t *testing.T, srcDir string) string {
+	t.Helper()
+	outPath := filepath.Join(t.TempDir(), "module.wasm")
+	cmd := exec.Command("go", "build", "-o", outPath, ".")
+	cmd.Dir = srcDir
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compile wasm module: %v\n%s", err, out)
+	}
+	return outPath
 }

@@ -44,15 +44,15 @@ func TestAppConfig_Defaults(t *testing.T) {
 
 func TestAppConfig_WithValues(t *testing.T) {
 	cfg := AppConfig{
-		Name:               "test-app",
-		Module:             "/apps/test.wasm",
-		Execution:          "longRunning",
-		Port:               8080,
-		MemoryMB:           128,
-		Timeout:            30 * time.Second,
-		Env:                map[string]string{"NODE_ENV": "production"},
-		Preopens:           map[string]string{"/data": "/host/data"},
-		HealthCheck:        "/health",
+		Name:                "test-app",
+		Module:              "/apps/test.wasm",
+		Execution:           "longRunning",
+		Port:                8080,
+		MemoryMB:            128,
+		Timeout:             30 * time.Second,
+		Env:                 map[string]string{"NODE_ENV": "production"},
+		Preopens:            map[string]string{"/data": "/host/data"},
+		HealthCheck:         "/health",
 		HealthCheckInterval: 10 * time.Second,
 	}
 
@@ -127,10 +127,10 @@ func TestManagerConfig_WithApps(t *testing.T) {
 
 func TestPortRange_Values(t *testing.T) {
 	tests := []struct {
-		name     string
-		pr       PortRange
-		wantMin  int
-		wantMax  int
+		name    string
+		pr      PortRange
+		wantMin int
+		wantMax int
 	}{
 		{"zero values", PortRange{}, 0, 0},
 		{"standard range", PortRange{Min: 9000, Max: 9999}, 9000, 9999},

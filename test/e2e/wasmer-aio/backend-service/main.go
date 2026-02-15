@@ -9,19 +9,19 @@ import (
 )
 
 type OrderRequest struct {
-	OrderID            string                 `json:"order_id"`
+	OrderID            string                   `json:"order_id"`
 	Items              []map[string]interface{} `json:"items"`
-	Customer           string                 `json:"customer"`
-	AIOTransformed     bool                   `json:"aio_transformed"`
-	AIOCalculatedTotal float64                `json:"aio_calculated_total"`
+	Customer           string                   `json:"customer"`
+	AIOTransformed     bool                     `json:"aio_transformed"`
+	AIOCalculatedTotal float64                  `json:"aio_calculated_total"`
 }
 
 type OrderResponse struct {
-	Status          string  `json:"status"`
-	OrderID         string  `json:"order_id"`
-	ProcessedAt     string  `json:"processed_at"`
-	TransformedByAIO bool   `json:"transformed_by_aio"`
-	Total           float64 `json:"total,omitempty"`
+	Status           string  `json:"status"`
+	OrderID          string  `json:"order_id"`
+	ProcessedAt      string  `json:"processed_at"`
+	TransformedByAIO bool    `json:"transformed_by_aio"`
+	Total            float64 `json:"total,omitempty"`
 }
 
 type NotificationRequest struct {
@@ -33,11 +33,11 @@ type NotificationRequest struct {
 }
 
 type NotificationResponse struct {
-	Status          string `json:"status"`
-	Type            string `json:"type"`
-	Recipient       string `json:"recipient"`
-	ProcessedAt     string `json:"processed_at"`
-	TransformedByAIO bool  `json:"transformed_by_aio"`
+	Status           string `json:"status"`
+	Type             string `json:"type"`
+	Recipient        string `json:"recipient"`
+	ProcessedAt      string `json:"processed_at"`
+	TransformedByAIO bool   `json:"transformed_by_aio"`
 }
 
 type HealthResponse struct {
@@ -74,11 +74,11 @@ func main() {
 		}
 
 		resp := OrderResponse{
-			Status:          "received",
-			OrderID:         req.OrderID,
-			ProcessedAt:     time.Now().UTC().Format(time.RFC3339),
+			Status:           "received",
+			OrderID:          req.OrderID,
+			ProcessedAt:      time.Now().UTC().Format(time.RFC3339),
 			TransformedByAIO: req.AIOTransformed,
-			Total:           req.AIOCalculatedTotal,
+			Total:            req.AIOCalculatedTotal,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -107,10 +107,10 @@ func main() {
 		}
 
 		resp := NotificationResponse{
-			Status:          "queued",
-			Type:            req.Type,
-			Recipient:       req.Recipient,
-			ProcessedAt:     time.Now().UTC().Format(time.RFC3339),
+			Status:           "queued",
+			Type:             req.Type,
+			Recipient:        req.Recipient,
+			ProcessedAt:      time.Now().UTC().Format(time.RFC3339),
 			TransformedByAIO: req.AIOTransformed,
 		}
 
