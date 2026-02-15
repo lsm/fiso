@@ -298,9 +298,9 @@ func TestRegistry_BuildChainsForTarget_PhaseParsing(t *testing.T) {
 	// We can't fully test this without a real WASM module, but we can verify
 	// the logic flow
 	tests := []struct {
-		name           string
-		config         map[string]interface{}
-		expectedPhase  Phase
+		name          string
+		config        map[string]interface{}
+		expectedPhase Phase
 	}{
 		{
 			name:          "default phase is outbound",
@@ -341,7 +341,7 @@ func TestRegistry_BuildChainsForTarget_PhaseParsing(t *testing.T) {
 			}
 
 			// Check the effective phase
-			effectivePhase := PhaseOutbound
+			var effectivePhase Phase
 			switch phase {
 			case PhaseOutbound:
 				effectivePhase = PhaseOutbound

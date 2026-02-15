@@ -14,16 +14,16 @@ import (
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/kafka"
-	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
+	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link/ratelimit"
 )
 
 // KafkaHandler handles Kafka target publishing.
 type KafkaHandler struct {
-	publisher    dlq.Publisher              // Single publisher (deprecated, for backwards compat)
-	pool         *kafka.PublisherPool       // Publisher pool for per-cluster publishing
+	publisher    dlq.Publisher        // Single publisher (deprecated, for backwards compat)
+	pool         *kafka.PublisherPool // Publisher pool for per-cluster publishing
 	targets      *link.TargetStore
 	breakers     map[string]*circuitbreaker.Breaker
 	rateLimiter  *ratelimit.Limiter

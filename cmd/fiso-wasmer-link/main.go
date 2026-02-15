@@ -20,10 +20,10 @@ import (
 
 	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/link"
-	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link/auth"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	"github.com/lsm/fiso/internal/link/discovery"
+	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link/proxy"
 	"github.com/lsm/fiso/internal/link/ratelimit"
 	"github.com/lsm/fiso/internal/observability"

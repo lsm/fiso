@@ -22,7 +22,6 @@ import (
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/interceptor/wasm"
-	wasmimpl "github.com/lsm/fiso/internal/wasm"
 	"github.com/lsm/fiso/internal/observability"
 	"github.com/lsm/fiso/internal/pipeline"
 	httpsink "github.com/lsm/fiso/internal/sink/http"
@@ -35,6 +34,7 @@ import (
 	"github.com/lsm/fiso/internal/tracing"
 	"github.com/lsm/fiso/internal/transform"
 	unifiedxform "github.com/lsm/fiso/internal/transform/unified"
+	wasmimpl "github.com/lsm/fiso/internal/wasm"
 )
 
 var logLevel string

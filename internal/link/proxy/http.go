@@ -16,11 +16,11 @@ import (
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/kafka"
-	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/auth"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	"github.com/lsm/fiso/internal/link/discovery"
+	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link/ratelimit"
 	"github.com/lsm/fiso/internal/link/retry"
 	"github.com/lsm/fiso/internal/tracing"
@@ -53,10 +53,10 @@ type Config struct {
 	Resolver       discovery.Resolver
 	Metrics        *link.Metrics
 	Logger         *slog.Logger
-	KafkaPublisher dlq.Publisher              // Deprecated: use KafkaPool instead
-	KafkaRegistry  *kafka.Registry            // Named Kafka cluster registry
-	KafkaPool      *kafka.PublisherPool       // Kafka publisher connection pool
-	Interceptors   *linkinterceptor.Registry  // Interceptor registry
+	KafkaPublisher dlq.Publisher             // Deprecated: use KafkaPool instead
+	KafkaRegistry  *kafka.Registry           // Named Kafka cluster registry
+	KafkaPool      *kafka.PublisherPool      // Kafka publisher connection pool
+	Interceptors   *linkinterceptor.Registry // Interceptor registry
 }
 
 // NewHandler creates a new HTTP proxy handler.
@@ -72,12 +72,12 @@ func NewHandler(cfg Config) *Handler {
 	}
 
 	h := &Handler{
-		targets:      cfg.Targets,
-		breakers:     cfg.Breakers,
-		rateLimiter:  cfg.RateLimiter,
-		auth:         cfg.Auth,
-		resolver:     cfg.Resolver,
-		metrics:      cfg.Metrics,
+		targets:     cfg.Targets,
+		breakers:    cfg.Breakers,
+		rateLimiter: cfg.RateLimiter,
+		auth:        cfg.Auth,
+		resolver:    cfg.Resolver,
+		metrics:     cfg.Metrics,
 		client: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
