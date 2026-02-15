@@ -153,7 +153,7 @@ func TestDefaultFactory_Create_ValidWazero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	if rt.Type() != RuntimeWazero {
 		t.Errorf("Type() = %q, want %q", rt.Type(), RuntimeWazero)
@@ -192,7 +192,7 @@ func TestDefaultFactory_Create_WithConfigOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	if rt.Type() != RuntimeWazero {
 		t.Errorf("Type() = %q, want %q", rt.Type(), RuntimeWazero)

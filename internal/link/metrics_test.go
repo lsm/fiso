@@ -49,3 +49,77 @@ func TestMetrics_IncrementCounters(t *testing.T) {
 		t.Errorf("expected 6 metric families, got %d", len(mfs))
 	}
 }
+
+func TestMetrics_RecordInterceptorInvocation_Success(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+
+	// Record successful invocation
+	m.RecordInterceptorInvocation("test-target", "test.wasm", "outbound", true, 0.123)
+
+	// Gather to verify metrics were recorded
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have interceptor metrics registered
+	foundInvocations := false
+	for _, mf := range mfs {
+		if mf.GetName() == "fiso_link_interceptor_invocations_total" {
+			foundInvocations = true
+			break
+		}
+	}
+	if !foundInvocations {
+		t.Error("expected interceptor invocations metric to be registered")
+	}
+}
+
+func TestMetrics_RecordInterceptorInvocation_Error(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+
+	// Record failed invocation
+	m.RecordInterceptorInvocation("test-target", "test.wasm", "inbound", false, 0.056)
+
+	// Gather to verify metrics were recorded
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have interceptor error metrics
+	foundErrors := false
+	for _, mf := range mfs {
+		if mf.GetName() == "fiso_link_interceptor_errors_total" {
+			foundErrors = true
+			break
+		}
+	}
+	if !foundErrors {
+		t.Error("expected interceptor errors metric to be registered")
+	}
+}
+
+func TestMetrics_RecordInterceptorInvocation_NilMetrics(t *testing.T) {
+	// Test that nil metrics doesn't panic
+	var m *Metrics
+	m.RecordInterceptorInvocation("test", "test.wasm", "outbound", true, 0.1)
+	// Should not panic
+}
+
+func TestMetrics_InterceptorMetricsNotNil(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+
+	if m.InterceptorInvocations == nil {
+		t.Error("InterceptorInvocations not initialized")
+	}
+	if m.InterceptorDuration == nil {
+		t.Error("InterceptorDuration not initialized")
+	}
+	if m.InterceptorErrors == nil {
+		t.Error("InterceptorErrors not initialized")
+	}
+}

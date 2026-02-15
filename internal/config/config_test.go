@@ -571,6 +571,132 @@ func TestFlowDefinition_Validate(t *testing.T) {
 			},
 			wantErr: "interceptors[0].config.module is required",
 		},
+		{
+			name: "wasm interceptor invalid runtime",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module":  "/path/to/module.wasm",
+					"runtime": "invalid-runtime",
+				}}},
+			},
+			wantErr: "interceptors[0].config.runtime must be 'wazero' or 'wasmer'",
+		},
+		{
+			name: "wasm interceptor valid wazero runtime",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module":  "/path/to/module.wasm",
+					"runtime": "wazero",
+				}}},
+			},
+		},
+		{
+			name: "wasm interceptor valid wasmer runtime",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module":  "/path/to/module.wasm",
+					"runtime": "wasmer",
+				}}},
+			},
+		},
+		{
+			name: "wasmer-app interceptor valid",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
+					"module": "/path/to/app.wasm",
+				}}},
+			},
+		},
+		{
+			name: "wasmer-app interceptor missing module",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{}}},
+			},
+			wantErr: "interceptors[0].config.module is required for wasmer-app interceptor",
+		},
+		{
+			name: "wasmer-app interceptor invalid execution mode",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
+					"module":    "/path/to/app.wasm",
+					"execution": "invalid-mode",
+				}}},
+			},
+			wantErr: "interceptors[0].config.execution must be 'perRequest', 'longRunning', or 'pooled'",
+		},
+		{
+			name: "wasmer-app interceptor valid perRequest execution",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
+					"module":    "/path/to/app.wasm",
+					"execution": "perRequest",
+				}}},
+			},
+		},
+		{
+			name: "wasmer-app interceptor valid longRunning execution",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
+					"module":    "/path/to/app.wasm",
+					"execution": "longRunning",
+				}}},
+			},
+		},
+		{
+			name: "wasmer-app interceptor valid pooled execution",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
+					"module":    "/path/to/app.wasm",
+					"execution": "pooled",
+				}}},
+			},
+		},
+		{
+			name: "grpc interceptor valid",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "grpc", Config: map[string]interface{}{
+					"endpoint": "localhost:9000",
+				}}},
+			},
+		},
+		{
+			name: "kafka sink valid",
+			flow: FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "kafka", Config: map[string]interface{}{"topic": "output"}},
+			},
+		},
 	}
 
 	for _, tt := range tests {

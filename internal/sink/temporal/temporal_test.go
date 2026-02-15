@@ -1139,3 +1139,17 @@ func TestConfig_Validate(t *testing.T) {
 		})
 	}
 }
+
+func TestSetTracer(t *testing.T) {
+	mc := &mockClient{}
+	s, err := NewSink(mc, Config{
+		TaskQueue:    "test-queue",
+		WorkflowType: "TestWorkflow",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating sink: %v", err)
+	}
+
+	// SetTracer should not panic
+	s.SetTracer(nil)
+}

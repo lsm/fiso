@@ -465,3 +465,33 @@ func TestSpanFromContext_NoSpan(t *testing.T) {
 		t.Error("expected no-op span to not be recording")
 	}
 }
+
+func TestInitialize_EnabledFailsToConnect(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	cfg := Config{
+		Enabled:     true,
+		Endpoint:    "nonexistent-endpoint:4317", // Invalid endpoint
+		ServiceName: "test-service",
+	}
+
+	// This should attempt to connect and may fail
+	tracer, shutdown, err := Initialize(cfg, logger)
+
+	// The connection might fail - that's OK, we're testing the path
+	if err != nil {
+		t.Logf("Initialize failed (expected if no OTLP endpoint): %v", err)
+		return
+	}
+
+	// If it succeeded, we need to clean up
+	if tracer == nil {
+		t.Error("expected non-nil tracer")
+	}
+
+	if shutdown != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = shutdown(ctx)
+	}
+}

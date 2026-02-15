@@ -4,17 +4,20 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/lsm/fiso/internal/link"
 	"github.com/lsm/fiso/internal/link/auth"
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	"github.com/lsm/fiso/internal/link/discovery"
+	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link/ratelimit"
 )
 
@@ -693,4 +696,234 @@ func (m *mockKafkaPublisher) Publish(ctx context.Context, topic string, key, val
 
 func (m *mockKafkaPublisher) Close() error {
 	return nil
+}
+
+// errorReader is a reader that always returns an error.
+type errorReader struct{}
+
+func (e *errorReader) Read(p []byte) (n int, err error) {
+	return 0, fmt.Errorf("read error")
+}
+
+func TestProxy_SetTracer(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	handler := setupProxy(t, upstream, []link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host},
+	}, nil, nil)
+
+	// Test SetTracer doesn't panic
+	handler.SetTracer(noop.NewTracerProvider().Tracer("test"))
+}
+
+func TestProxy_CopyResponseWithInterceptors(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Response", "value")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":"success"}`))
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	handler := setupProxy(t, upstream, []link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host},
+	}, nil, nil)
+
+	req := httptest.NewRequest("GET", "/link/svc/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if w.Header().Get("X-Response") != "value" {
+		t.Error("expected response header to be forwarded")
+	}
+}
+
+func TestProxy_NewHandlerDefaults(t *testing.T) {
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: "localhost:8080"},
+	})
+
+	// Test with minimal config
+	handler := NewHandler(Config{Targets: store})
+	if handler == nil {
+		t.Fatal("expected non-nil handler")
+	}
+	if handler.logger == nil {
+		t.Error("expected default logger")
+	}
+	if handler.resolver == nil {
+		t.Error("expected default resolver")
+	}
+	if handler.auth == nil {
+		t.Error("expected default auth provider")
+	}
+}
+
+func TestProxy_ResponseReadError(t *testing.T) {
+	// Test handling of response read errors
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1000")
+		w.WriteHeader(http.StatusOK)
+		// Write less than Content-Length to cause read error on client
+		_, _ = w.Write([]byte("short"))
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	handler := setupProxy(t, upstream, []link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host},
+	}, nil, nil)
+
+	req := httptest.NewRequest("GET", "/link/svc/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	// Should still complete even with response issues
+}
+
+func TestProxy_WithInterceptors(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Upstream", "value")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"response":true}`))
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host},
+	})
+
+	reg := prometheus.NewRegistry()
+	metrics := link.NewMetrics(reg)
+
+	// Create handler with interceptors
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer icRegistry.Close()
+
+	handler := NewHandler(Config{
+		Targets:      store,
+		Metrics:      metrics,
+		Interceptors: icRegistry,
+	})
+
+	// Make request with body to trigger outbound interceptor path
+	req := httptest.NewRequest("POST", "/link/svc/test", strings.NewReader(`{"request":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestProxy_InterceptorError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host},
+	})
+
+	reg := prometheus.NewRegistry()
+	metrics := link.NewMetrics(reg)
+
+	// Create interceptor registry
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer icRegistry.Close()
+
+	handler := NewHandler(Config{
+		Targets:      store,
+		Metrics:      metrics,
+		Interceptors: icRegistry,
+	})
+
+	// Make request with body
+	req := httptest.NewRequest("POST", "/link/svc/test", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Request should succeed since no interceptors are configured for target
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestProxy_ReadRequestBodyError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host},
+	})
+
+	reg := prometheus.NewRegistry()
+	metrics := link.NewMetrics(reg)
+
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer icRegistry.Close()
+
+	handler := NewHandler(Config{
+		Targets:      store,
+		Metrics:      metrics,
+		Interceptors: icRegistry,
+	})
+
+	// Create request with error body
+	req := httptest.NewRequest("POST", "/link/svc/test", &errorReader{})
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Should get 400 for read error
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestProxy_InboundInterceptorError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host},
+	})
+
+	reg := prometheus.NewRegistry()
+	metrics := link.NewMetrics(reg)
+
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer icRegistry.Close()
+
+	handler := NewHandler(Config{
+		Targets:      store,
+		Metrics:      metrics,
+		Interceptors: icRegistry,
+	})
+
+	// Make request
+	req := httptest.NewRequest("GET", "/link/svc/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Should succeed
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
 }

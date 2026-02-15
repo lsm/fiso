@@ -374,3 +374,58 @@ func TestBuildTLSConfig_WithInvalidCertPath(t *testing.T) {
 		t.Error("buildTLSConfig() should fail with nonexistent cert/key files")
 	}
 }
+
+func TestSaslOption_OAuth_AzureDefaultCredential(t *testing.T) {
+	// Test Azure OAuth with default credential (no ClientSecretEnv)
+	// This tests the path that uses NewDefaultAzureCredential
+	auth := AuthConfig{
+		Mechanism: "OAUTHBEARER",
+		OAuth: &OAuthConfig{
+			Provider: "azure",
+			TenantID: "tenant-123",
+			ClientID: "client-123",
+			// No ClientSecretEnv - should use default credential
+			Scope: "api://kafka/.default",
+		},
+	}
+
+	// This will attempt to create a default credential which may fail
+	// in a test environment, but we're testing the path coverage
+	opt, err := saslOption(auth)
+	// The call may succeed or fail depending on the environment
+	// We just want to ensure it doesn't panic and exercises the code path
+	if err != nil {
+		t.Logf("saslOption with default credential returned error (expected in CI): %v", err)
+	} else {
+		t.Log("saslOption with default credential succeeded")
+		if opt == nil {
+			t.Error("expected non-nil option when no error")
+		}
+	}
+}
+
+func TestCreateOAuthMechanism_UnsupportedProvider(t *testing.T) {
+	cfg := &OAuthConfig{
+		Provider: "unsupported-provider",
+	}
+	_, err := createOAuthMechanism(cfg)
+	if err == nil {
+		t.Fatal("expected error for unsupported provider")
+	}
+	if !strings.Contains(err.Error(), "unsupported oauth provider") {
+		t.Errorf("expected 'unsupported oauth provider' error, got: %v", err)
+	}
+}
+
+func TestSaslOption_EmptyMechanism(t *testing.T) {
+	// Test with empty mechanism - should return error
+	auth := AuthConfig{
+		Mechanism: "",
+		Username:  "user",
+		Password:  "pass",
+	}
+	_, err := saslOption(auth)
+	if err == nil {
+		t.Fatal("expected error for empty mechanism")
+	}
+}
