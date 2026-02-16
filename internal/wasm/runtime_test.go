@@ -344,3 +344,81 @@ func TestMockAppRuntime_IsRunning(t *testing.T) {
 		t.Error("IsRunning() = true, want false")
 	}
 }
+
+func TestConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  Config
+		wantErr bool
+	}{
+		{
+			name: "valid wazero config",
+			config: Config{
+				Type:       RuntimeWazero,
+				ModulePath: "/path/to/module.wasm",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid wasmer config",
+			config: Config{
+				Type:       RuntimeWasmer,
+				ModulePath: "/path/to/module.wasm",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid runtime type",
+			config: Config{
+				Type:       RuntimeType("invalid"),
+				ModulePath: "/path/to/module.wasm",
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative memory limit",
+			config: Config{
+				MemoryLimit: -1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative timeout",
+			config: Config{
+				Timeout: -1 * time.Second,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid execution mode",
+			config: Config{
+				Execution: ExecutionMode("invalid"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid module type",
+			config: Config{
+				ModuleType: ModuleType("invalid"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid execution modes",
+			config: Config{
+				ModulePath: "/path/to/module.wasm",
+				Execution:  ExecutionPerRequest,
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

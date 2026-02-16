@@ -1223,6 +1223,33 @@ Expected output:
 {"data":{"key":"VALUE"}}
 ```
 
+### Wasmer Runtime for Full Applications
+
+For WASM applications that require network access, threading, or database connectivity, Fiso supports the Wasmer runtime with WASIX support.
+
+**Deployment Modes:**
+- **fiso-wasmer**: Standalone Wasmer app runner
+- **fiso-flow-wasmer**: Flow + Wasmer combined
+- **fiso-wasmer-link**: Link with Wasmer apps
+- **fiso-wasmer-aio**: All-in-one (Flow + Link + Wasmer)
+
+**Configuration:**
+```yaml
+interceptors:
+  - type: wasm
+    config:
+      module: /etc/fiso/modules/app.wasm
+      runtime: wasmer    # Use wasmer instead of default wazero
+      timeout: 30s
+```
+
+**Building:**
+```bash
+CGO_ENABLED=1 go build -tags wasmer -o fiso-wasmer ./cmd/fiso-wasmer
+```
+
+See the [Wasmer Integration Guide](./docs/wasmer-integration.md) for full documentation.
+
 ### Environment Variables
 
 #### fiso-flow
@@ -1581,6 +1608,12 @@ make build-link   # fiso-link only
 make build-cli    # fiso CLI only
 ```
 
+### Build with Wasmer
+
+```bash
+make build-wasmer-all    # All Wasmer binaries (requires CGO)
+```
+
 ### Test
 
 ```bash
@@ -1664,6 +1697,10 @@ GitHub Actions runs on every push and PR to `main`:
 | **e2e-kafka-temporal** | Kafka → Temporal full pipeline E2E (6-service Docker Compose) |
 | **e2e-kafka-temporal-signal** | Kafka → Temporal signal mode E2E (6-service Docker Compose) |
 | **e2e-wasm** | WASM interceptor E2E test (Docker Compose) |
+| **e2e-wasmer-standalone** | Wasmer standalone app E2E test (Docker Compose) |
+| **e2e-flow-wasmer** | Flow + Wasmer E2E test (Docker Compose) |
+| **e2e-wasmer-link** | Link + Wasmer E2E test (Docker Compose) |
+| **e2e-wasmer-aio** | All-in-one Wasmer E2E test (Docker Compose) |
 | **e2e-operator** | CRD operator E2E test (kind cluster — CRD reconciliation, status updates) |
 | **cli-smoke** | `fiso init --defaults` + `fiso validate` smoke test |
 

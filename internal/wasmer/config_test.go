@@ -3,6 +3,8 @@
 package wasmer
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -144,6 +146,142 @@ func TestPortRange_Values(t *testing.T) {
 			}
 			if tt.pr.Max != tt.wantMax {
 				t.Errorf("Max = %d, want %d", tt.pr.Max, tt.wantMax)
+			}
+		})
+	}
+}
+
+func TestAppConfig_Validate(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "test.wasm")
+	if err := os.WriteFile(tmpFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		config  AppConfig
+		wantErr bool
+	}{
+		{
+			name:    "empty name",
+			config:  AppConfig{Module: tmpFile},
+			wantErr: true,
+		},
+		{
+			name:    "empty module",
+			config:  AppConfig{Name: "test"},
+			wantErr: true,
+		},
+		{
+			name:    "non-existent module",
+			config:  AppConfig{Name: "test", Module: "/nonexistent/path.wasm"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid port negative",
+			config:  AppConfig{Name: "test", Module: tmpFile, Port: -1},
+			wantErr: true,
+		},
+		{
+			name:    "invalid port too high",
+			config:  AppConfig{Name: "test", Module: tmpFile, Port: 70000},
+			wantErr: true,
+		},
+		{
+			name:    "negative memory",
+			config:  AppConfig{Name: "test", Module: tmpFile, MemoryMB: -1},
+			wantErr: true,
+		},
+		{
+			name:    "negative timeout",
+			config:  AppConfig{Name: "test", Module: tmpFile, Timeout: -1 * time.Second},
+			wantErr: true,
+		},
+		{
+			name:    "invalid execution mode",
+			config:  AppConfig{Name: "test", Module: tmpFile, Execution: "invalid"},
+			wantErr: true,
+		},
+		{
+			name:    "valid config",
+			config:  AppConfig{Name: "test", Module: tmpFile, Port: 8080},
+			wantErr: false,
+		},
+		{
+			name:    "valid execution modes",
+			config:  AppConfig{Name: "test", Module: tmpFile, Execution: ExecutionPerRequest},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestManagerConfig_Validate(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "test.wasm")
+	if err := os.WriteFile(tmpFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		config  ManagerConfig
+		wantErr bool
+	}{
+		{
+			name:    "empty config is valid",
+			config:  ManagerConfig{},
+			wantErr: false,
+		},
+		{
+			name: "valid config with apps",
+			config: ManagerConfig{
+				Apps: []AppConfig{{Name: "test", Module: tmpFile}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid app in list",
+			config: ManagerConfig{
+				Apps: []AppConfig{{Name: "", Module: tmpFile}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid port range min",
+			config: ManagerConfig{
+				DefaultPortRange: PortRange{Min: -1, Max: 100},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid port range max",
+			config: ManagerConfig{
+				DefaultPortRange: PortRange{Min: 0, Max: 70000},
+			},
+			wantErr: true,
+		},
+		{
+			name: "port range min greater than max",
+			config: ManagerConfig{
+				DefaultPortRange: PortRange{Min: 100, Max: 50},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

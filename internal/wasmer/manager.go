@@ -5,6 +5,7 @@ package wasmer
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -19,18 +20,19 @@ type Manager struct {
 	mu       sync.RWMutex
 	apps     map[string]*AppInstance
 	portPool *PortPool
-	logger   interface{} // TODO: use proper logger type
+	logger   *slog.Logger
 }
 
 // AppInstance represents a running Wasmer application.
 type AppInstance struct {
-	Name    string
-	Config  AppConfig
-	Runtime wasm.AppRuntime
-	Client  *http.Client
-	Addr    string
-	Health  HealthStatus
-	Started time.Time
+	Name       string
+	Config     AppConfig
+	Runtime    wasm.AppRuntime
+	Client     *http.Client
+	Addr       string
+	Health     HealthStatus
+	Started    time.Time
+	StopHealth chan struct{} `json:"-"` // Channel to stop health check goroutine
 }
 
 // HealthStatus represents the health of an app.
@@ -96,6 +98,33 @@ func NewManager() *Manager {
 	}
 }
 
+// NewManagerWithLogger creates a new Wasmer app manager with a custom logger.
+func NewManagerWithLogger(logger *slog.Logger) *Manager {
+	return &Manager{
+		apps:     make(map[string]*AppInstance),
+		portPool: NewPortPool(9000, 9999),
+		logger:   logger,
+	}
+}
+
+// SetLogger sets the logger for the manager.
+func (m *Manager) SetLogger(logger *slog.Logger) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logger = logger
+}
+
+// getLogger returns the configured logger or a default discard logger.
+func (m *Manager) getLogger() *slog.Logger {
+	if m.logger != nil {
+		return m.logger
+	}
+	// Return a no-op logger if none configured
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+}
+
 // StartApp launches a Wasmer app.
 func (m *Manager) StartApp(ctx context.Context, cfg AppConfig) error {
 	m.mu.Lock()
@@ -155,9 +184,13 @@ func (m *Manager) StartApp(ctx context.Context, cfg AppConfig) error {
 		return fmt.Errorf("start app: %w", err)
 	}
 
-	// Create HTTP client for the app
+	// Create HTTP client for the app with timeout
+	timeout := cfg.Timeout
+	if timeout == 0 {
+		timeout = 30 * time.Second // default timeout
+	}
 	client := &http.Client{
-		Timeout: cfg.Timeout,
+		Timeout: timeout,
 		Transport: &http.Transport{
 			MaxIdleConns:       10,
 			IdleConnTimeout:    30 * time.Second,
@@ -175,6 +208,13 @@ func (m *Manager) StartApp(ctx context.Context, cfg AppConfig) error {
 		Started: time.Now(),
 	}
 
+	// Start health check goroutine if configured
+	if cfg.HealthCheck != "" {
+		app := m.apps[cfg.Name]
+		app.StopHealth = make(chan struct{})
+		go m.healthCheckLoop(app)
+	}
+
 	return nil
 }
 
@@ -186,6 +226,11 @@ func (m *Manager) StopApp(ctx context.Context, name string) error {
 	app, exists := m.apps[name]
 	if !exists {
 		return fmt.Errorf("app %q not found", name)
+	}
+
+	// Stop health check goroutine if running
+	if app.StopHealth != nil {
+		close(app.StopHealth)
 	}
 
 	if err := app.Runtime.Stop(ctx); err != nil {
@@ -245,4 +290,77 @@ func extractPort(addr string) int {
 	var port int
 	fmt.Sscanf(addr, "127.0.0.1:%d", &port)
 	return port
+}
+
+// healthCheckLoop runs periodic health checks for an app.
+func (m *Manager) healthCheckLoop(app *AppInstance) {
+	interval := app.Config.HealthCheckInterval
+	if interval <= 0 {
+		interval = 10 * time.Second // default interval
+	}
+
+	logger := m.getLogger()
+	logger.Debug("starting health check loop", "app", app.Name, "interval", interval)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			m.checkHealth(app)
+		case <-app.StopHealth:
+			logger.Debug("stopping health check loop", "app", app.Name)
+			return
+		}
+	}
+}
+
+// checkHealth performs a single health check for an app.
+func (m *Manager) checkHealth(app *AppInstance) {
+	if app.Client == nil || app.Addr == "" {
+		return
+	}
+
+	url := fmt.Sprintf("http://%s%s", app.Addr, app.Config.HealthCheck)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		m.setAppHealth(app.Name, HealthUnhealthy)
+		return
+	}
+
+	resp, err := app.Client.Do(req)
+	if err != nil {
+		m.setAppHealth(app.Name, HealthUnhealthy)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		m.setAppHealth(app.Name, HealthHealthy)
+	} else {
+		m.setAppHealth(app.Name, HealthUnhealthy)
+	}
+}
+
+// setAppHealth updates the health status of an app.
+func (m *Manager) setAppHealth(name string, status HealthStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if app, ok := m.apps[name]; ok {
+		app.Health = status
+	}
+}
+
+// IsHealthy returns the health status of an app.
+func (m *Manager) IsHealthy(name string) (HealthStatus, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if app, ok := m.apps[name]; ok {
+		return app.Health, true
+	}
+	return HealthStopped, false
 }

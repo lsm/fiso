@@ -2,6 +2,8 @@ package wasm
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 )
 
@@ -94,4 +96,36 @@ type AppRuntime interface {
 type Factory interface {
 	Create(ctx context.Context, cfg Config) (Runtime, error)
 	CreateApp(ctx context.Context, cfg Config) (AppRuntime, error)
+}
+
+// Validate checks that the config is valid.
+func (c *Config) Validate() error {
+	switch c.Type {
+	case RuntimeWazero, RuntimeWasmer, "":
+		// valid
+	default:
+		return fmt.Errorf("unknown runtime type: %s", c.Type)
+	}
+	if c.ModulePath == "" {
+		return errors.New("module path is required")
+	}
+	if c.MemoryLimit < 0 {
+		return fmt.Errorf("memory limit must be non-negative: %d", c.MemoryLimit)
+	}
+	if c.Timeout < 0 {
+		return fmt.Errorf("timeout must be non-negative: %v", c.Timeout)
+	}
+	switch c.Execution {
+	case ExecutionPerRequest, ExecutionLongRunning, ExecutionPooled, "":
+		// valid
+	default:
+		return fmt.Errorf("invalid execution mode: %s", c.Execution)
+	}
+	switch c.ModuleType {
+	case ModuleTypeTransform, ModuleTypeApp, "":
+		// valid
+	default:
+		return fmt.Errorf("invalid module type: %s", c.ModuleType)
+	}
+	return nil
 }

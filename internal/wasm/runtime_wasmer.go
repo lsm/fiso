@@ -57,12 +57,26 @@ func NewWasmerRuntime(ctx context.Context, wasmBytes []byte, cfg Config) (*Wasme
 // Call invokes the WASM module with input and returns the output.
 // Uses WASI stdin/stdout for communication.
 func (w *WasmerRuntime) Call(ctx context.Context, input []byte) ([]byte, error) {
+	// Check for already-cancelled context before starting
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	w.mu.RLock()
 	if w.closed {
 		w.mu.RUnlock()
 		return nil, fmt.Errorf("runtime is closed")
 	}
 	w.mu.RUnlock()
+
+	// Apply timeout if configured
+	var cancel context.CancelFunc
+	if w.config.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, w.config.Timeout)
+		defer cancel()
+	}
 
 	// Create a fresh store and engine for this execution to ensure thread safety
 	// as Wasmer Store is not thread-safe.
@@ -130,29 +144,22 @@ func (w *WasmerRuntime) Call(ctx context.Context, input []byte) ([]byte, error) 
 	}
 	defer instance.Close()
 
-	// Apply timeout if configured
-	if w.config.Timeout > 0 {
-		ctx, cancel := context.WithTimeout(ctx, w.config.Timeout)
-		defer cancel()
+	// Execute in goroutine to support context cancellation
+	done := make(chan struct{})
+	var execErr error
+	var result []byte
 
-		done := make(chan struct{})
-		var execErr error
-		var result []byte
+	go func() {
+		defer close(done)
+		result, execErr = w.executeWasi(instance, wasiEnv)
+	}()
 
-		go func() {
-			defer close(done)
-			result, execErr = w.executeWasi(instance, wasiEnv)
-		}()
-
-		select {
-		case <-done:
-			return result, execErr
-		case <-ctx.Done():
-			return nil, fmt.Errorf("wasm execution timeout after %v", w.config.Timeout)
-		}
+	select {
+	case <-done:
+		return result, execErr
+	case <-ctx.Done():
+		return nil, fmt.Errorf("wasm execution cancelled: %w", ctx.Err())
 	}
-
-	return w.executeWasi(instance, wasiEnv)
 }
 
 // executeWasi runs the WASI start function and returns stdout.
