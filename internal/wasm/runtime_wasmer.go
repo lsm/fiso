@@ -100,7 +100,7 @@ func (w *WasmerRuntime) Call(ctx context.Context, input []byte) ([]byte, error) 
 	// This requires the guest module to check for --stdin-file argument
 	builder.MapDirectory("stdin", tmpDir)
 	builder.Argument("--stdin-file")
-	builder.Argument("/stdin/" + filepath.Base(stdinFile))
+	builder.Argument("stdin/" + filepath.Base(stdinFile))
 
 	// Add preopens from config
 	for alias, path := range w.config.Preopens {
