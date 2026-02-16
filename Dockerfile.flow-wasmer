@@ -12,9 +12,11 @@ WORKDIR /app
 
 COPY go.mod go.sum ./
 RUN go mod download
+RUN go mod download github.com/wasmerio/wasmer-go
 
 # Export libwasmer shared library for runtime image
-RUN cp "$(go env GOPATH)"/pkg/mod/github.com/wasmerio/wasmer-go@*/packaged/lib/linux-amd64/libwasmer.so /usr/local/lib/libwasmer.so
+RUN WASMER_DIR="$(go list -m -f '{{.Dir}}' github.com/wasmerio/wasmer-go)" && \
+    cp "$WASMER_DIR/packaged/lib/linux-amd64/libwasmer.so" /usr/local/lib/libwasmer.so
 
 COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -tags wasmer -o /bin/fiso-flow-wasmer ./cmd/fiso-flow-wasmer
