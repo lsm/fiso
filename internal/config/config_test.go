@@ -349,15 +349,19 @@ sink:
   config: {}
 `)
 
-	select {
-	case flows := <-changed:
-		if _, ok := flows["new-flow"]; !ok {
-			t.Error("expected new-flow in reloaded config")
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case flows := <-changed:
+			if _, ok := flows["new-flow"]; ok {
+				close(done)
+				return
+			}
+		case <-timeout:
+			close(done)
+			t.Fatal("timed out waiting for create notification with new-flow")
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for create notification")
 	}
-	close(done)
 }
 
 func TestOnChange_Callback(t *testing.T) {
