@@ -129,6 +129,10 @@ func (m *Manager) StartApp(ctx context.Context, cfg AppConfig) error {
 		Env:        cfg.Env,
 		Preopens:   cfg.Preopens,
 	}
+	if runtimeCfg.Env == nil {
+		runtimeCfg.Env = make(map[string]string)
+	}
+	runtimeCfg.Env["PORT"] = fmt.Sprintf("%d", port)
 	if cfg.MemoryMB > 0 {
 		runtimeCfg.MemoryLimit = cfg.MemoryMB * 1024 * 1024
 	}
