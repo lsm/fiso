@@ -717,7 +717,7 @@ func TestRegistry_CreateWASMInterceptor_ModuleNotString(t *testing.T) {
 
 func TestRegistry_Load_WithValidWASMModule(t *testing.T) {
 	// Skip if the test WASM module doesn't exist
-	wasmPath := "../interceptor/wasm/testdata/partial-output/module.wasm"
+	wasmPath := "../../interceptor/wasm/testdata/partial-output/module.wasm"
 	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
 		t.Skip("test WASM module not found")
 	}
@@ -761,7 +761,7 @@ func TestRegistry_Load_WithValidWASMModule(t *testing.T) {
 
 func TestRegistry_Load_WithValidWASMModuleInbound(t *testing.T) {
 	// Skip if the test WASM module doesn't exist
-	wasmPath := "../interceptor/wasm/testdata/partial-output/module.wasm"
+	wasmPath := "../../interceptor/wasm/testdata/partial-output/module.wasm"
 	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
 		t.Skip("test WASM module not found")
 	}
@@ -808,7 +808,7 @@ func TestRegistry_Load_WithValidWASMModuleInbound(t *testing.T) {
 
 func TestRegistry_Load_WithMultipleInterceptors(t *testing.T) {
 	// Skip if the test WASM module doesn't exist
-	wasmPath := "../interceptor/wasm/testdata/partial-output/module.wasm"
+	wasmPath := "../../interceptor/wasm/testdata/partial-output/module.wasm"
 	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
 		t.Skip("test WASM module not found")
 	}
@@ -933,7 +933,7 @@ func (e *errorClosingInterceptor) Close() error {
 
 func TestRegistry_Load_PhaseAsString(t *testing.T) {
 	// Skip if the test WASM module doesn't exist
-	wasmPath := "../interceptor/wasm/testdata/partial-output/module.wasm"
+	wasmPath := "../../interceptor/wasm/testdata/partial-output/module.wasm"
 	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
 		t.Skip("test WASM module not found")
 	}
@@ -975,7 +975,7 @@ func TestRegistry_Load_PhaseAsString(t *testing.T) {
 
 func TestRegistry_Load_MultipleBuildChainsForTarget(t *testing.T) {
 	// Skip if the test WASM module doesn't exist
-	wasmPath := "../interceptor/wasm/testdata/partial-output/module.wasm"
+	wasmPath := "../../interceptor/wasm/testdata/partial-output/module.wasm"
 	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
 		t.Skip("test WASM module not found")
 	}
