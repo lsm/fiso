@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -170,6 +171,11 @@ func (w *WasmerRuntime) executeWasi(instance *wasmer.Instance, wasiEnv *wasmer.W
 	stderr := wasiEnv.ReadStderr()
 
 	if err != nil {
+		// wasmer-go reports process termination as an error even for successful
+		// WASI exit code 0. Treat that case as success.
+		if strings.Contains(err.Error(), "WASI exited with code: 0") {
+			return stdout, nil
+		}
 		if len(stderr) > 0 {
 			return stdout, fmt.Errorf("wasm execution: %w, stderr: %s", err, string(stderr))
 		}
