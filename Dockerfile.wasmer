@@ -13,6 +13,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
+# Export libwasmer shared library for runtime image
+RUN cp "$(go env GOPATH)"/pkg/mod/github.com/wasmerio/wasmer-go@*/packaged/lib/linux-amd64/libwasmer.so /usr/local/lib/libwasmer.so
+
 COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -tags wasmer -o /bin/fiso-wasmer ./cmd/fiso-wasmer
 
@@ -26,6 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /bin/fiso-wasmer /usr/local/bin/fiso-wasmer
+COPY --from=builder /usr/local/lib/libwasmer.so /usr/local/lib/libwasmer.so
+RUN ldconfig
 
 RUN useradd -m -u 1000 fiso
 USER fiso
