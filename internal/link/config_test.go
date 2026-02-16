@@ -1162,3 +1162,51 @@ targets:
 		t.Errorf("expected jitter 0.0 for non-numeric value, got %f", cfg.Targets[0].Retry.Jitter)
 	}
 }
+
+func TestLoadConfig_PortAndBasePath(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	data := `
+listenAddr: ":3500"
+targets:
+  - name: svc
+    protocol: http
+    host: api.example.com
+    port: 8080
+    basePath: /api
+`
+	if err := os.WriteFile(cfgFile, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Targets[0].Port != 8080 {
+		t.Errorf("expected port 8080, got %d", cfg.Targets[0].Port)
+	}
+	if cfg.Targets[0].BasePath != "/api" {
+		t.Errorf("expected basePath /api, got %q", cfg.Targets[0].BasePath)
+	}
+}
+
+func TestValidate_InvalidPort(t *testing.T) {
+	cfg := &Config{
+		Targets: []LinkTarget{{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     "api.example.com",
+			Port:     70000,
+		}},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for invalid port")
+	}
+	if !strings.Contains(err.Error(), "port must be between 0 and 65535") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

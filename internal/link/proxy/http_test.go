@@ -963,3 +963,35 @@ func TestProxy_InboundInterceptorError(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 }
+
+func TestJoinUpstreamPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		basePath string
+		proxy    string
+		want     string
+	}{
+		{name: "no base path", basePath: "", proxy: "/x", want: "/x"},
+		{name: "base path with route", basePath: "/api", proxy: "/x", want: "/api/x"},
+		{name: "base path root route", basePath: "/api", proxy: "/", want: "/api"},
+		{name: "non-slash proxy", basePath: "/api", proxy: "x", want: "/api/x"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinUpstreamPath(tt.basePath, tt.proxy)
+			if got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestHasExplicitPort(t *testing.T) {
+	if !hasExplicitPort("example.com:8080") {
+		t.Fatal("expected explicit port to be detected")
+	}
+	if hasExplicitPort("example.com") {
+		t.Fatal("did not expect port for bare host")
+	}
+}
