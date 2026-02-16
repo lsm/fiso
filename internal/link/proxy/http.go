@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"path"
 	"strconv"
@@ -270,7 +271,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if scheme == "" {
 		scheme = "https"
 	}
-	upstreamURL := fmt.Sprintf("%s://%s%s", scheme, resolvedHost, proxyPath)
+
+	upstreamHost := resolvedHost
+	if target.Port > 0 && !hasExplicitPort(resolvedHost) {
+		upstreamHost = fmt.Sprintf("%s:%d", resolvedHost, target.Port)
+	}
+
+	upstreamPath := joinUpstreamPath(target.BasePath, proxyPath)
+	upstreamURL := fmt.Sprintf("%s://%s%s", scheme, upstreamHost, upstreamPath)
 	if r.URL.RawQuery != "" {
 		upstreamURL += "?" + r.URL.RawQuery
 	}
@@ -480,4 +488,43 @@ func (h *Handler) buildRetryConfig(target *link.LinkTarget) retry.Config {
 		cfg.MaxInterval = d
 	}
 	return cfg
+}
+
+func hasExplicitPort(host string) bool {
+	if strings.HasPrefix(host, "[") {
+		_, _, err := net.SplitHostPort(host)
+		return err == nil
+	}
+
+	if strings.Count(host, ":") == 0 {
+		return false
+	}
+	if strings.Count(host, ":") == 1 {
+		_, _, err := net.SplitHostPort(host)
+		return err == nil
+	}
+
+	// Raw IPv6 literal without brackets.
+	return false
+}
+
+func joinUpstreamPath(basePath, proxyPath string) string {
+	if proxyPath == "" {
+		proxyPath = "/"
+	}
+	if !strings.HasPrefix(proxyPath, "/") {
+		proxyPath = "/" + proxyPath
+	}
+
+	if basePath == "" || basePath == "/" {
+		return proxyPath
+	}
+	if !strings.HasPrefix(basePath, "/") {
+		basePath = "/" + basePath
+	}
+
+	if proxyPath == "/" {
+		return strings.TrimRight(basePath, "/")
+	}
+	return strings.TrimRight(basePath, "/") + "/" + strings.TrimLeft(proxyPath, "/")
 }

@@ -19,6 +19,8 @@ type LinkTarget struct {
 	Name           string               `yaml:"name"`
 	Protocol       string               `yaml:"protocol"` // http, https, grpc, kafka
 	Host           string               `yaml:"host"`
+	Port           int                  `yaml:"port,omitempty"`
+	BasePath       string               `yaml:"basePath,omitempty"`
 	Auth           AuthConfig           `yaml:"auth"`
 	CircuitBreaker CircuitBreakerConfig `yaml:"circuitBreaker"`
 	Retry          RetryConfig          `yaml:"retry"`
@@ -304,6 +306,9 @@ func (c *Config) Validate() error {
 		}
 		if t.Host == "" && t.Protocol != "kafka" {
 			errs = append(errs, fmt.Errorf("%s: host is required (except for kafka protocol)", prefix))
+		}
+		if t.Port < 0 || t.Port > 65535 {
+			errs = append(errs, fmt.Errorf("%s: port must be between 0 and 65535", prefix))
 		}
 
 		if t.Protocol != "" && !validProtocols[t.Protocol] {

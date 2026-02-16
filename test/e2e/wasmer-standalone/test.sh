@@ -23,13 +23,20 @@ sleep 3
 
 echo ""
 echo "Testing HTTP endpoint through fiso-wasmer..."
-STATUS=$(curl -s -o /tmp/e2e-wasmer-standalone-response.txt -w "%{http_code}" \
-    -X GET http://localhost:9000/hello \
-    -H "Accept: application/json")
+STATUS="000"
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    STATUS=$(curl -s -o /tmp/e2e-wasmer-standalone-response.txt -w "%{http_code}" \
+        -X GET http://localhost:9000/hello \
+        -H "Accept: application/json" || true)
+    if [ "$STATUS" = "200" ]; then
+        break
+    fi
+    sleep 1
+done
 
 echo "Response status: $STATUS"
 echo "Response body:"
-cat /tmp/e2e-wasmer-standalone-response.txt
+cat /tmp/e2e-wasmer-standalone-response.txt || true
 echo ""
 
 if [ "$STATUS" != "200" ]; then

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -66,6 +67,40 @@ func TestProxy_Success(t *testing.T) {
 	}
 	if w.Header().Get("X-Custom") != "value" {
 		t.Errorf("expected X-Custom header")
+	}
+}
+
+func TestProxy_UsesPortAndBasePath(t *testing.T) {
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	hostPort := strings.TrimPrefix(upstream.URL, "http://")
+	parts := strings.Split(hostPort, ":")
+	if len(parts) != 2 {
+		t.Fatalf("unexpected upstream URL: %s", upstream.URL)
+	}
+	port, err := strconv.Atoi(parts[1])
+	if err != nil {
+		t.Fatalf("parse upstream port: %v", err)
+	}
+
+	handler := setupProxy(t, upstream, []link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: parts[0], Port: port, BasePath: "/api"},
+	}, nil, nil)
+
+	req := httptest.NewRequest("GET", "/link/svc/process", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if gotPath != "/api/process" {
+		t.Errorf("expected upstream path /api/process, got %s", gotPath)
 	}
 }
 

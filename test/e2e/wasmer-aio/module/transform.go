@@ -39,7 +39,8 @@ func main() {
 	// Parse the original payload
 	var data map[string]interface{}
 	if err := json.Unmarshal(req.Payload, &data); err != nil {
-		os.Exit(1)
+		// Fall back to pass-through envelope to avoid hard-failing on non-object payloads
+		data = map[string]interface{}{"raw": string(req.Payload)}
 	}
 
 	// AIO-specific enrichment
