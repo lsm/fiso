@@ -7,13 +7,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/lsm/fiso/internal/interceptor"
 	wasminterceptor "github.com/lsm/fiso/internal/interceptor/wasm"
 	"github.com/lsm/fiso/internal/link"
+	wasmruntime "github.com/lsm/fiso/internal/wasm"
 )
 
 // Phase indicates when an interceptor should run.
@@ -157,14 +157,40 @@ func (r *Registry) createWASMInterceptor(ctx context.Context, config map[string]
 		return nil, fmt.Errorf("interceptor[%d]: wasm config missing 'module' field", index)
 	}
 
-	// Read WASM module from file
-	wasmBytes, err := os.ReadFile(modulePath)
-	if err != nil {
-		return nil, fmt.Errorf("interceptor[%d]: read wasm module %q: %w", index, modulePath, err)
+	// Extract runtime type (default to wazero)
+	runtimeType := wasmruntime.RuntimeWazero
+	if typeVal, ok := config["runtime"].(string); ok {
+		runtimeType = wasmruntime.RuntimeType(typeVal)
 	}
 
-	// Create wazero runtime
-	runtime, err := wasminterceptor.NewWazeroRuntime(ctx, wasmBytes)
+	// Extract env vars
+	env := make(map[string]string)
+	if envMap, ok := config["env"].(map[string]interface{}); ok {
+		for k, v := range envMap {
+			if strVal, ok := v.(string); ok {
+				env[k] = strVal
+			}
+		}
+	}
+
+	// Extract preopens
+	preopens := make(map[string]string)
+	if preopensMap, ok := config["preopens"].(map[string]interface{}); ok {
+		for k, v := range preopensMap {
+			if strVal, ok := v.(string); ok {
+				preopens[k] = strVal
+			}
+		}
+	}
+
+	// Create runtime via factory
+	factory := wasmruntime.NewFactory()
+	runtime, err := factory.Create(ctx, wasmruntime.Config{
+		Type:       runtimeType,
+		ModulePath: modulePath,
+		Env:        env,
+		Preopens:   preopens,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("interceptor[%d]: create wasm runtime for %q: %w", index, modulePath, err)
 	}
