@@ -3,114 +3,86 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
+	"io"
 	"os"
 	"sync/atomic"
 	"time"
 )
 
-type ProcessResponse struct {
-	Processor  string `json:"processor"`
-	RequestID  string `json:"request_id"`
-	Count      int64  `json:"count"`
-	Timestamp  string `json:"timestamp"`
-	Health     string `json:"health"`
-	AppVersion string `json:"app_version"`
+type AppRequest struct {
+	Method string          `json:"method"`
+	Path   string          `json:"path"`
+	Body   json.RawMessage `json:"body,omitempty"`
 }
 
-type HealthResponse struct {
-	Status    string `json:"status"`
-	Uptime    string `json:"uptime"`
-	Processed int64  `json:"processed"`
+type AppResponse struct {
+	Status   int               `json:"status"`
+	Headers  map[string]string `json:"headers,omitempty"`
+	Body     interface{}       `json:"body,omitempty"`
+	BodyText string            `json:"bodyText,omitempty"`
 }
 
-var (
-	requestCount atomic.Int64
-	startTime    time.Time
-	appName      string
-)
+var count atomic.Int64
 
 func main() {
-	appName = os.Getenv("APP_NAME")
+	var in []byte
+	var err error
+
+	if path, ok := stdinFileArg(os.Args); ok {
+		in, err = os.ReadFile(path)
+	} else {
+		in, err = io.ReadAll(os.Stdin)
+	}
+	if err != nil {
+		os.Exit(1)
+	}
+
+	var req AppRequest
+	if err := json.Unmarshal(in, &req); err != nil {
+		os.Exit(1)
+	}
+
+	appName := os.Getenv("APP_NAME")
 	if appName == "" {
 		appName = "processor"
 	}
-	startTime = time.Now()
 
-	log.Printf("Wasmer processor app starting: %s", appName)
+	resp := AppResponse{Status: 200, Headers: map[string]string{"Content-Type": "application/json"}}
 
-	// GET /process - main processing endpoint
-	http.HandleFunc("/process", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
+	switch {
+	case req.Path == "/process" && (req.Method == "GET" || req.Method == "POST"):
+		n := count.Add(1)
+		resp.Body = map[string]interface{}{
+			"processor":   appName,
+			"request_id":  fmt.Sprintf("req-%d", n),
+			"count":       n,
+			"timestamp":   time.Now().UTC().Format(time.RFC3339),
+			"health":      "ok",
+			"app_version": "2.0.0-aio",
 		}
-
-		count := requestCount.Add(1)
-		log.Printf("/process request #%d", count)
-
-		requestID := r.Header.Get("X-Request-ID")
-		if requestID == "" {
-			requestID = fmt.Sprintf("req-%d", count)
-		}
-
-		resp := ProcessResponse{
-			Processor:  appName,
-			RequestID:  requestID,
-			Count:      count,
-			Timestamp:  time.Now().UTC().Format(time.RFC3339),
-			Health:     "ok",
-			AppVersion: "1.0.0-aio",
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Processor-Name", appName)
-		json.NewEncoder(w).Encode(resp)
-	})
-
-	// GET /health - health check
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		uptime := time.Since(startTime).String()
-		resp := HealthResponse{
-			Status:    "healthy",
-			Uptime:    uptime,
-			Processed: requestCount.Load(),
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-	})
-
-	// GET /metrics - simple metrics
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		fmt.Fprintf(w, "# HELP processor_requests_total Total requests processed\n")
-		fmt.Fprintf(w, "# TYPE processor_requests_total counter\n")
-		fmt.Fprintf(w, "processor_requests_total{app=\"%s\"} %d\n", appName, requestCount.Load())
-	})
-
-	// Default handler
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		fmt.Fprintf(w, "fiso-wasmer-aio processor\n")
-	})
-
-	addr := ":9000"
-	log.Printf("processor listening on %s", addr)
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Fatalf("server error: %v", err)
+	case req.Path == "/health" && req.Method == "GET":
+		resp.Body = map[string]interface{}{"status": "healthy", "processed": count.Load()}
+	case req.Path == "/metrics" && req.Method == "GET":
+		resp.Headers["Content-Type"] = "text/plain; version=0.0.4"
+		resp.BodyText = fmt.Sprintf("# HELP processor_requests_total Total requests processed\n# TYPE processor_requests_total counter\nprocessor_requests_total{app=\"%s\"} %d\n", appName, count.Load())
+	case req.Path == "/" && req.Method == "GET":
+		resp.Headers["Content-Type"] = "text/plain"
+		resp.BodyText = "fiso-wasmer-aio processor\n"
+	default:
+		resp.Status = 404
+		resp.Body = map[string]interface{}{"error": "not found", "path": req.Path}
 	}
+
+	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
+		os.Exit(1)
+	}
+}
+
+func stdinFileArg(args []string) (string, bool) {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--stdin-file" {
+			return args[i+1], true
+		}
+	}
+	return "", false
 }

@@ -4,51 +4,60 @@ package wasm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"strconv"
 	"sync"
-	"time"
-
-	wasmer "github.com/wasmerio/wasmer-go/wasmer"
 )
 
-// WasmerAppRuntime implements AppRuntime for long-running WASIX applications.
+// WasmerAppRuntime implements AppRuntime for long-running HTTP applications.
+//
+// NOTE: wasmer-go v1.0.4 doesn't expose WASIX socket imports (e.g. sock_accept),
+// so Go WASI modules that call net/http directly cannot be instantiated in-process.
+// To support app-mode semantics reliably, we run a host HTTP server and invoke the
+// WASM module per request via the stdin/stdout JSON ABI.
 type WasmerAppRuntime struct {
-	mu       sync.Mutex
-	config   Config
-	instance *wasmer.Instance
-	wasiEnv  *wasmer.WasiEnvironment
-	store    *wasmer.Store
-	module   *wasmer.Module
-	addr     string
-	cancel   context.CancelFunc
-	running  bool
-	exited   chan error
+	mu      sync.Mutex
+	config  Config
+	runner  *WasmerRuntime
+	server  *http.Server
+	ln      net.Listener
+	addr    string
+	running bool
 }
 
-// NewWasmerAppRuntime creates a new Wasmer app runtime for long-running applications.
+type appRequest struct {
+	Method  string            `json:"method"`
+	Path    string            `json:"path"`
+	Query   string            `json:"query,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    json.RawMessage   `json:"body,omitempty"`
+}
+
+type appResponse struct {
+	Status   int               `json:"status,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
+	Body     json.RawMessage   `json:"body,omitempty"`
+	BodyText string            `json:"bodyText,omitempty"`
+}
+
+// NewWasmerAppRuntime creates a new Wasmer app runtime.
 func NewWasmerAppRuntime(ctx context.Context, wasmBytes []byte, cfg Config) (*WasmerAppRuntime, error) {
-	config := wasmer.NewConfig()
-	config.UseCraneliftCompiler()
-	config.UseUniversalEngine()
-
-	engine := wasmer.NewEngineWithConfig(config)
-	store := wasmer.NewStore(engine)
-
-	module, err := wasmer.NewModule(store, wasmBytes)
+	runner, err := NewWasmerRuntime(ctx, wasmBytes, cfg)
 	if err != nil {
-		store.Close()
-		return nil, fmt.Errorf("compile wasm module: %w", err)
+		return nil, fmt.Errorf("create wasmer runner: %w", err)
 	}
 
 	return &WasmerAppRuntime{
 		config: cfg,
-		store:  store,
-		module: module,
-		exited: make(chan error, 1),
+		runner: runner,
 	}, nil
 }
 
-// Start launches the app as a long-running process.
+// Start launches the app as a long-running HTTP endpoint.
 func (w *WasmerAppRuntime) Start(ctx context.Context) (string, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -57,85 +66,117 @@ func (w *WasmerAppRuntime) Start(ctx context.Context) (string, error) {
 		return w.addr, fmt.Errorf("app already running")
 	}
 
-	// Create a cancelable context for the app lifecycle
-	ctx, cancel := context.WithCancel(context.Background())
-	w.cancel = cancel
-
-	// Build WASI environment
-	builder := wasmer.NewWasiStateBuilder(w.config.ModulePath)
-
-	// Add environment variables
-	for key, value := range w.config.Env {
-		builder.Environment(key, value)
+	port := w.config.Env["PORT"]
+	if port == "" {
+		port = "80"
+	}
+	if _, err := strconv.Atoi(port); err != nil {
+		return "", fmt.Errorf("invalid PORT %q: %w", port, err)
 	}
 
-	// Add preopens
-	for alias, path := range w.config.Preopens {
-		builder.MapDirectory(alias, path)
-	}
-
-	// WASIX networking is enabled by default in wasmer-go?
-	// Note: wasmer-go's WasiStateBuilder doesn't seem to have explicit "EnableNetworking" methods exposed in the easy API,
-	// but it inherits host capabilities.
-
-	// Inherit stdio for logs
-	builder.InheritStdout()
-	builder.InheritStderr()
-
-	wasiEnv, err := builder.Finalize()
+	listenAddr := "0.0.0.0:" + port
+	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		return "", fmt.Errorf("create wasi environment: %w", err)
-	}
-	w.wasiEnv = wasiEnv
-
-	importObject, err := wasiEnv.GenerateImportObject(w.store, w.module)
-	if err != nil {
-		return "", fmt.Errorf("generate imports: %w", err)
+		return "", fmt.Errorf("listen on %s: %w", listenAddr, err)
 	}
 
-	instance, err := wasmer.NewInstance(w.module, importObject)
-	if err != nil {
-		return "", fmt.Errorf("instantiate module: %w", err)
-	}
-	w.instance = instance
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", w.handleHTTP)
 
-	// Run _start in a goroutine
+	w.server = &http.Server{Handler: mux}
+	w.ln = ln
+	w.addr = "127.0.0.1:" + port
+	w.running = true
+
 	go func() {
-		start, err := instance.Exports.GetWasiStartFunction()
-		if err != nil {
-			w.exited <- fmt.Errorf("get start function: %w", err)
-			return
-		}
-
-		// Run the module
-		// This blocks until the module exits
-		_, err = start()
-		if err != nil {
-			// Check if it's a clean exit or error
-			w.exited <- err
-		} else {
-			w.exited <- nil
-		}
-
-		// When it exits, mark as not running
+		_ = w.server.Serve(ln)
 		w.mu.Lock()
 		w.running = false
 		w.mu.Unlock()
 	}()
 
-	// Wait a bit to ensure it starts up (rudimentary health check)
-	// Real implementation should probably probe the port
-	time.Sleep(100 * time.Millisecond)
-
-	// Determine address based on PORT env
-	port := w.config.Env["PORT"]
-	if port == "" {
-		port = "80" // default fallback
-	}
-	w.addr = "127.0.0.1:" + port
-	w.running = true
-
 	return w.addr, nil
+}
+
+func (w *WasmerAppRuntime) handleHTTP(rw http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	var body []byte
+	if req.Body != nil {
+		defer req.Body.Close()
+		b, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(rw, fmt.Sprintf("read body: %v", err), http.StatusBadRequest)
+			return
+		}
+		body = b
+	}
+
+	headers := make(map[string]string, len(req.Header))
+	for k, v := range req.Header {
+		if len(v) > 0 {
+			headers[k] = v[0]
+		}
+	}
+
+	payload := appRequest{
+		Method:  req.Method,
+		Path:    req.URL.Path,
+		Query:   req.URL.RawQuery,
+		Headers: headers,
+	}
+	if len(body) > 0 {
+		if json.Valid(body) {
+			payload.Body = body
+		} else {
+			wrapped, _ := json.Marshal(string(body))
+			payload.Body = wrapped
+		}
+	}
+
+	in, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(rw, fmt.Sprintf("marshal request: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	out, err := w.runner.Call(ctx, in)
+	if err != nil {
+		http.Error(rw, fmt.Sprintf("wasm execution: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	var resp appResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		http.Error(rw, fmt.Sprintf("decode wasm response: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	status := resp.Status
+	if status == 0 {
+		status = http.StatusOK
+	}
+
+	for k, v := range resp.Headers {
+		rw.Header().Set(k, v)
+	}
+	if rw.Header().Get("Content-Type") == "" && len(resp.BodyText) == 0 {
+		rw.Header().Set("Content-Type", "application/json")
+	}
+
+	rw.WriteHeader(status)
+
+	if len(resp.BodyText) > 0 {
+		_, _ = rw.Write([]byte(resp.BodyText))
+		return
+	}
+
+	if len(resp.Body) > 0 {
+		_, _ = rw.Write(resp.Body)
+		return
+	}
+
+	_, _ = rw.Write([]byte("{}"))
 }
 
 // Stop gracefully shuts down the app.
@@ -147,21 +188,19 @@ func (w *WasmerAppRuntime) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	// Cancel context (if we used it to pass to the runtime, but we didn't)
-	if w.cancel != nil {
-		w.cancel()
+	if w.server != nil {
+		if err := w.server.Shutdown(ctx); err != nil {
+			return fmt.Errorf("shutdown app server: %w", err)
+		}
 	}
-
-	// We can't force kill a running WASM thread easily in wasmer-go v1.0.4
-	// without destroying the store/instance.
-	// But Close() will do that.
-
 	w.running = false
 	return nil
 }
 
 // Addr returns the HTTP address.
 func (w *WasmerAppRuntime) Addr() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.addr
 }
 
@@ -172,29 +211,17 @@ func (w *WasmerAppRuntime) IsRunning() bool {
 	return w.running
 }
 
-// Call invokes the app (for AppRuntime interface compliance).
-// For AppRuntime, this is not used as we use HTTP proxying.
+// Call invokes the app (for interface compliance).
 func (w *WasmerAppRuntime) Call(ctx context.Context, input []byte) ([]byte, error) {
-	return nil, fmt.Errorf("direct call not supported for app runtime, use HTTP")
+	return w.runner.Call(ctx, input)
 }
 
 // Close releases resources.
 func (w *WasmerAppRuntime) Close() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.cancel != nil {
-		w.cancel()
+	_ = w.Stop(context.Background())
+	if w.runner != nil {
+		return w.runner.Close()
 	}
-
-	if w.module != nil {
-		w.module.Close()
-	}
-	if w.store != nil {
-		w.store.Close()
-	}
-
-	w.running = false
 	return nil
 }
 

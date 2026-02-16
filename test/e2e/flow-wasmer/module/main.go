@@ -22,8 +22,8 @@ func main() {
 	var input []byte
 	var err error
 
-	if len(os.Args) > 2 && os.Args[1] == "--stdin-file" {
-		input, err = os.ReadFile(os.Args[2])
+	if path, ok := stdinFileArg(os.Args); ok {
+		input, err = os.ReadFile(path)
 	} else {
 		input, err = io.ReadAll(os.Stdin)
 	}
@@ -78,4 +78,13 @@ func main() {
 	if err := json.NewEncoder(os.Stdout).Encode(output); err != nil {
 		os.Exit(1)
 	}
+}
+
+func stdinFileArg(args []string) (string, bool) {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--stdin-file" {
+			return args[i+1], true
+		}
+	}
+	return "", false
 }

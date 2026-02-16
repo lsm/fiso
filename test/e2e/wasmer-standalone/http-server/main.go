@@ -2,17 +2,20 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
-	"log"
-	"net/http"
 	"os"
 )
 
-type HelloResponse struct {
-	Greeting string `json:"greeting"`
-	Server   string `json:"server"`
-	Version  string `json:"version"`
+type AppRequest struct {
+	Method string          `json:"method"`
+	Path   string          `json:"path"`
+	Body   json.RawMessage `json:"body,omitempty"`
+}
+
+type AppResponse struct {
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    interface{}       `json:"body,omitempty"`
 }
 
 type EchoRequest struct {
@@ -20,102 +23,63 @@ type EchoRequest struct {
 	Count   int    `json:"count"`
 }
 
-type EchoResponse struct {
-	Received EchoRequest `json:"received"`
-	Echoed   bool        `json:"echoed"`
-	Server   string      `json:"server"`
-}
-
-type HealthResponse struct {
-	Status string `json:"status"`
-	Uptime string `json:"uptime"`
-}
-
-var startTime string
-
 func main() {
+	var in []byte
+	var err error
+
+	if path, ok := stdinFileArg(os.Args); ok {
+		in, err = os.ReadFile(path)
+	} else {
+		in, err = io.ReadAll(os.Stdin)
+	}
+	if err != nil {
+		os.Exit(1)
+	}
+
+	var req AppRequest
+	if err := json.Unmarshal(in, &req); err != nil {
+		os.Exit(1)
+	}
+
 	serverName := os.Getenv("SERVER_NAME")
 	if serverName == "" {
-		serverName = "fiso-wasmer"
+		serverName = "fiso-wasmer-e2e"
 	}
-	startTime = "0s"
 
-	log.Printf("HTTP server starting, name=%s", serverName)
+	resp := AppResponse{Status: 200, Headers: map[string]string{"Content-Type": "application/json"}}
 
-	// GET /hello - greeting endpoint
-	http.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
+	switch {
+	case req.Method == "GET" && req.Path == "/hello":
+		resp.Body = map[string]interface{}{
+			"greeting": "Hello from Wasmer app-mode!",
+			"server":   serverName,
+			"version":  "2.0.0",
 		}
-		log.Printf("GET /hello from %s", r.RemoteAddr)
-
-		resp := HelloResponse{
-			Greeting: "Hello from WASIX!",
-			Server:   serverName,
-			Version:  "1.0.0",
+	case req.Method == "POST" && req.Path == "/echo":
+		var er EchoRequest
+		_ = json.Unmarshal(req.Body, &er)
+		resp.Body = map[string]interface{}{
+			"received": er,
+			"echoed":   true,
+			"server":   serverName,
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-	})
-
-	// POST /echo - echo endpoint
-	http.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		var req EchoRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		log.Printf("POST /echo: message=%s count=%d", req.Message, req.Count)
-
-		resp := EchoResponse{
-			Received: req,
-			Echoed:   true,
-			Server:   serverName,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-	})
-
-	// GET /health - health check endpoint
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		resp := HealthResponse{
-			Status: "healthy",
-			Uptime: startTime,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-	})
-
-	// Default handler
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		fmt.Fprintf(w, "fiso-wasmer HTTP server\n")
-	})
-
-	addr := ":9000"
-	log.Printf("server listening on %s", addr)
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Fatalf("server error: %v", err)
+	case req.Method == "GET" && req.Path == "/health":
+		resp.Body = map[string]interface{}{"status": "healthy", "uptime": "ok"}
+	default:
+		resp.Status = 404
+		resp.Body = map[string]interface{}{"error": "not found", "path": req.Path}
 	}
+
+	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
+		os.Exit(1)
+	}
+}
+
+func stdinFileArg(args []string) (string, bool) {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--stdin-file" {
+			return args[i+1], true
+		}
+	}
+	return "", false
 }

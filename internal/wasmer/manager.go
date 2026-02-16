@@ -171,7 +171,7 @@ func (m *Manager) StartApp(ctx context.Context, cfg AppConfig) error {
 		Runtime: runtime,
 		Client:  client,
 		Addr:    addr,
-		Health:  HealthStarting,
+		Health:  HealthHealthy,
 		Started: time.Now(),
 	}
 
