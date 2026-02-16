@@ -1,8 +1,12 @@
-# Flow + Wasmer-enabled build (requires CGO/llvm)
-FROM golang:1.25-alpine AS builder
+# Flow + Wasmer-enabled build (requires CGO/glibc)
+FROM golang:1.25-bookworm AS builder
 
-# Install build dependencies for CGO/llvm (Wasmer requires CGO)
-RUN apk add --no-cache gcc musl-dev llvm-dev
+# Install build dependencies for CGO/llvm (Wasmer requires CGO + glibc)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    llvm-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -12,14 +16,18 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -tags wasmer -o /bin/fiso-flow-wasmer ./cmd/fiso-flow-wasmer
 
-FROM alpine:3.20
+FROM debian:bookworm-slim
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata libstdc++
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    tzdata \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /bin/fiso-flow-wasmer /usr/local/bin/fiso-flow-wasmer
 
-RUN adduser -D -u 1000 fiso
+RUN useradd -m -u 1000 fiso
 USER fiso
 
 EXPOSE 9090
