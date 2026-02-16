@@ -16,7 +16,7 @@ RUN go mod download github.com/wasmerio/wasmer-go
 
 # Export libwasmer shared library for runtime image
 RUN WASMER_DIR="$(go list -m -f '{{.Dir}}' github.com/wasmerio/wasmer-go)" && \
-    cp "$WASMER_DIR/packaged/lib/linux-amd64/libwasmer.so" /usr/local/lib/libwasmer.so
+    cp "$WASMER_DIR/wasmer/packaged/lib/linux-amd64/libwasmer.so" /usr/local/lib/libwasmer.so
 
 COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -tags wasmer -o /bin/fiso-flow-wasmer ./cmd/fiso-flow-wasmer
