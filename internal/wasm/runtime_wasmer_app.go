@@ -116,7 +116,7 @@ func (w *WasmerAppRuntime) Start(ctx context.Context) (string, error) {
 		} else {
 			w.exited <- nil
 		}
-		
+
 		// When it exits, mark as not running
 		w.mu.Lock()
 		w.running = false
@@ -155,7 +155,7 @@ func (w *WasmerAppRuntime) Stop(ctx context.Context) error {
 	// We can't force kill a running WASM thread easily in wasmer-go v1.0.4
 	// without destroying the store/instance.
 	// But Close() will do that.
-	
+
 	w.running = false
 	return nil
 }
@@ -186,14 +186,14 @@ func (w *WasmerAppRuntime) Close() error {
 	if w.cancel != nil {
 		w.cancel()
 	}
-	
+
 	if w.module != nil {
 		w.module.Close()
 	}
 	if w.store != nil {
 		w.store.Close()
 	}
-	
+
 	w.running = false
 	return nil
 }

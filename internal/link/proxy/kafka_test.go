@@ -738,6 +738,7 @@ func TestNewKafkaHandlerWithPool(t *testing.T) {
 	handler := NewKafkaHandlerWithPool(pool, store, nil, nil, nil, nil)
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
+		return
 	}
 	if handler.pool == nil {
 		t.Error("expected pool to be set")
@@ -756,6 +757,7 @@ func TestNewKafkaHandlerWithInterceptors(t *testing.T) {
 	handler := NewKafkaHandlerWithInterceptors(pool, store, nil, nil, nil, nil, nil)
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
+		return
 	}
 	if handler.pool == nil {
 		t.Error("expected pool to be set")
@@ -845,6 +847,7 @@ func TestKafkaHandler_NewKafkaHandler_NilLogger(t *testing.T) {
 	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
+		return
 	}
 	if handler.logger == nil {
 		t.Error("expected default logger when nil provided")
@@ -859,6 +862,7 @@ func TestKafkaHandler_NewKafkaHandlerWithPool_NilLogger(t *testing.T) {
 	handler := NewKafkaHandlerWithPool(pool, store, nil, nil, nil, nil)
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
+		return
 	}
 	if handler.logger == nil {
 		t.Error("expected default logger when nil provided")
@@ -873,6 +877,7 @@ func TestKafkaHandler_NewKafkaHandlerWithInterceptors_NilLogger(t *testing.T) {
 	handler := NewKafkaHandlerWithInterceptors(pool, store, nil, nil, nil, nil, nil)
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
+		return
 	}
 	if handler.logger == nil {
 		t.Error("expected default logger when nil provided")
@@ -895,7 +900,7 @@ func TestKafkaHandler_OutboundInterceptorError(t *testing.T) {
 	// Create interceptor registry with mock that returns error
 	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
 	// Pre-configure a mock chain that returns error
-	icRegistry.Close() // Clean up
+	_ = icRegistry.Close() // Clean up
 
 	// Create handler with interceptors
 	handler := &KafkaHandler{

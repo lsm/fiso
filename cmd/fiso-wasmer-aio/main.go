@@ -195,7 +195,7 @@ func run() error {
 			}
 			runners = append(runners, &flowRunner{name: name, pipeline: p})
 		}
-		
+
 		go func() {
 			if err := httpPool.Start(ctx); err != nil && err != context.Canceled {
 				logger.Error("http pool error", "error", err)
@@ -413,7 +413,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		httpSink, err := httpsink.NewSink(httpsink.Config{
 			URL:    sinkURL,
 			Method: sinkMethod,
-			Retry: httpsink.RetryConfig{MaxAttempts: flowDef.ErrorHandling.MaxRetries, InitialInterval: 200 * time.Millisecond, MaxInterval: 30 * time.Second},
+			Retry:  httpsink.RetryConfig{MaxAttempts: flowDef.ErrorHandling.MaxRetries, InitialInterval: 200 * time.Millisecond, MaxInterval: 30 * time.Second},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("http sink: %w", err)
@@ -472,7 +472,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 	}
 
 	cfg := pipeline.Config{FlowName: flowDef.Name, PropagateErrors: propagateErrors}
-	
+
 	// Interceptors
 	var chain *interceptor.Chain
 	if len(flowDef.Interceptors) > 0 {
@@ -482,19 +482,19 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 			case "wasm":
 				modulePath := getString(ic.Config, "module")
 				runtimeType := getString(ic.Config, "runtime") // read runtime type
-				
+
 				wasmCfg := wasmruntime.Config{
 					Type:       wasmruntime.RuntimeType(runtimeType),
 					ModulePath: modulePath,
 				}
-				
+
 				// Create runtime via factory to support both Wasmer and Wazero
 				factory := wasmruntime.NewFactory()
 				rt, err := factory.Create(context.Background(), wasmCfg)
 				if err != nil {
 					return nil, fmt.Errorf("wasm runtime for %s: %w", modulePath, err)
 				}
-				
+
 				interceptors = append(interceptors, wasm.New(rt, modulePath))
 			}
 		}

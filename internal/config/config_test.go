@@ -45,8 +45,8 @@ errorHandling:
 		t.Fatalf("expected 1 flow, got %d", len(flows))
 	}
 
-	flow := flows["order-events"]
-	if flow == nil {
+	flow, ok := flows["order-events"]
+	if !ok || flow == nil {
 		t.Fatal("expected flow 'order-events'")
 	}
 	if flow.Source.Type != "kafka" {
@@ -574,9 +574,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 		{
 			name: "wasm interceptor invalid runtime",
 			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
 				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
 					"module":  "/path/to/module.wasm",
 					"runtime": "invalid-runtime",
@@ -587,9 +587,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 		{
 			name: "wasm interceptor valid wazero runtime",
 			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
 				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
 					"module":  "/path/to/module.wasm",
 					"runtime": "wazero",
@@ -599,9 +599,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 		{
 			name: "wasm interceptor valid wasmer runtime",
 			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
 				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
 					"module":  "/path/to/module.wasm",
 					"runtime": "wasmer",
@@ -611,9 +611,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 		{
 			name: "wasmer-app interceptor valid",
 			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
 				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
 					"module": "/path/to/app.wasm",
 				}}},
@@ -632,9 +632,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 		{
 			name: "wasmer-app interceptor invalid execution mode",
 			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
 				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
 					"module":    "/path/to/app.wasm",
 					"execution": "invalid-mode",
@@ -645,9 +645,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 		{
 			name: "wasmer-app interceptor valid perRequest execution",
 			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
 				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
 					"module":    "/path/to/app.wasm",
 					"execution": "perRequest",
@@ -657,9 +657,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 		{
 			name: "wasmer-app interceptor valid longRunning execution",
 			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
 				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
 					"module":    "/path/to/app.wasm",
 					"execution": "longRunning",
@@ -669,9 +669,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 		{
 			name: "wasmer-app interceptor valid pooled execution",
 			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
 				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
 					"module":    "/path/to/app.wasm",
 					"execution": "pooled",
@@ -681,9 +681,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 		{
 			name: "grpc interceptor valid",
 			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
 				Interceptors: []InterceptorConfig{{Type: "grpc", Config: map[string]interface{}{
 					"endpoint": "localhost:9000",
 				}}},
@@ -692,9 +692,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 		{
 			name: "kafka sink valid",
 			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "kafka", Config: map[string]interface{}{"topic": "output"}},
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "kafka", Config: map[string]interface{}{"topic": "output"}},
 			},
 		},
 	}
@@ -740,8 +740,8 @@ sink:
 		t.Fatalf("load failed: %v", err)
 	}
 
-	flow := flows["ce-flow"]
-	if flow == nil {
+	flow, ok := flows["ce-flow"]
+	if !ok || flow == nil {
 		t.Fatal("expected flow 'ce-flow'")
 	}
 	if flow.CloudEvents == nil {
@@ -781,8 +781,8 @@ sink:
 		t.Fatalf("load failed: %v", err)
 	}
 
-	flow := flows["unified-flow"]
-	if flow == nil {
+	flow, ok := flows["unified-flow"]
+	if !ok || flow == nil {
 		t.Fatal("expected flow 'unified-flow'")
 	}
 	if flow.Transform == nil {

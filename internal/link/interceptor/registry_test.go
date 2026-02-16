@@ -970,7 +970,7 @@ func TestRegistry_Load_PhaseAsString(t *testing.T) {
 		t.Errorf("expected 1 outbound interceptor, got %d", chains.Outbound.Len())
 	}
 
-	r.Close()
+	_ = r.Close()
 }
 
 func TestRegistry_Load_MultipleBuildChainsForTarget(t *testing.T) {
@@ -1027,7 +1027,7 @@ func TestRegistry_Load_MultipleBuildChainsForTarget(t *testing.T) {
 		t.Error("expected target-b to have 1 inbound interceptor")
 	}
 
-	r.Close()
+	_ = r.Close()
 }
 
 func TestRegistry_CreateInterceptor_Index(t *testing.T) {

@@ -754,6 +754,7 @@ func TestProxy_NewHandlerDefaults(t *testing.T) {
 	handler := NewHandler(Config{Targets: store})
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
+		return
 	}
 	if handler.logger == nil {
 		t.Error("expected default logger")
@@ -805,7 +806,7 @@ func TestProxy_WithInterceptors(t *testing.T) {
 
 	// Create handler with interceptors
 	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
-	defer icRegistry.Close()
+	defer func() { _ = icRegistry.Close() }()
 
 	handler := NewHandler(Config{
 		Targets:      store,
@@ -840,7 +841,7 @@ func TestProxy_InterceptorError(t *testing.T) {
 
 	// Create interceptor registry
 	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
-	defer icRegistry.Close()
+	defer func() { _ = icRegistry.Close() }()
 
 	handler := NewHandler(Config{
 		Targets:      store,
@@ -874,7 +875,7 @@ func TestProxy_ReadRequestBodyError(t *testing.T) {
 	metrics := link.NewMetrics(reg)
 
 	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
-	defer icRegistry.Close()
+	defer func() { _ = icRegistry.Close() }()
 
 	handler := NewHandler(Config{
 		Targets:      store,
@@ -909,7 +910,7 @@ func TestProxy_InboundInterceptorError(t *testing.T) {
 	metrics := link.NewMetrics(reg)
 
 	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
-	defer icRegistry.Close()
+	defer func() { _ = icRegistry.Close() }()
 
 	handler := NewHandler(Config{
 		Targets:      store,
