@@ -10,7 +10,7 @@ source:
     cluster: main
     topic: test-events
     consumerGroup: fiso-kafka-e2e
-    startOffset: earliest
+    startOffset: 1
 sink:
   type: http
   config:
