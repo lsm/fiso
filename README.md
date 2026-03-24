@@ -253,7 +253,7 @@ Consumes events from sources, optionally transforms them using a unified fields-
 #### Sources
 
 - **HTTP** — Synchronous request-response ingestion. Listens on a configurable address and path, forwards events to the sink, and returns the sink's response to the caller.
-- **Kafka** — Consumer group-based consumption via [franz-go](https://github.com/twmb/franz-go). Supports `earliest`/`latest` start offset. At-least-once delivery with manual offset commits.
+- **Kafka** — Consumer group-based consumption via [franz-go](https://github.com/twmb/franz-go). Supports `earliest`/`latest` or an explicit numeric start offset (e.g. `231`). At-least-once delivery with manual offset commits.
 - **gRPC** — Streaming gRPC source for push-based event ingestion.
 
 #### Transform

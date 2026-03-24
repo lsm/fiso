@@ -347,7 +347,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 	case "kafka":
 		topic, _ := flowDef.Source.Config["topic"].(string)
 		consumerGroup, _ := flowDef.Source.Config["consumerGroup"].(string)
-		startOffset, _ := flowDef.Source.Config["startOffset"].(string)
+		startOffset := flowDef.Source.Config["startOffset"]
 		clusterName, ok := flowDef.Source.Config["cluster"].(string)
 		if !ok || clusterName == "" {
 			return nil, fmt.Errorf("source config: cluster name is required")

@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
+	"strconv"
+	"strings"
 
 	"github.com/lsm/fiso/internal/correlation"
 	"github.com/lsm/fiso/internal/kafka"
@@ -19,7 +22,7 @@ type Config struct {
 	Cluster       *kafka.ClusterConfig // Cluster config with auth/TLS (required)
 	Topic         string
 	ConsumerGroup string
-	StartOffset   string // "earliest" or "latest" (default: "latest")
+	StartOffset   any // "earliest", "latest", or non-negative numeric offset (default: "latest")
 }
 
 // consumer abstracts the kafka client methods used by Source for testing.
@@ -53,9 +56,9 @@ func NewSource(cfg Config, logger *slog.Logger) (*Source, error) {
 		logger = slog.Default()
 	}
 
-	offset := kgo.NewOffset().AtEnd()
-	if cfg.StartOffset == "earliest" {
-		offset = kgo.NewOffset().AtStart()
+	offset, err := resolveStartOffset(cfg.StartOffset)
+	if err != nil {
+		return nil, fmt.Errorf("invalid startOffset: %w", err)
 	}
 
 	opts, err := kafka.ClientOptions(cfg.Cluster)
@@ -82,6 +85,111 @@ func NewSource(cfg Config, logger *slog.Logger) (*Source, error) {
 		logger: logger,
 		tracer: noop.NewTracerProvider().Tracer("kafka-source"),
 	}, nil
+}
+
+func resolveStartOffset(raw any) (kgo.Offset, error) {
+	if raw == nil {
+		return kgo.NewOffset().AtEnd(), nil
+	}
+
+	if n, ok, err := parseNumericStartOffset(raw); ok || err != nil {
+		if err != nil {
+			return kgo.Offset{}, err
+		}
+		return kgo.NewOffset().At(n), nil
+	}
+
+	s, ok := raw.(string)
+	if !ok {
+		return kgo.Offset{}, fmt.Errorf("must be \"earliest\", \"latest\", or a non-negative integer (got %T)", raw)
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(s))
+	switch normalized {
+	case "", "latest":
+		return kgo.NewOffset().AtEnd(), nil
+	case "earliest":
+		return kgo.NewOffset().AtStart(), nil
+	default:
+		n, err := strconv.ParseInt(normalized, 10, 64)
+		if err != nil {
+			return kgo.Offset{}, fmt.Errorf("must be \"earliest\", \"latest\", or a non-negative integer (got %q)", s)
+		}
+		if n < 0 {
+			return kgo.Offset{}, fmt.Errorf("must be >= 0 when numeric (got %d)", n)
+		}
+		return kgo.NewOffset().At(n), nil
+	}
+}
+
+func parseNumericStartOffset(raw any) (offset int64, ok bool, err error) {
+	switch v := raw.(type) {
+	case int:
+		if v < 0 {
+			return 0, true, fmt.Errorf("must be >= 0 when numeric (got %d)", v)
+		}
+		return int64(v), true, nil
+	case int8:
+		if v < 0 {
+			return 0, true, fmt.Errorf("must be >= 0 when numeric (got %d)", v)
+		}
+		return int64(v), true, nil
+	case int16:
+		if v < 0 {
+			return 0, true, fmt.Errorf("must be >= 0 when numeric (got %d)", v)
+		}
+		return int64(v), true, nil
+	case int32:
+		if v < 0 {
+			return 0, true, fmt.Errorf("must be >= 0 when numeric (got %d)", v)
+		}
+		return int64(v), true, nil
+	case int64:
+		if v < 0 {
+			return 0, true, fmt.Errorf("must be >= 0 when numeric (got %d)", v)
+		}
+		return v, true, nil
+	case uint:
+		if uint64(v) > uint64(math.MaxInt64) {
+			return 0, true, fmt.Errorf("numeric startOffset overflows int64: %d", v)
+		}
+		return int64(v), true, nil
+	case uint8:
+		return int64(v), true, nil
+	case uint16:
+		return int64(v), true, nil
+	case uint32:
+		return int64(v), true, nil
+	case uint64:
+		if v > uint64(math.MaxInt64) {
+			return 0, true, fmt.Errorf("numeric startOffset overflows int64: %d", v)
+		}
+		return int64(v), true, nil
+	case float32:
+		if v < 0 {
+			return 0, true, fmt.Errorf("must be >= 0 when numeric (got %v)", v)
+		}
+		if math.Trunc(float64(v)) != float64(v) {
+			return 0, true, fmt.Errorf("must be an integer when numeric (got %v)", v)
+		}
+		if float64(v) > math.MaxInt64 {
+			return 0, true, fmt.Errorf("numeric startOffset overflows int64: %v", v)
+		}
+		return int64(v), true, nil
+	case float64:
+		if v < 0 {
+			return 0, true, fmt.Errorf("must be >= 0 when numeric (got %v)", v)
+		}
+		if math.Trunc(v) != v {
+			return 0, true, fmt.Errorf("must be an integer when numeric (got %v)", v)
+		}
+		if v > math.MaxInt64 {
+			return 0, true, fmt.Errorf("numeric startOffset overflows int64: %v", v)
+		}
+		return int64(v), true, nil
+	default:
+		return 0, false, nil
+	}
 }
 
 // SetTracer sets the tracer for the source.

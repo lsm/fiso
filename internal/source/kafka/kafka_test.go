@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -110,6 +111,77 @@ func TestNewSource_DefaultOffset(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	defer func() { _ = s.Close() }()
+}
+
+func TestNewSource_NumericStartOffset(t *testing.T) {
+	s, err := NewSource(Config{
+		Cluster:       testCluster(),
+		Topic:         "test-topic",
+		ConsumerGroup: "test-group",
+		StartOffset:   231,
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+}
+
+func TestNewSource_InvalidStartOffset(t *testing.T) {
+	_, err := NewSource(Config{
+		Cluster:       testCluster(),
+		Topic:         "test-topic",
+		ConsumerGroup: "test-group",
+		StartOffset:   "middle",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid startOffset")
+	}
+	if !strings.Contains(err.Error(), "invalid startOffset") {
+		t.Fatalf("expected invalid startOffset error, got: %v", err)
+	}
+}
+
+func TestResolveStartOffset(t *testing.T) {
+	tests := []struct {
+		name        string
+		in          any
+		want        int64
+		wantErrText string
+	}{
+		{name: "nil defaults to latest", in: nil, want: -1},
+		{name: "empty string defaults to latest", in: "", want: -1},
+		{name: "latest keyword", in: "latest", want: -1},
+		{name: "earliest keyword", in: "earliest", want: -2},
+		{name: "numeric int", in: 231, want: 231},
+		{name: "numeric string", in: "231", want: 231},
+		{name: "numeric float64 integer", in: float64(231), want: 231},
+		{name: "invalid text", in: "middle", wantErrText: "must be \"earliest\""},
+		{name: "negative int", in: -1, wantErrText: "must be >= 0"},
+		{name: "fractional float", in: 2.5, wantErrText: "must be an integer"},
+		{name: "invalid type", in: true, wantErrText: "got bool"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveStartOffset(tt.in)
+			if tt.wantErrText != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q", tt.wantErrText)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrText) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErrText, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.EpochOffset().Offset != tt.want {
+				t.Fatalf("expected offset %d, got %s", tt.want, got.String())
+			}
+		})
+	}
 }
 
 func TestSource_Close(t *testing.T) {
