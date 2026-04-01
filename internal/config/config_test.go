@@ -1564,3 +1564,41 @@ sink:
 		t.Fatal("Watch did not exit after done channel closed")
 	}
 }
+
+func TestFlowDefinition_Validate_InvalidCommitPolicy(t *testing.T) {
+	flow := FlowDefinition{
+		Name:   "bad-policy",
+		Source: SourceConfig{Type: "kafka"},
+		Sink:   SinkConfig{Type: "http"},
+		ErrorHandling: ErrorHandlingConfig{
+			CommitPolicy: "unknown",
+		},
+	}
+
+	err := flow.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "errorHandling.commitPolicy") {
+		t.Fatalf("expected commitPolicy validation error, got: %v", err)
+	}
+}
+
+func TestFlowDefinition_Validate_KafkaTransactionRequiresTransactionalID(t *testing.T) {
+	flow := FlowDefinition{
+		Name:   "tx-policy",
+		Source: SourceConfig{Type: "kafka"},
+		Sink:   SinkConfig{Type: "kafka"},
+		ErrorHandling: ErrorHandlingConfig{
+			CommitPolicy: "kafka_transaction",
+		},
+	}
+
+	err := flow.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "errorHandling.transactionalId") {
+		t.Fatalf("expected transactionalId validation error, got: %v", err)
+	}
+}

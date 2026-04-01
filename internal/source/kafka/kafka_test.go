@@ -330,6 +330,37 @@ func TestSource_Start_HandlerError(t *testing.T) {
 	}
 }
 
+func TestSource_Start_StopOnHandlerError_ReturnsError(t *testing.T) {
+	mc := &mockConsumer{
+		fetches: kgo.Fetches{{
+			Topics: []kgo.FetchTopic{{
+				Topic: "test-topic",
+				Partitions: []kgo.FetchPartition{{
+					Partition: 0,
+					Records: []*kgo.Record{{
+						Key:    []byte("key1"),
+						Value:  []byte(`{"event":"test"}`),
+						Offset: 1,
+						Topic:  "test-topic",
+					}},
+				}},
+			}},
+		}},
+	}
+
+	s := &Source{client: mc, topic: "test-topic", stopOnHandlerError: true, logger: slog.Default()}
+
+	err := s.Start(context.Background(), func(_ context.Context, _ source.Event) error {
+		return errors.New("handler failed")
+	})
+	if err == nil {
+		t.Fatal("expected handler error to be returned")
+	}
+	if !strings.Contains(err.Error(), "handler failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestSource_Start_CommitError(t *testing.T) {
 	mc := &mockConsumer{
 		fetches: kgo.Fetches{{

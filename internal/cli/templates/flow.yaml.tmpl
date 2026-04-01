@@ -55,4 +55,5 @@ sink:
 errorHandling:
   deadLetterTopic: fiso-dlq-{{.FlowName}}
   maxRetries: 3
+  commitPolicy: sink_or_dlq  # sink | sink_or_dlq | kafka_transaction
 {{- end}}

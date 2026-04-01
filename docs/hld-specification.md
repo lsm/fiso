@@ -443,10 +443,17 @@ These are generated from CRD definitions and applied automatically when
 |-----------|-----------|-----------|
 | **Fiso-Link (Async)** | At-least-once | Broker ack before returning 202 to app |
 | **Fiso-Link (Sync)** | Best-effort | HTTP semantics; retries are transparent |
-| **Fiso-Flow** | At-least-once | Consumer offset committed after sink ack |
+| **Fiso-Flow** | Configurable | Offset commit behavior controlled by `errorHandling.commitPolicy` |
 
-**Exactly-once is not a goal.** Fiso provides at-least-once delivery and
-expects sinks to be idempotent. Fiso assists with idempotency by:
+For Kafka sources, `errorHandling.commitPolicy` supports:
+
+- `sink` — commit only after sink success
+- `sink_or_dlq` (default) — commit after sink success or durable DLQ write
+- `kafka_transaction` — transactional EOS for Kafka→Kafka on same cluster
+
+**Exactly-once is not the default goal.** Fiso provides at-least-once delivery by default and
+expects sinks to be idempotent. For Kafka→Kafka pipelines, `kafka_transaction`
+provides transactional exactly-once semantics. Fiso assists with idempotency by:
 
 - Including a unique `fiso-event-id` (UUID v7) in every CloudEvent.
 - Propagating the original `correlation-id` through all hops.

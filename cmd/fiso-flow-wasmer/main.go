@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/lsm/fiso/internal/config"
+	"github.com/lsm/fiso/internal/delivery"
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/interceptor/wasm"
@@ -208,6 +209,18 @@ func run() error {
 // This is similar to fiso-flow's buildPipeline but uses the wasm factory
 // which supports both wazero and wasmer runtimes.
 func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool *httpsource.ServerPool, tracer trace.Tracer) (*pipeline.Pipeline, error) {
+	commitPolicy := delivery.NormalizeCommitPolicy(flowDef.ErrorHandling.CommitPolicy)
+	if commitPolicy == delivery.CommitPolicyKafkaTransaction {
+		if flowDef.Source.Type != "kafka" || flowDef.Sink.Type != "kafka" {
+			return nil, fmt.Errorf("commitPolicy kafka_transaction requires kafka source and kafka sink")
+		}
+		sourceCluster, _ := flowDef.Source.Config["cluster"].(string)
+		sinkCluster, _ := flowDef.Sink.Config["cluster"].(string)
+		if sourceCluster == "" || sinkCluster == "" || sourceCluster != sinkCluster {
+			return nil, fmt.Errorf("commitPolicy kafka_transaction requires source and sink to use the same kafka cluster")
+		}
+	}
+
 	// Build source
 	var src source.Source
 	var propagateErrors bool
@@ -228,10 +241,15 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		}
 
 		kafkaCfg := kafka.Config{
-			Cluster:       &cluster,
-			Topic:         topic,
-			ConsumerGroup: consumerGroup,
-			StartOffset:   startOffset,
+			Cluster:            &cluster,
+			Topic:              topic,
+			ConsumerGroup:      consumerGroup,
+			StartOffset:        startOffset,
+			StopOnHandlerError: true,
+		}
+		if commitPolicy == delivery.CommitPolicyKafkaTransaction {
+			kafkaCfg.TransactionalID = flowDef.ErrorHandling.TransactionalID
+			kafkaCfg.RequireStableFetchOffset = true
 		}
 
 		s, err := kafka.NewSource(kafkaCfg, logger)
@@ -240,6 +258,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		}
 		s.SetTracer(tracer)
 		src = s
+		propagateErrors = true
 
 	case "grpc":
 		listenAddr, _ := flowDef.Source.Config["listenAddr"].(string)
@@ -413,8 +432,9 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		}
 
 		kafkaSinkCfg := kafkasink.Config{
-			Cluster: &cluster,
-			Topic:   topic,
+			Cluster:              &cluster,
+			Topic:                topic,
+			RequireTransactional: commitPolicy == delivery.CommitPolicyKafkaTransaction,
 		}
 
 		kSink, err := kafkasink.NewSink(kafkaSinkCfg)
@@ -452,7 +472,9 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 
 	cfg := pipeline.Config{
 		FlowName:        flowDef.Name,
+		SourceType:      flowDef.Source.Type,
 		PropagateErrors: propagateErrors,
+		CommitPolicy:    commitPolicy,
 	}
 
 	// Apply CloudEvents overrides from config

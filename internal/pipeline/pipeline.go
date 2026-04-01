@@ -14,6 +14,7 @@ import (
 	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/ext"
 	"github.com/lsm/fiso/internal/correlation"
+	"github.com/lsm/fiso/internal/delivery"
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/sink"
@@ -53,8 +54,10 @@ type CloudEventsOverrides struct {
 // Config holds pipeline configuration.
 type Config struct {
 	FlowName        string
+	SourceType      string // source type (kafka, http, grpc)
 	EventType       string // CloudEvent type (e.g., "order.created")
 	PropagateErrors bool   // When true, return processing errors to the source handler.
+	CommitPolicy    delivery.CommitPolicy
 	CloudEvents     *CloudEventsOverrides
 }
 
@@ -80,6 +83,8 @@ type Pipeline struct {
 // New creates a new Pipeline. If transformer is nil, events pass through untransformed.
 // If chain is nil, no interceptors are applied.
 func New(cfg Config, src source.Source, tr transform.Transformer, sk sink.Sink, dlqHandler *dlq.Handler, chain *interceptor.Chain) *Pipeline {
+	cfg.CommitPolicy = delivery.NormalizeCommitPolicy(string(cfg.CommitPolicy))
+
 	p := &Pipeline{
 		config:       cfg,
 		source:       src,
@@ -141,8 +146,7 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 	if p.transformer != nil {
 		transformed, err := p.transformer.Transform(ctx, payload)
 		if err != nil {
-			p.sendToDLQ(ctx, evt, "TRANSFORM_FAILED", err.Error())
-			return err
+			return p.handleFailure(ctx, evt, "TRANSFORM_FAILED", err)
 		}
 		payload = transformed
 		p.logger.Debug("transform completed",
@@ -161,8 +165,7 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 		}
 		result, err := p.interceptors.Process(ctx, req)
 		if err != nil {
-			p.sendToDLQ(ctx, evt, "INTERCEPTOR_FAILED", err.Error())
-			return err
+			return p.handleFailure(ctx, evt, "INTERCEPTOR_FAILED", err)
 		}
 		payload = result.Payload
 	}
@@ -177,8 +180,7 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 		wrapped, err = p.wrapCloudEvent(payload, originalPayload)
 	}
 	if err != nil {
-		p.sendToDLQ(ctx, evt, "CLOUDEVENT_WRAP_FAILED", err.Error())
-		return err
+		return p.handleFailure(ctx, evt, "CLOUDEVENT_WRAP_FAILED", err)
 	}
 
 	// Deliver to sink
@@ -188,8 +190,7 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 	headers = correlation.AddToHeaders(headers, corrID)
 
 	if err := p.sink.Deliver(ctx, wrapped, headers); err != nil {
-		p.sendToDLQ(ctx, evt, "SINK_DELIVERY_FAILED", err.Error())
-		return err
+		return p.handleFailure(ctx, evt, "SINK_DELIVERY_FAILED", err)
 	}
 
 	p.logger.Info("event delivered",
@@ -444,7 +445,39 @@ func (p *Pipeline) passOrMergeCloudEvent(data, originalInput []byte) ([]byte, er
 	return json.Marshal(existingCE)
 }
 
-func (p *Pipeline) sendToDLQ(ctx context.Context, evt source.Event, code, message string) {
+func (p *Pipeline) handleFailure(ctx context.Context, evt source.Event, code string, cause error) error {
+	if cause == nil {
+		return nil
+	}
+
+	// For non-Kafka sources, always preserve request-response error semantics.
+	if p.config.SourceType != "kafka" {
+		if dlqErr := p.sendToDLQ(ctx, evt, code, cause.Error()); dlqErr != nil {
+			return errors.Join(cause, dlqErr)
+		}
+		return cause
+	}
+
+	switch p.config.CommitPolicy {
+	case delivery.CommitPolicySinkOrDLQ:
+		if dlqErr := p.sendToDLQ(ctx, evt, code, cause.Error()); dlqErr != nil {
+			return errors.Join(cause, dlqErr)
+		}
+		return nil // durable fallback via DLQ, safe to ack
+
+	case delivery.CommitPolicySink, delivery.CommitPolicyKafkaTransaction:
+		// Strict policies: never acknowledge on failure.
+		return cause
+
+	default:
+		if dlqErr := p.sendToDLQ(ctx, evt, code, cause.Error()); dlqErr != nil {
+			return errors.Join(cause, dlqErr)
+		}
+		return nil
+	}
+}
+
+func (p *Pipeline) sendToDLQ(ctx context.Context, evt source.Event, code, message string) error {
 	info := dlq.FailureInfo{
 		OriginalTopic: evt.Topic,
 		ErrorCode:     code,
@@ -458,7 +491,9 @@ func (p *Pipeline) sendToDLQ(ctx context.Context, evt source.Event, code, messag
 			"correlation_id", evt.CorrelationID,
 			"error", err,
 		)
+		return err
 	}
+	return nil
 }
 
 // Shutdown performs graceful shutdown of the pipeline components.

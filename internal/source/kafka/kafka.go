@@ -7,8 +7,10 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lsm/fiso/internal/correlation"
+	"github.com/lsm/fiso/internal/delivery"
 	"github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/source"
 	"github.com/lsm/fiso/internal/tracing"
@@ -19,10 +21,14 @@ import (
 
 // Config holds Kafka source configuration.
 type Config struct {
-	Cluster       *kafka.ClusterConfig // Cluster config with auth/TLS (required)
-	Topic         string
-	ConsumerGroup string
-	StartOffset   any // "earliest", "latest", or non-negative numeric offset (default: "latest")
+	Cluster                  *kafka.ClusterConfig // Cluster config with auth/TLS (required)
+	Topic                    string
+	ConsumerGroup            string
+	StartOffset              any // "earliest", "latest", or non-negative numeric offset (default: "latest")
+	StopOnHandlerError       bool
+	TransactionalID          string        // Enables Kafka transactions when set (EOS path)
+	TransactionTimeout       time.Duration // Optional; used with TransactionalID
+	RequireStableFetchOffset bool          // Recommended with TransactionalID (Kafka >=2.5)
 }
 
 // consumer abstracts the kafka client methods used by Source for testing.
@@ -33,12 +39,23 @@ type consumer interface {
 	Close()
 }
 
+// transactionalSession abstracts franz-go transactional group session.
+type transactionalSession interface {
+	PollFetches(ctx context.Context) kgo.Fetches
+	Begin() error
+	End(ctx context.Context, commit kgo.TransactionEndTry) (bool, error)
+	ProduceSync(ctx context.Context, rs ...*kgo.Record) kgo.ProduceResults
+	Close()
+}
+
 // Source consumes events from a Kafka topic.
 type Source struct {
-	client consumer
-	topic  string
-	logger *slog.Logger
-	tracer trace.Tracer
+	client             consumer
+	txSession          transactionalSession
+	topic              string
+	stopOnHandlerError bool
+	logger             *slog.Logger
+	tracer             trace.Tracer
 }
 
 // NewSource creates a new Kafka source.
@@ -74,17 +91,39 @@ func NewSource(cfg Config, logger *slog.Logger) (*Source, error) {
 		kgo.DisableAutoCommit(),
 	)
 
+	s := &Source{
+		topic:              cfg.Topic,
+		stopOnHandlerError: cfg.StopOnHandlerError,
+		logger:             logger,
+		tracer:             noop.NewTracerProvider().Tracer("kafka-source"),
+	}
+
+	if cfg.TransactionalID != "" {
+		opts = append(opts,
+			kgo.FetchIsolationLevel(kgo.ReadCommitted()),
+			kgo.TransactionalID(cfg.TransactionalID),
+		)
+		if cfg.TransactionTimeout > 0 {
+			opts = append(opts, kgo.TransactionTimeout(cfg.TransactionTimeout))
+		}
+		if cfg.RequireStableFetchOffset {
+			opts = append(opts, kgo.RequireStableFetchOffsets())
+		}
+
+		txSession, err := kgo.NewGroupTransactSession(opts...)
+		if err != nil {
+			return nil, fmt.Errorf("kafka transactional session: %w", err)
+		}
+		s.txSession = txSession
+		return s, nil
+	}
+
 	client, err := kgo.NewClient(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka client: %w", err)
 	}
-
-	return &Source{
-		client: client,
-		topic:  cfg.Topic,
-		logger: logger,
-		tracer: noop.NewTracerProvider().Tracer("kafka-source"),
-	}, nil
+	s.client = client
+	return s, nil
 }
 
 func resolveStartOffset(raw any) (kgo.Offset, error) {
@@ -200,7 +239,13 @@ func (s *Source) SetTracer(tracer trace.Tracer) {
 // Start begins consuming events from Kafka. Blocks until ctx is cancelled.
 func (s *Source) Start(ctx context.Context, handler func(context.Context, source.Event) error) error {
 	s.logger.Info("starting kafka consumer", "topic", s.topic)
+	if s.txSession != nil {
+		return s.startTransactional(ctx, handler)
+	}
+	return s.startManualCommit(ctx, handler)
+}
 
+func (s *Source) startManualCommit(ctx context.Context, handler func(context.Context, source.Event) error) error {
 	for {
 		fetches := s.client.PollFetches(ctx)
 
@@ -214,35 +259,12 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 			continue
 		}
 
-		fetches.EachRecord(func(record *kgo.Record) {
-			evt := source.Event{
-				Key:     record.Key,
-				Value:   record.Value,
-				Headers: make(map[string]string, len(record.Headers)),
-				Offset:  record.Offset,
-				Topic:   record.Topic,
-			}
-			for _, h := range record.Headers {
-				evt.Headers[h.Key] = string(h.Value)
-			}
+		var handlerErr error
+		for iter := fetches.RecordIter(); !iter.Done(); {
+			record := iter.Next()
+			evt := buildEvent(record)
 
-			// Extract or generate correlation ID
-			corrID := correlation.ExtractOrGenerate(evt.Headers)
-			evt.CorrelationID = corrID.Value
-
-			// Extract trace context from Kafka headers
-			recordCtx := correlation.ExtractTraceContext(ctx, evt.Headers)
-
-			// Start consumer span
-			spanCtx, span := tracing.StartSpan(recordCtx, s.tracer, tracing.SpanKafkaConsume,
-				trace.WithAttributes(
-					tracing.KafkaTopicAttr(record.Topic),
-					tracing.KafkaPartitionAttr(record.Partition),
-					tracing.KafkaOffsetAttr(record.Offset),
-					tracing.CorrelationAttr(corrID.Value),
-				),
-			)
-
+			recordCtx, corrID, span := s.startRecordSpan(ctx, record, evt)
 			s.logger.Info("event received",
 				"correlation_id", corrID.Value,
 				"correlation_source", corrID.Source,
@@ -251,11 +273,12 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 				"partition", record.Partition,
 			)
 
-			if err := handler(spanCtx, evt); err != nil {
+			if err := handler(recordCtx, evt); err != nil {
+				handlerErr = err
 				tracing.SetSpanError(span, err)
 				span.End()
 				s.logger.Error("handler error", "topic", record.Topic, "offset", record.Offset, "error", err)
-				return
+				break
 			}
 
 			// Commit offset after successful handler execution (at-least-once)
@@ -267,10 +290,12 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 				tracing.SetSpanOK(span)
 			}
 			span.End()
-		})
+		}
 
-		// Check for cancellation after processing the batch, ensuring
-		// all records from the last fetch are fully drained before exit.
+		if handlerErr != nil && s.stopOnHandlerError {
+			return handlerErr
+		}
+
 		if ctx.Err() != nil {
 			s.logger.Info("kafka source draining complete", "topic", s.topic)
 			return ctx.Err()
@@ -278,8 +303,124 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 	}
 }
 
+func (s *Source) startTransactional(ctx context.Context, handler func(context.Context, source.Event) error) error {
+	for {
+		fetches := s.txSession.PollFetches(ctx)
+
+		if errs := fetches.Errors(); len(errs) > 0 {
+			for _, err := range errs {
+				s.logger.Error("fetch error", "topic", err.Topic, "partition", err.Partition, "error", err.Err)
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+
+		if fetches.Empty() {
+			if ctx.Err() != nil {
+				s.logger.Info("kafka source draining complete", "topic", s.topic)
+				return ctx.Err()
+			}
+			continue
+		}
+
+		if err := s.txSession.Begin(); err != nil {
+			return fmt.Errorf("begin transaction: %w", err)
+		}
+
+		txCtx := delivery.WithKafkaTransactionalProducer(ctx, s.txSession)
+		var handlerErr error
+		for iter := fetches.RecordIter(); !iter.Done(); {
+			record := iter.Next()
+			evt := buildEvent(record)
+
+			recordCtx, corrID, span := s.startRecordSpan(txCtx, record, evt)
+			s.logger.Info("event received",
+				"correlation_id", corrID.Value,
+				"correlation_source", corrID.Source,
+				"topic", record.Topic,
+				"offset", record.Offset,
+				"partition", record.Partition,
+			)
+
+			if err := handler(recordCtx, evt); err != nil {
+				handlerErr = err
+				tracing.SetSpanError(span, err)
+				span.End()
+				s.logger.Error("handler error", "topic", record.Topic, "offset", record.Offset, "error", err)
+				break
+			}
+
+			tracing.SetSpanOK(span)
+			span.End()
+		}
+
+		if handlerErr != nil {
+			if _, err := s.txSession.End(ctx, kgo.TryAbort); err != nil {
+				return fmt.Errorf("abort transaction after handler error: %w", err)
+			}
+			if s.stopOnHandlerError {
+				return handlerErr
+			}
+			continue
+		}
+
+		committed, err := s.txSession.End(ctx, kgo.TryCommit)
+		if err != nil {
+			return fmt.Errorf("commit transaction: %w", err)
+		}
+		if !committed {
+			return fmt.Errorf("transaction commit was aborted")
+		}
+
+		if ctx.Err() != nil {
+			s.logger.Info("kafka source draining complete", "topic", s.topic)
+			return ctx.Err()
+		}
+	}
+}
+
+func (s *Source) startRecordSpan(ctx context.Context, record *kgo.Record, evt source.Event) (context.Context, correlation.ID, trace.Span) {
+	corrID := correlation.ExtractOrGenerate(evt.Headers)
+
+	recordCtx := correlation.ExtractTraceContext(ctx, evt.Headers)
+	spanCtx, span := tracing.StartSpan(recordCtx, s.tracer, tracing.SpanKafkaConsume,
+		trace.WithAttributes(
+			tracing.KafkaTopicAttr(record.Topic),
+			tracing.KafkaPartitionAttr(record.Partition),
+			tracing.KafkaOffsetAttr(record.Offset),
+			tracing.CorrelationAttr(corrID.Value),
+		),
+	)
+	return spanCtx, corrID, span
+}
+
+func buildEvent(record *kgo.Record) source.Event {
+	evt := source.Event{
+		Key:     record.Key,
+		Value:   record.Value,
+		Headers: make(map[string]string, len(record.Headers)),
+		Offset:  record.Offset,
+		Topic:   record.Topic,
+	}
+	for _, h := range record.Headers {
+		evt.Headers[h.Key] = string(h.Value)
+	}
+
+	corrID := correlation.ExtractOrGenerate(evt.Headers)
+	evt.CorrelationID = corrID.Value
+	return evt
+}
+
 // Close performs graceful shutdown of the Kafka client.
 func (s *Source) Close() error {
-	s.client.Close()
+	if s.txSession != nil {
+		s.txSession.Close()
+		return nil
+	}
+	if s.client != nil {
+		s.client.Close()
+	}
 	return nil
 }

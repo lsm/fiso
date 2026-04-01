@@ -498,6 +498,54 @@ Failed events are published to a DLQ topic (`fiso-dlq-{flowName}`) with structur
 | `fiso-failed-at` | Failure timestamp |
 | `fiso-flow-name` | Flow name |
 
+#### Kafka Offset Commit Policies
+
+For Kafka sources, `errorHandling.commitPolicy` controls when offsets are acknowledged:
+
+- `sink` — Commit only when sink delivery succeeds (strict, no fallback ack)
+- `sink_or_dlq` (default) — Commit when sink succeeds **or** DLQ write succeeds
+- `kafka_transaction` — Kafka transactional EOS (Kafka source + Kafka sink on same cluster, requires `errorHandling.transactionalId`)
+
+#### Migration Note (existing Kafka flows)
+
+If your flow does not set `errorHandling.commitPolicy`, it now defaults to `sink_or_dlq`.
+For predictable behavior across upgrades, set it explicitly.
+
+**1) Strict sink success (`sink`)**
+```yaml
+errorHandling:
+  maxRetries: 5
+  commitPolicy: sink
+```
+
+**2) Sink-or-DLQ durability (`sink_or_dlq`, recommended default)**
+```yaml
+errorHandling:
+  deadLetterTopic: fiso-dlq-order-events
+  maxRetries: 5
+  commitPolicy: sink_or_dlq
+```
+
+**4) Kafka transactional EOS (`kafka_transaction`)**
+```yaml
+source:
+  type: kafka
+  config:
+    cluster: main
+sink:
+  type: kafka
+  config:
+    cluster: main
+errorHandling:
+  commitPolicy: kafka_transaction
+  transactionalId: order-pipeline-tx-1
+```
+
+Notes for `kafka_transaction`:
+- source and sink must both be Kafka
+- source and sink must use the same Kafka cluster
+- `transactionalId` must be set and unique per running consumer instance
+
 ### Fiso-Link — Outbound Proxy
 
 Reverse proxy sidecar that routes application requests to external services through `localhost:3500/link/{target}/{path}`.
@@ -569,6 +617,7 @@ errorHandling:
   deadLetterTopic: fiso-dlq-order-events
   maxRetries: 5
   backoff: exponential
+  commitPolicy: sink_or_dlq   # sink | sink_or_dlq | kafka_transaction
 ```
 
 Fiso watches the config directory and hot-reloads on changes.
@@ -1801,12 +1850,42 @@ transform:
     eligible: "data.age >= 18 && data.verified == true"
 ```
 
+### Additional Upgrade Note: Kafka Commit Policies
+
+If you are upgrading existing Kafka-source flows, set `errorHandling.commitPolicy` explicitly.
+If omitted, Fiso now defaults to `sink_or_dlq`.
+
+```yaml
+errorHandling:
+  deadLetterTopic: fiso-dlq-order-events
+  maxRetries: 5
+  commitPolicy: sink_or_dlq # sink | sink_or_dlq | kafka_transaction
+```
+
+For strict sink-only acknowledgment:
+
+```yaml
+errorHandling:
+  maxRetries: 5
+  commitPolicy: sink
+```
+
+For Kafka transactional EOS (Kafka→Kafka on same cluster):
+
+```yaml
+errorHandling:
+  commitPolicy: kafka_transaction
+  transactionalId: order-pipeline-tx-1
+```
+
 ### Migration Checklist
 
 - [ ] Replace all `cel:` with `fields:`
 - [ ] Replace all `mapping:` with `fields:`
 - [ ] Change `$.field` references to `data.field`
 - [ ] Add quotes around static string literals: `"value"`
+- [ ] For Kafka sources, set `errorHandling.commitPolicy` explicitly
+- [ ] If using `kafka_transaction`, set `errorHandling.transactionalId` and verify source/sink are Kafka on same cluster
 - [ ] Test updated configurations with `fiso validate`
 - [ ] Run `fiso doctor` to check environment health
 

@@ -21,6 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/lsm/fiso/internal/config"
+	"github.com/lsm/fiso/internal/delivery"
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/interceptor/wasm"
@@ -340,6 +341,18 @@ func run() error {
 }
 
 func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool *httpsource.ServerPool, tracer trace.Tracer) (*pipeline.Pipeline, error) {
+	commitPolicy := delivery.NormalizeCommitPolicy(flowDef.ErrorHandling.CommitPolicy)
+	if commitPolicy == delivery.CommitPolicyKafkaTransaction {
+		if flowDef.Source.Type != "kafka" || flowDef.Sink.Type != "kafka" {
+			return nil, fmt.Errorf("commitPolicy kafka_transaction requires kafka source and kafka sink")
+		}
+		sourceCluster, _ := flowDef.Source.Config["cluster"].(string)
+		sinkCluster, _ := flowDef.Sink.Config["cluster"].(string)
+		if sourceCluster == "" || sinkCluster == "" || sourceCluster != sinkCluster {
+			return nil, fmt.Errorf("commitPolicy kafka_transaction requires source and sink to use the same kafka cluster")
+		}
+	}
+
 	var src source.Source
 	var propagateErrors bool
 
@@ -357,10 +370,15 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 			return nil, fmt.Errorf("source config: cluster %q not found", clusterName)
 		}
 		kafkaCfg := kafka_source.Config{
-			Cluster:       &cluster,
-			Topic:         topic,
-			ConsumerGroup: consumerGroup,
-			StartOffset:   startOffset,
+			Cluster:            &cluster,
+			Topic:              topic,
+			ConsumerGroup:      consumerGroup,
+			StartOffset:        startOffset,
+			StopOnHandlerError: true,
+		}
+		if commitPolicy == delivery.CommitPolicyKafkaTransaction {
+			kafkaCfg.TransactionalID = flowDef.ErrorHandling.TransactionalID
+			kafkaCfg.RequireStableFetchOffset = true
 		}
 		s, err := kafka_source.NewSource(kafkaCfg, logger)
 		if err != nil {
@@ -368,6 +386,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		}
 		s.SetTracer(tracer)
 		src = s
+		propagateErrors = true
 
 	case "grpc":
 		listenAddr, _ := flowDef.Source.Config["listenAddr"].(string)
@@ -454,7 +473,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		if !found {
 			return nil, fmt.Errorf("sink config: cluster %q not found", clusterName)
 		}
-		kSink, err := kafkasink.NewSink(kafkasink.Config{Cluster: &cluster, Topic: topic})
+		kSink, err := kafkasink.NewSink(kafkasink.Config{Cluster: &cluster, Topic: topic, RequireTransactional: commitPolicy == delivery.CommitPolicyKafkaTransaction})
 		if err != nil {
 			return nil, fmt.Errorf("kafka sink: %w", err)
 		}
@@ -471,7 +490,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		dlqHandler = dlq.NewHandler(&dlq.NoopPublisher{})
 	}
 
-	cfg := pipeline.Config{FlowName: flowDef.Name, PropagateErrors: propagateErrors}
+	cfg := pipeline.Config{FlowName: flowDef.Name, SourceType: flowDef.Source.Type, PropagateErrors: propagateErrors, CommitPolicy: commitPolicy}
 
 	// Interceptors
 	var chain *interceptor.Chain

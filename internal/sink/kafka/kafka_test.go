@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/lsm/fiso/internal/delivery"
 	intkafka "github.com/lsm/fiso/internal/kafka"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -20,6 +22,20 @@ type mockPublisher struct {
 		value   []byte
 		headers map[string]string
 	}
+}
+
+type mockTxProducer struct {
+	err      error
+	received []*kgo.Record
+}
+
+func (m *mockTxProducer) ProduceSync(_ context.Context, rs ...*kgo.Record) kgo.ProduceResults {
+	m.received = append(m.received, rs...)
+	results := make(kgo.ProduceResults, len(rs))
+	for i, r := range rs {
+		results[i] = kgo.ProduceResult{Record: r, Err: m.err}
+	}
+	return results
 }
 
 func (m *mockPublisher) Publish(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
@@ -400,6 +416,44 @@ func TestSink_Deliver_PublishErrorWrapped(t *testing.T) {
 	// Verify the error is returned as-is from publisher (no wrapping in Deliver)
 	if err.Error() != "kafka publish: broker not available" {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestSink_Deliver_UsesTransactionalProducerFromContext(t *testing.T) {
+	tx := &mockTxProducer{}
+	mp := &mockPublisher{}
+	s := &Sink{
+		publisher: mp,
+		topic:     "test-topic",
+		logger:    slog.Default(),
+	}
+
+	ctx := delivery.WithKafkaTransactionalProducer(context.Background(), tx)
+	err := s.Deliver(ctx, []byte(`{"id":"evt-1"}`), map[string]string{"x-test": "1"})
+	if err != nil {
+		t.Fatalf("deliver failed: %v", err)
+	}
+
+	if len(tx.received) != 1 {
+		t.Fatalf("expected 1 transactional record, got %d", len(tx.received))
+	}
+	if mp.record.topic != "" {
+		t.Fatalf("expected regular publisher not to be used")
+	}
+}
+
+func TestSink_Deliver_RequireTransactionalWithoutContext(t *testing.T) {
+	mp := &mockPublisher{}
+	s := &Sink{
+		publisher:            mp,
+		topic:                "test-topic",
+		requireTransactional: true,
+		logger:               slog.Default(),
+	}
+
+	err := s.Deliver(context.Background(), []byte(`{}`), nil)
+	if err == nil {
+		t.Fatal("expected error when transactional context is missing")
 	}
 }
 

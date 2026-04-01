@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/lsm/fiso/internal/delivery"
 	"github.com/lsm/fiso/internal/kafka"
 	"gopkg.in/yaml.v3"
 )
@@ -102,6 +103,22 @@ func (f *FlowDefinition) Validate() error {
 		errs = append(errs, fmt.Errorf("errorHandling.maxRetries must be >= 0, got %d", f.ErrorHandling.MaxRetries))
 	}
 
+	commitPolicy := delivery.NormalizeCommitPolicy(f.ErrorHandling.CommitPolicy)
+	if !commitPolicy.Valid() {
+		errs = append(errs, fmt.Errorf("errorHandling.commitPolicy %q is not valid (must be one of: sink, sink_or_dlq, kafka_transaction)", f.ErrorHandling.CommitPolicy))
+	}
+	if commitPolicy == delivery.CommitPolicyKafkaTransaction {
+		if f.Source.Type != "kafka" {
+			errs = append(errs, fmt.Errorf("errorHandling.commitPolicy kafka_transaction requires source.type to be kafka"))
+		}
+		if f.Sink.Type != "kafka" {
+			errs = append(errs, fmt.Errorf("errorHandling.commitPolicy kafka_transaction requires sink.type to be kafka"))
+		}
+		if f.ErrorHandling.TransactionalID == "" {
+			errs = append(errs, fmt.Errorf("errorHandling.transactionalId is required when commitPolicy is kafka_transaction"))
+		}
+	}
+
 	// Validate Kafka clusters if defined
 	if err := f.Kafka.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("kafka: %w", err))
@@ -179,6 +196,8 @@ type ErrorHandlingConfig struct {
 	DeadLetterTopic string `yaml:"deadLetterTopic"`
 	MaxRetries      int    `yaml:"maxRetries"`
 	Backoff         string `yaml:"backoff"`
+	CommitPolicy    string `yaml:"commitPolicy,omitempty"`    // sink | sink_or_dlq | kafka_transaction (default: sink_or_dlq)
+	TransactionalID string `yaml:"transactionalId,omitempty"` // required when commitPolicy=kafka_transaction
 }
 
 // Loader loads and watches flow definition files.
