@@ -8,6 +8,12 @@ func TestNormalizeCommitPolicy_Default(t *testing.T) {
 	}
 }
 
+func TestNormalizeCommitPolicy_TrimAndLower(t *testing.T) {
+	if got := NormalizeCommitPolicy("  SINK_OR_DLQ  "); got != CommitPolicySinkOrDLQ {
+		t.Fatalf("expected normalized sink_or_dlq, got %q", got)
+	}
+}
+
 func TestCommitPolicy_Valid(t *testing.T) {
 	valid := []CommitPolicy{CommitPolicySink, CommitPolicySinkOrDLQ, CommitPolicyKafkaTransaction}
 	for _, p := range valid {

@@ -3,12 +3,16 @@ package kafka
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/lsm/fiso/internal/delivery"
 	intkafka "github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/source"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -47,11 +51,87 @@ func (m *mockConsumer) Close() {
 	m.closed = true
 }
 
+type txEndResult struct {
+	committed bool
+	err       error
+}
+
+type mockTxSession struct {
+	fetches      []kgo.Fetches
+	pollCount    atomic.Int32
+	beginErr     error
+	endResults   []txEndResult
+	endCallCount int
+	endCount     atomic.Int32
+	endCalls     []kgo.TransactionEndTry
+	produced     []*kgo.Record
+	closed       bool
+}
+
+func (m *mockTxSession) PollFetches(ctx context.Context) kgo.Fetches {
+	m.pollCount.Add(1)
+	if ctx.Err() != nil {
+		return nil
+	}
+	if len(m.fetches) == 0 {
+		return kgo.Fetches{}
+	}
+	idx := int(m.pollCount.Load()) - 1
+	if idx < len(m.fetches) {
+		return m.fetches[idx]
+	}
+	return m.fetches[len(m.fetches)-1]
+}
+
+func (m *mockTxSession) Begin() error {
+	return m.beginErr
+}
+
+func (m *mockTxSession) End(_ context.Context, commit kgo.TransactionEndTry) (bool, error) {
+	m.endCalls = append(m.endCalls, commit)
+	m.endCount.Add(1)
+	idx := m.endCallCount
+	m.endCallCount++
+	if idx < len(m.endResults) {
+		return m.endResults[idx].committed, m.endResults[idx].err
+	}
+	if commit == kgo.TryCommit {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (m *mockTxSession) ProduceSync(_ context.Context, rs ...*kgo.Record) kgo.ProduceResults {
+	m.produced = append(m.produced, rs...)
+	results := make(kgo.ProduceResults, len(rs))
+	for i, r := range rs {
+		results[i] = kgo.ProduceResult{Record: r}
+	}
+	return results
+}
+
+func (m *mockTxSession) Close() {
+	m.closed = true
+}
+
 func testCluster(brokers ...string) *intkafka.ClusterConfig {
 	if len(brokers) == 0 {
 		brokers = []string{"localhost:9092"}
 	}
 	return &intkafka.ClusterConfig{Brokers: brokers}
+}
+
+func txFetch(topic string, partition int32, records []*kgo.Record, fetchErr error) kgo.Fetches {
+	return kgo.Fetches{{
+		Topics: []kgo.FetchTopic{{
+			Topic: topic,
+			Partitions: []kgo.FetchPartition{{
+				Partition: partition,
+				Records:   records,
+				Err:       fetchErr,
+			}},
+		}},
+	}}
 }
 
 func TestNewSource_MissingCluster(t *testing.T) {
@@ -154,7 +234,9 @@ func TestResolveStartOffset(t *testing.T) {
 		{name: "earliest keyword", in: "earliest", want: -2},
 		{name: "numeric int", in: 231, want: 231},
 		{name: "numeric string", in: "231", want: 231},
+		{name: "negative numeric string", in: "-1", wantErrText: "must be >= 0"},
 		{name: "numeric float64 integer", in: float64(231), want: 231},
+		{name: "numeric float32 integer", in: float32(22), want: 22},
 		{name: "invalid text", in: "middle", wantErrText: "must be \"earliest\""},
 		{name: "negative int", in: -1, wantErrText: "must be >= 0"},
 		{name: "fractional float", in: 2.5, wantErrText: "must be an integer"},
@@ -181,6 +263,118 @@ func TestResolveStartOffset(t *testing.T) {
 				t.Fatalf("expected offset %d, got %s", tt.want, got.String())
 			}
 		})
+	}
+}
+
+func TestParseNumericStartOffset_Branches(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      any
+		want    int64
+		ok      bool
+		errText string
+	}{
+		{name: "int8", in: int8(5), want: 5, ok: true},
+		{name: "int8 negative", in: int8(-5), ok: true, errText: "must be >= 0"},
+		{name: "int16", in: int16(6), want: 6, ok: true},
+		{name: "int16 negative", in: int16(-6), ok: true, errText: "must be >= 0"},
+		{name: "int32", in: int32(7), want: 7, ok: true},
+		{name: "int32 negative", in: int32(-7), ok: true, errText: "must be >= 0"},
+		{name: "int64", in: int64(8), want: 8, ok: true},
+		{name: "int64 negative", in: int64(-8), ok: true, errText: "must be >= 0"},
+		{name: "uint", in: uint(9), want: 9, ok: true},
+		{name: "uint8", in: uint8(10), want: 10, ok: true},
+		{name: "uint16", in: uint16(11), want: 11, ok: true},
+		{name: "uint32", in: uint32(12), want: 12, ok: true},
+		{name: "uint64", in: uint64(14), want: 14, ok: true},
+		{name: "float32 integer", in: float32(13), want: 13, ok: true},
+		{name: "float32 fractional", in: float32(13.5), ok: true, errText: "must be an integer"},
+		{name: "float32 negative", in: float32(-1), ok: true, errText: "must be >= 0"},
+		{name: "float64 fractional", in: float64(2.5), ok: true, errText: "must be an integer"},
+		{name: "float64 negative", in: float64(-2), ok: true, errText: "must be >= 0"},
+		{name: "float64 overflow", in: float64(math.MaxInt64) * 2, ok: true, errText: "overflows"},
+		{name: "uint64 overflow", in: uint64(math.MaxInt64) + 1, ok: true, errText: "overflows"},
+		{name: "unsupported type", in: struct{}{}, ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok, err := parseNumericStartOffset(tt.in)
+			if ok != tt.ok {
+				t.Fatalf("expected ok=%v, got %v", tt.ok, ok)
+			}
+			if tt.errText != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.errText) {
+					t.Fatalf("expected error containing %q, got %v", tt.errText, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if ok && got != tt.want {
+				t.Fatalf("expected %d, got %d", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestNewSource_TransactionalConfig(t *testing.T) {
+	s, err := NewSource(Config{
+		Cluster:                  testCluster(),
+		Topic:                    "test-topic",
+		ConsumerGroup:            "test-group",
+		TransactionalID:          "tx-test-1",
+		TransactionTimeout:       time.Second,
+		RequireStableFetchOffset: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	if s.txSession == nil {
+		t.Fatal("expected transactional session to be initialized")
+	}
+	if s.client != nil {
+		t.Fatal("expected manual client to be nil when transactional session is enabled")
+	}
+}
+
+func TestNewSource_ClusterOptionsError(t *testing.T) {
+	_, err := NewSource(Config{
+		Cluster: &intkafka.ClusterConfig{
+			Brokers: []string{"localhost:9092"},
+			Auth:    intkafka.AuthConfig{Mechanism: "INVALID"},
+		},
+		Topic:         "test-topic",
+		ConsumerGroup: "test-group",
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "cluster options") {
+		t.Fatalf("expected cluster options error, got %v", err)
+	}
+}
+
+func TestNewSource_ClientCreationError_NoBrokers(t *testing.T) {
+	_, err := NewSource(Config{
+		Cluster:       &intkafka.ClusterConfig{Brokers: nil},
+		Topic:         "test-topic",
+		ConsumerGroup: "test-group",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected client creation error when brokers are missing")
+	}
+}
+
+func TestNewSource_TransactionalSessionError_NoBrokers(t *testing.T) {
+	_, err := NewSource(Config{
+		Cluster:         &intkafka.ClusterConfig{Brokers: nil},
+		Topic:           "test-topic",
+		ConsumerGroup:   "test-group",
+		TransactionalID: "tx-test",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected transactional session creation error when brokers are missing")
 	}
 }
 
@@ -541,5 +735,169 @@ func TestSetTracer(t *testing.T) {
 
 	if s.tracer == nil {
 		t.Error("expected tracer to be set")
+	}
+}
+
+func TestSource_Start_Transactional_SuccessAndCommit(t *testing.T) {
+	rec := &kgo.Record{Key: []byte("k1"), Value: []byte(`{"event":"ok"}`), Offset: 10, Topic: "test-topic", Partition: 0}
+	tx := &mockTxSession{fetches: []kgo.Fetches{txFetch("test-topic", 0, []*kgo.Record{rec}, nil)}}
+
+	s := &Source{txSession: tx, topic: "test-topic", stopOnHandlerError: true, logger: slog.Default(), tracer: noop.NewTracerProvider().Tracer("test")}
+	ctx, cancel := context.WithCancel(context.Background())
+	err := s.Start(ctx, func(hctx context.Context, evt source.Event) error {
+		if evt.Offset != 10 {
+			t.Fatalf("expected offset 10, got %d", evt.Offset)
+		}
+		producer, ok := delivery.KafkaTransactionalProducerFromContext(hctx)
+		if !ok {
+			t.Fatal("expected transactional producer in handler context")
+		}
+		results := producer.ProduceSync(hctx, &kgo.Record{Topic: "sink-topic", Value: []byte("x")})
+		if err := results.FirstErr(); err != nil {
+			t.Fatalf("unexpected produce error: %v", err)
+		}
+		cancel()
+		return nil
+	})
+
+	if err != context.Canceled {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if len(tx.endCalls) != 1 || tx.endCalls[0] != kgo.TryCommit {
+		t.Fatalf("expected one commit end call, got %+v", tx.endCalls)
+	}
+	if len(tx.produced) != 1 {
+		t.Fatalf("expected one produced record via tx producer, got %d", len(tx.produced))
+	}
+}
+
+func TestSource_Start_Transactional_BeginError(t *testing.T) {
+	rec := &kgo.Record{Key: []byte("k1"), Value: []byte(`{"event":"ok"}`), Topic: "test-topic"}
+	tx := &mockTxSession{
+		fetches:  []kgo.Fetches{txFetch("test-topic", 0, []*kgo.Record{rec}, nil)},
+		beginErr: errors.New("begin failed"),
+	}
+	s := &Source{txSession: tx, topic: "test-topic", stopOnHandlerError: true, logger: slog.Default()}
+
+	err := s.Start(context.Background(), func(_ context.Context, _ source.Event) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "begin transaction") {
+		t.Fatalf("expected begin transaction error, got %v", err)
+	}
+}
+
+func TestSource_Start_Transactional_HandlerErrorAbort(t *testing.T) {
+	rec := &kgo.Record{Key: []byte("k1"), Value: []byte(`{"event":"bad"}`), Topic: "test-topic"}
+	tx := &mockTxSession{fetches: []kgo.Fetches{txFetch("test-topic", 0, []*kgo.Record{rec}, nil)}}
+	s := &Source{txSession: tx, topic: "test-topic", stopOnHandlerError: true, logger: slog.Default(), tracer: noop.NewTracerProvider().Tracer("test")}
+
+	err := s.Start(context.Background(), func(_ context.Context, _ source.Event) error {
+		return errors.New("handler failed")
+	})
+	if err == nil || !strings.Contains(err.Error(), "handler failed") {
+		t.Fatalf("expected handler error, got %v", err)
+	}
+	if len(tx.endCalls) != 1 || tx.endCalls[0] != kgo.TryAbort {
+		t.Fatalf("expected abort end call, got %+v", tx.endCalls)
+	}
+}
+
+func TestSource_Start_Transactional_AbortError(t *testing.T) {
+	rec := &kgo.Record{Key: []byte("k1"), Value: []byte(`{"event":"bad"}`), Topic: "test-topic"}
+	tx := &mockTxSession{
+		fetches:    []kgo.Fetches{txFetch("test-topic", 0, []*kgo.Record{rec}, nil)},
+		endResults: []txEndResult{{committed: false, err: errors.New("abort failed")}},
+	}
+	s := &Source{txSession: tx, topic: "test-topic", stopOnHandlerError: true, logger: slog.Default()}
+
+	err := s.Start(context.Background(), func(_ context.Context, _ source.Event) error {
+		return errors.New("handler failed")
+	})
+	if err == nil || !strings.Contains(err.Error(), "abort transaction after handler error") {
+		t.Fatalf("expected abort error, got %v", err)
+	}
+}
+
+func TestSource_Start_Transactional_CommitErrorAndAborted(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     txEndResult
+		errContain string
+	}{
+		{name: "commit error", result: txEndResult{err: errors.New("commit failed")}, errContain: "commit transaction"},
+		{name: "commit aborted", result: txEndResult{committed: false, err: nil}, errContain: "transaction commit was aborted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &kgo.Record{Key: []byte("k1"), Value: []byte(`{"event":"ok"}`), Topic: "test-topic"}
+			tx := &mockTxSession{
+				fetches:    []kgo.Fetches{txFetch("test-topic", 0, []*kgo.Record{rec}, nil)},
+				endResults: []txEndResult{tt.result},
+			}
+			s := &Source{txSession: tx, topic: "test-topic", stopOnHandlerError: true, logger: slog.Default(), tracer: noop.NewTracerProvider().Tracer("test")}
+			err := s.Start(context.Background(), func(_ context.Context, _ source.Event) error { return nil })
+			if err == nil || !strings.Contains(err.Error(), tt.errContain) {
+				t.Fatalf("expected error containing %q, got %v", tt.errContain, err)
+			}
+		})
+	}
+}
+
+func TestSource_Start_Transactional_FetchErrorsThenCancel(t *testing.T) {
+	tx := &mockTxSession{fetches: []kgo.Fetches{txFetch("test-topic", 0, nil, errors.New("fetch failed"))}}
+	s := &Source{txSession: tx, topic: "test-topic", logger: slog.Default()}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for tx.pollCount.Load() < 2 {
+		}
+		cancel()
+	}()
+
+	err := s.Start(ctx, func(_ context.Context, _ source.Event) error { return nil })
+	if err != context.Canceled {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+}
+
+func TestSource_Close_TransactionalSession(t *testing.T) {
+	tx := &mockTxSession{}
+	s := &Source{txSession: tx, topic: "test-topic", logger: slog.Default()}
+	if err := s.Close(); err != nil {
+		t.Fatalf("unexpected close error: %v", err)
+	}
+	if !tx.closed {
+		t.Fatal("expected transactional session to be closed")
+	}
+}
+
+func TestBuildEvent_GeneratesCorrelationID(t *testing.T) {
+	rec := &kgo.Record{Key: []byte("k"), Value: []byte("v"), Topic: "t", Offset: 1, Headers: []kgo.RecordHeader{{Key: "x", Value: []byte("y")}}}
+	evt := buildEvent(rec)
+	if evt.CorrelationID == "" {
+		t.Fatal("expected correlation id to be populated")
+	}
+	if got := evt.Headers["x"]; got != "y" {
+		t.Fatalf("expected header x=y, got %q", got)
+	}
+}
+
+func TestSource_Start_Transactional_AbortAndContinueWhenNotStrict(t *testing.T) {
+	rec := &kgo.Record{Key: []byte("k1"), Value: []byte(`{"event":"bad"}`), Topic: "test-topic"}
+	tx := &mockTxSession{fetches: []kgo.Fetches{txFetch("test-topic", 0, []*kgo.Record{rec}, nil)}}
+	s := &Source{txSession: tx, topic: "test-topic", stopOnHandlerError: false, logger: slog.Default(), tracer: noop.NewTracerProvider().Tracer("test")}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for tx.endCount.Load() < 1 {
+		}
+		cancel()
+	}()
+
+	err := s.Start(ctx, func(_ context.Context, _ source.Event) error { return fmt.Errorf("boom") })
+	if err != context.Canceled {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if len(tx.endCalls) == 0 || tx.endCalls[0] != kgo.TryAbort {
+		t.Fatalf("expected first end call to abort, got %+v", tx.endCalls)
 	}
 }

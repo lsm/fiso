@@ -288,6 +288,77 @@ func TestPipeline_KafkaPolicySinkOrDLQ_DLQFailurePropagates(t *testing.T) {
 	}
 }
 
+func TestPipeline_NonKafkaSource_DLQFailurePropagates(t *testing.T) {
+	src := &mockSource{events: []source.Event{{Key: []byte("k1"), Value: []byte(`{"x":1}`), Topic: "http"}}}
+	sk := &mockSink{err: fmt.Errorf("sink unavailable")}
+	pub := &mockPublisher{err: fmt.Errorf("dlq unavailable")}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName:        "http-flow",
+		SourceType:      "http",
+		PropagateErrors: true,
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err == nil {
+		t.Fatal("expected combined sink+dlq error")
+	}
+	if !strings.Contains(err.Error(), "sink unavailable") || !strings.Contains(err.Error(), "dlq unavailable") {
+		t.Fatalf("expected joined error, got %v", err)
+	}
+}
+
+func TestPipeline_KafkaPolicyUnknown_DefaultsToDLQAck(t *testing.T) {
+	src := &mockSource{events: []source.Event{{Key: []byte("k1"), Value: []byte(`{"x":1}`), Topic: "orders"}}}
+	sk := &mockSink{err: fmt.Errorf("sink unavailable")}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName:        "order-events",
+		SourceType:      "kafka",
+		PropagateErrors: true,
+		CommitPolicy:    delivery.CommitPolicy("custom-policy"),
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err != context.DeadlineExceeded {
+		t.Fatalf("expected no propagated handler error, got %v", err)
+	}
+	if pub.count() != 1 {
+		t.Fatalf("expected 1 DLQ event, got %d", pub.count())
+	}
+}
+
+func TestPipeline_KafkaPolicyUnknown_DLQFailurePropagates(t *testing.T) {
+	src := &mockSource{events: []source.Event{{Key: []byte("k1"), Value: []byte(`{"x":1}`), Topic: "orders"}}}
+	sk := &mockSink{err: fmt.Errorf("sink unavailable")}
+	pub := &mockPublisher{err: fmt.Errorf("dlq unavailable")}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName:        "order-events",
+		SourceType:      "kafka",
+		PropagateErrors: true,
+		CommitPolicy:    delivery.CommitPolicy("custom-policy"),
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err == nil || !strings.Contains(err.Error(), "dlq unavailable") {
+		t.Fatalf("expected propagated dlq error, got %v", err)
+	}
+}
+
 func TestPipeline_CloudEventWrapping(t *testing.T) {
 	src := &mockSource{
 		events: []source.Event{
@@ -2812,5 +2883,70 @@ func TestToNative_List(t *testing.T) {
 	}
 	if len(nestedList) != 2 {
 		t.Errorf("expected 2 nested items, got %d", len(nestedList))
+	}
+}
+
+func TestPipeline_HandleFailure_NilCause(t *testing.T) {
+	p := &Pipeline{}
+	if err := p.handleFailure(context.Background(), source.Event{}, "IGNORED", nil); err != nil {
+		t.Fatalf("expected nil error for nil cause, got %v", err)
+	}
+}
+
+type valueCarrier struct{ v interface{} }
+
+func (c valueCarrier) Value() interface{} { return c.v }
+
+func TestCompileCELExpression_AndEvaluateHelpers(t *testing.T) {
+	if prg, err := compileCELExpression(""); err != nil || prg != nil {
+		t.Fatalf("expected empty expression to return nil program, got program=%v err=%v", prg, err)
+	}
+
+	invalid, err := compileCELExpression("data[")
+	if err != nil {
+		t.Fatalf("expected invalid expression to be treated as literal without error, got %v", err)
+	}
+	if invalid != nil {
+		t.Fatal("expected nil program for invalid expression")
+	}
+
+	prg, err := compileCELExpression("data.id")
+	if err != nil || prg == nil {
+		t.Fatalf("expected valid program, got prg=%v err=%v", prg, err)
+	}
+
+	if got := evaluateCELExpression(prg, map[string]interface{}{"id": "abc"}); got != "abc" {
+		t.Fatalf("expected abc, got %q", got)
+	}
+
+	if got := evaluateCELExpression(nil, map[string]interface{}{"id": "abc"}); got != "" {
+		t.Fatalf("expected empty string for nil program, got %q", got)
+	}
+
+	errPrg, err := compileCELExpression("data.amount + 1")
+	if err != nil || errPrg == nil {
+		t.Fatalf("expected valid arithmetic program, got %v %v", errPrg, err)
+	}
+	if got := evaluateCELExpression(errPrg, map[string]interface{}{"amount": "not-a-number"}); got != "" {
+		t.Fatalf("expected empty string on evaluation error, got %q", got)
+	}
+
+	if got := evaluateCELValue(nil, map[string]interface{}{"id": "abc"}); got != nil {
+		t.Fatalf("expected nil for nil program, got %#v", got)
+	}
+
+	if got := evaluateCELValue(errPrg, map[string]interface{}{"amount": "not-a-number"}); got != nil {
+		t.Fatalf("expected nil on evaluation error, got %#v", got)
+	}
+}
+
+func TestToNative_ValueMethodFallbackAndDefaultReturn(t *testing.T) {
+	if got := toNative(valueCarrier{v: "wrapped"}); got != "wrapped" {
+		t.Fatalf("expected wrapped value, got %#v", got)
+	}
+
+	custom := struct{ X int }{X: 1}
+	if got := toNative(custom); got != custom {
+		t.Fatalf("expected passthrough value, got %#v", got)
 	}
 }
