@@ -39,7 +39,7 @@ func TestKafkaTransactionalProducerFromContext(t *testing.T) {
 }
 
 func TestKafkaTransactionalProducerFromContext_NilAndMissing(t *testing.T) {
-	if _, ok := KafkaTransactionalProducerFromContext(nil); ok {
+	if _, ok := KafkaTransactionalProducerFromContext(nil); ok { //nolint:staticcheck // explicitly testing nil-context guard in KafkaTransactionalProducerFromContext
 		t.Fatal("expected missing producer for nil context")
 	}
 	if _, ok := KafkaTransactionalProducerFromContext(context.Background()); ok {
