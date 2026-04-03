@@ -479,13 +479,29 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		}
 		kSink.SetTracer(tracer)
 		sk = kSink
+
+	default:
+		return nil, fmt.Errorf("unsupported sink type: %s", flowDef.Sink.Type)
 	}
 
 	// DLQ logic
 	var dlqHandler *dlq.Handler
 	if flowDef.Source.Type == "kafka" {
-		// ... simplified dlq ...
-		dlqHandler = dlq.NewHandler(&dlq.NoopPublisher{})
+		clusterName, _ := flowDef.Source.Config["cluster"].(string)
+		cluster, found := flowDef.Kafka.Clusters[clusterName]
+		if !found {
+			return nil, fmt.Errorf("dlq publisher: cluster %q not found", clusterName)
+		}
+		pub, err := kafka_source.NewPublisher(&cluster)
+		if err != nil {
+			return nil, fmt.Errorf("dlq publisher: %w", err)
+		}
+		dlqHandler = dlq.NewHandler(pub)
+		if flowDef.ErrorHandling.DeadLetterTopic != "" {
+			dlqHandler = dlq.NewHandler(pub, dlq.WithTopicFunc(func(_ string) string {
+				return flowDef.ErrorHandling.DeadLetterTopic
+			}))
+		}
 	} else {
 		dlqHandler = dlq.NewHandler(&dlq.NoopPublisher{})
 	}
@@ -496,19 +512,19 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 	var chain *interceptor.Chain
 	if len(flowDef.Interceptors) > 0 {
 		var interceptors []interceptor.Interceptor
+		// Create the factory once, outside the loop, so it is reused across all wasm interceptors.
+		factory := wasmruntime.NewFactory()
 		for _, ic := range flowDef.Interceptors {
 			switch ic.Type {
 			case "wasm":
 				modulePath := getString(ic.Config, "module")
-				runtimeType := getString(ic.Config, "runtime") // read runtime type
+				runtimeType := getString(ic.Config, "runtime")
 
 				wasmCfg := wasmruntime.Config{
 					Type:       wasmruntime.RuntimeType(runtimeType),
 					ModulePath: modulePath,
 				}
 
-				// Create runtime via factory to support both Wasmer and Wazero
-				factory := wasmruntime.NewFactory()
 				rt, err := factory.Create(context.Background(), wasmCfg)
 				if err != nil {
 					return nil, fmt.Errorf("wasm runtime for %s: %w", modulePath, err)
