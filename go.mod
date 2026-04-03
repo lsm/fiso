@@ -1,6 +1,6 @@
 module github.com/lsm/fiso
 
-go 1.25.5
+go 1.25.8
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
