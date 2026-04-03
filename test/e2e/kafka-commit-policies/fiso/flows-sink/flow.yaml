@@ -1,0 +1,21 @@
+name: commit-policy-sink
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka:9092
+source:
+  type: kafka
+  config:
+    cluster: main
+    topic: cp-sink-events
+    consumerGroup: fiso-cp-sink
+    startOffset: 0
+sink:
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST
+errorHandling:
+  commitPolicy: sink
+  maxRetries: 0

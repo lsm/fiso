@@ -1,0 +1,65 @@
+services:
+  kafka:
+    image: apache/kafka:4.0.0
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      # Required for transactional EOS on single-node cluster
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Minimal HTTP backend; returns 500 for messages containing "fail-me"
+  user-service:
+    build:
+      context: ./user-service
+
+  # ── commitPolicy: sink ───────────────────────────────────────────────────
+  fiso-flow-sink:
+    image: fiso-flow:e2e
+    volumes:
+      - ./fiso/flows-sink:/etc/fiso/flows:ro
+    environment:
+      FISO_CONFIG_DIR: /etc/fiso/flows
+      FISO_METRICS_ADDR: ":9090"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+
+  # ── commitPolicy: sink_or_dlq ────────────────────────────────────────────
+  fiso-flow-sink-or-dlq:
+    image: fiso-flow:e2e
+    volumes:
+      - ./fiso/flows-sink-or-dlq:/etc/fiso/flows:ro
+    environment:
+      FISO_CONFIG_DIR: /etc/fiso/flows
+      FISO_METRICS_ADDR: ":9091"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+
+  # ── commitPolicy: kafka_transaction ─────────────────────────────────────
+  fiso-flow-kafka-tx:
+    image: fiso-flow:e2e
+    volumes:
+      - ./fiso/flows-kafka-tx:/etc/fiso/flows:ro
+    environment:
+      FISO_CONFIG_DIR: /etc/fiso/flows
+      FISO_METRICS_ADDR: ":9092"
+    depends_on:
+      kafka:
+        condition: service_healthy
