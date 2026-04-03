@@ -1564,3 +1564,103 @@ sink:
 		t.Fatal("Watch did not exit after done channel closed")
 	}
 }
+
+func TestFlowDefinition_Validate_InvalidCommitPolicy(t *testing.T) {
+	flow := FlowDefinition{
+		Name:   "bad-policy",
+		Source: SourceConfig{Type: "kafka"},
+		Sink:   SinkConfig{Type: "http"},
+		ErrorHandling: ErrorHandlingConfig{
+			CommitPolicy: "unknown",
+		},
+	}
+
+	err := flow.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "errorHandling.commitPolicy") {
+		t.Fatalf("expected commitPolicy validation error, got: %v", err)
+	}
+}
+
+func TestFlowDefinition_Validate_KafkaTransactionRequiresTransactionalID(t *testing.T) {
+	flow := FlowDefinition{
+		Name:   "tx-policy",
+		Source: SourceConfig{Type: "kafka"},
+		Sink:   SinkConfig{Type: "kafka"},
+		ErrorHandling: ErrorHandlingConfig{
+			CommitPolicy: "kafka_transaction",
+		},
+	}
+
+	err := flow.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "errorHandling.transactionalId") {
+		t.Fatalf("expected transactionalId validation error, got: %v", err)
+	}
+}
+
+func TestFlowDefinition_Validate_KafkaTransactionRequiresKafkaSourceAndSink(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		sink      string
+		errSubstr string
+	}{
+		{name: "requires kafka source", source: "http", sink: "kafka", errSubstr: "requires source.type to be kafka"},
+		{name: "requires kafka sink", source: "kafka", sink: "http", errSubstr: "requires sink.type to be kafka"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := FlowDefinition{
+				Name:   "tx-policy",
+				Source: SourceConfig{Type: tt.source},
+				Sink:   SinkConfig{Type: tt.sink},
+				ErrorHandling: ErrorHandlingConfig{
+					CommitPolicy:    "kafka_transaction",
+					TransactionalID: "tx-1",
+				},
+			}
+
+			err := flow.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Fatalf("expected error containing %q, got %v", tt.errSubstr, err)
+			}
+		})
+	}
+}
+
+func TestFlowDefinition_Validate_CommitPolicySink_IsValid(t *testing.T) {
+	flow := FlowDefinition{
+		Name:   "sink-policy",
+		Source: SourceConfig{Type: "kafka"},
+		Sink:   SinkConfig{Type: "http"},
+		ErrorHandling: ErrorHandlingConfig{
+			CommitPolicy: "sink",
+		},
+	}
+
+	if err := flow.Validate(); err != nil {
+		t.Fatalf("expected sink commit policy to be valid, got %v", err)
+	}
+}
+
+func TestFlowDefinition_Validate_KafkaTransactionValidConfig(t *testing.T) {
+	flow := FlowDefinition{
+		Name:   "tx-policy",
+		Source: SourceConfig{Type: "kafka"},
+		Sink:   SinkConfig{Type: "kafka"},
+		ErrorHandling: ErrorHandlingConfig{
+			CommitPolicy:    "kafka_transaction",
+			TransactionalID: "tx-1",
+		},
+	}
+
+	if err := flow.Validate(); err != nil {
+		t.Fatalf("expected valid kafka_transaction config, got %v", err)
+	}
+}

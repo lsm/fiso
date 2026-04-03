@@ -1,0 +1,22 @@
+name: commit-policy-sink-or-dlq
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka:9092
+source:
+  type: kafka
+  config:
+    cluster: main
+    topic: cp-dlq-events
+    consumerGroup: fiso-cp-dlq
+    startOffset: 0
+sink:
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST
+errorHandling:
+  commitPolicy: sink_or_dlq
+  deadLetterTopic: cp-dlq-dead
+  maxRetries: 0

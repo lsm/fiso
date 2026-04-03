@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/cel-go/common/types"
+	"github.com/lsm/fiso/internal/delivery"
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/source"
@@ -209,6 +210,152 @@ func TestPipeline_SinkError_SendsToDLQ(t *testing.T) {
 	}
 	if pub.published[0].headers["fiso-error-code"] != "SINK_DELIVERY_FAILED" {
 		t.Errorf("expected SINK_DELIVERY_FAILED, got %s", pub.published[0].headers["fiso-error-code"])
+	}
+}
+
+func TestPipeline_KafkaPolicySinkOrDLQ_AcksAfterDLQ(t *testing.T) {
+	src := &mockSource{events: []source.Event{{Key: []byte("k1"), Value: []byte(`{"x":1}`), Topic: "orders"}}}
+	sk := &mockSink{err: fmt.Errorf("sink unavailable")}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName:        "order-events",
+		SourceType:      "kafka",
+		PropagateErrors: true,
+		CommitPolicy:    delivery.CommitPolicySinkOrDLQ,
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err != context.DeadlineExceeded {
+		t.Fatalf("expected deadline exceeded (no propagated handler error), got %v", err)
+	}
+	if pub.count() != 1 {
+		t.Fatalf("expected 1 DLQ event, got %d", pub.count())
+	}
+}
+
+func TestPipeline_KafkaPolicySink_StrictFailure(t *testing.T) {
+	src := &mockSource{events: []source.Event{{Key: []byte("k1"), Value: []byte(`{"x":1}`), Topic: "orders"}}}
+	sk := &mockSink{err: fmt.Errorf("sink unavailable")}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName:        "order-events",
+		SourceType:      "kafka",
+		PropagateErrors: true,
+		CommitPolicy:    delivery.CommitPolicySink,
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err == nil {
+		t.Fatal("expected propagated error for strict sink policy")
+	}
+	if pub.count() != 0 {
+		t.Fatalf("expected 0 DLQ events for strict sink policy, got %d", pub.count())
+	}
+}
+
+func TestPipeline_KafkaPolicySinkOrDLQ_DLQFailurePropagates(t *testing.T) {
+	src := &mockSource{events: []source.Event{{Key: []byte("k1"), Value: []byte(`{"x":1}`), Topic: "orders"}}}
+	sk := &mockSink{err: fmt.Errorf("sink unavailable")}
+	pub := &mockPublisher{err: fmt.Errorf("dlq unavailable")}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName:        "order-events",
+		SourceType:      "kafka",
+		PropagateErrors: true,
+		CommitPolicy:    delivery.CommitPolicySinkOrDLQ,
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err == nil {
+		t.Fatal("expected error when DLQ publish fails")
+	}
+	if !strings.Contains(err.Error(), "dlq unavailable") {
+		t.Fatalf("expected propagated DLQ error, got %v", err)
+	}
+}
+
+func TestPipeline_NonKafkaSource_DLQFailurePropagates(t *testing.T) {
+	src := &mockSource{events: []source.Event{{Key: []byte("k1"), Value: []byte(`{"x":1}`), Topic: "http"}}}
+	sk := &mockSink{err: fmt.Errorf("sink unavailable")}
+	pub := &mockPublisher{err: fmt.Errorf("dlq unavailable")}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName:        "http-flow",
+		SourceType:      "http",
+		PropagateErrors: true,
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err == nil {
+		t.Fatal("expected combined sink+dlq error")
+	}
+	if !strings.Contains(err.Error(), "sink unavailable") || !strings.Contains(err.Error(), "dlq unavailable") {
+		t.Fatalf("expected joined error, got %v", err)
+	}
+}
+
+func TestPipeline_KafkaPolicyUnknown_DefaultsToDLQAck(t *testing.T) {
+	src := &mockSource{events: []source.Event{{Key: []byte("k1"), Value: []byte(`{"x":1}`), Topic: "orders"}}}
+	sk := &mockSink{err: fmt.Errorf("sink unavailable")}
+	pub := &mockPublisher{}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName:        "order-events",
+		SourceType:      "kafka",
+		PropagateErrors: true,
+		CommitPolicy:    delivery.CommitPolicy("custom-policy"),
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err != context.DeadlineExceeded {
+		t.Fatalf("expected no propagated handler error, got %v", err)
+	}
+	if pub.count() != 1 {
+		t.Fatalf("expected 1 DLQ event, got %d", pub.count())
+	}
+}
+
+func TestPipeline_KafkaPolicyUnknown_DLQFailurePropagates(t *testing.T) {
+	src := &mockSource{events: []source.Event{{Key: []byte("k1"), Value: []byte(`{"x":1}`), Topic: "orders"}}}
+	sk := &mockSink{err: fmt.Errorf("sink unavailable")}
+	pub := &mockPublisher{err: fmt.Errorf("dlq unavailable")}
+	dlqHandler := dlq.NewHandler(pub)
+
+	p := New(Config{
+		FlowName:        "order-events",
+		SourceType:      "kafka",
+		PropagateErrors: true,
+		CommitPolicy:    delivery.CommitPolicy("custom-policy"),
+	}, src, nil, sk, dlqHandler, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if err == nil || !strings.Contains(err.Error(), "dlq unavailable") {
+		t.Fatalf("expected propagated dlq error, got %v", err)
 	}
 }
 
@@ -2736,5 +2883,70 @@ func TestToNative_List(t *testing.T) {
 	}
 	if len(nestedList) != 2 {
 		t.Errorf("expected 2 nested items, got %d", len(nestedList))
+	}
+}
+
+func TestPipeline_HandleFailure_NilCause(t *testing.T) {
+	p := &Pipeline{}
+	if err := p.handleFailure(context.Background(), source.Event{}, "IGNORED", nil); err != nil {
+		t.Fatalf("expected nil error for nil cause, got %v", err)
+	}
+}
+
+type valueCarrier struct{ v interface{} }
+
+func (c valueCarrier) Value() interface{} { return c.v }
+
+func TestCompileCELExpression_AndEvaluateHelpers(t *testing.T) {
+	if prg, err := compileCELExpression(""); err != nil || prg != nil {
+		t.Fatalf("expected empty expression to return nil program, got program=%v err=%v", prg, err)
+	}
+
+	invalid, err := compileCELExpression("data[")
+	if err != nil {
+		t.Fatalf("expected invalid expression to be treated as literal without error, got %v", err)
+	}
+	if invalid != nil {
+		t.Fatal("expected nil program for invalid expression")
+	}
+
+	prg, err := compileCELExpression("data.id")
+	if err != nil || prg == nil {
+		t.Fatalf("expected valid program, got prg=%v err=%v", prg, err)
+	}
+
+	if got := evaluateCELExpression(prg, map[string]interface{}{"id": "abc"}); got != "abc" {
+		t.Fatalf("expected abc, got %q", got)
+	}
+
+	if got := evaluateCELExpression(nil, map[string]interface{}{"id": "abc"}); got != "" {
+		t.Fatalf("expected empty string for nil program, got %q", got)
+	}
+
+	errPrg, err := compileCELExpression("data.amount + 1")
+	if err != nil || errPrg == nil {
+		t.Fatalf("expected valid arithmetic program, got %v %v", errPrg, err)
+	}
+	if got := evaluateCELExpression(errPrg, map[string]interface{}{"amount": "not-a-number"}); got != "" {
+		t.Fatalf("expected empty string on evaluation error, got %q", got)
+	}
+
+	if got := evaluateCELValue(nil, map[string]interface{}{"id": "abc"}); got != nil {
+		t.Fatalf("expected nil for nil program, got %#v", got)
+	}
+
+	if got := evaluateCELValue(errPrg, map[string]interface{}{"amount": "not-a-number"}); got != nil {
+		t.Fatalf("expected nil on evaluation error, got %#v", got)
+	}
+}
+
+func TestToNative_ValueMethodFallbackAndDefaultReturn(t *testing.T) {
+	if got := toNative(valueCarrier{v: "wrapped"}); got != "wrapped" {
+		t.Fatalf("expected wrapped value, got %#v", got)
+	}
+
+	custom := struct{ X int }{X: 1}
+	if got := toNative(custom); got != custom {
+		t.Fatalf("expected passthrough value, got %#v", got)
 	}
 }

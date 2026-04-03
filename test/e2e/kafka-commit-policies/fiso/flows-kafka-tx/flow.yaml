@@ -1,0 +1,21 @@
+name: commit-policy-kafka-tx
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka:9092
+source:
+  type: kafka
+  config:
+    cluster: main
+    topic: cp-tx-source
+    consumerGroup: fiso-cp-tx
+    startOffset: 0
+sink:
+  type: kafka
+  config:
+    cluster: main
+    topic: cp-tx-sink
+errorHandling:
+  commitPolicy: kafka_transaction
+  transactionalId: fiso-e2e-tx

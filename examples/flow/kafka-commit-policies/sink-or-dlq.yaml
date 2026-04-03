@@ -1,0 +1,65 @@
+# commitPolicy: sink_or_dlq — Durable offset commit via Dead-Letter Queue
+#
+# This is the recommended default for most Kafka-source flows.  The
+# consumer offset is advanced after the sink succeeds OR after a
+# failed message is durably written to the dead-letter topic.
+# The pipeline never stalls: every message either reaches the sink or
+# lands in the DLQ, and processing continues regardless.
+#
+# When to choose sink_or_dlq:
+#   • You cannot afford to stall the consumer pipeline on transient
+#     or persistent downstream failures.
+#   • Your team can operate a DLQ: monitor it, replay or discard
+#     messages after investigating failures.
+#   • The sink is NOT idempotent and duplicates are more harmful than
+#     occasional DLQ entries.
+#
+# When NOT to choose sink_or_dlq:
+#   • You have no DLQ infrastructure — failed messages would be sent
+#     to a NoopPublisher and effectively discarded.  Use sink instead
+#     so failures surface as a stall rather than silent loss.
+#   • You need exactly-once semantics for a Kafka-to-Kafka flow — use
+#     kafka_transaction instead.
+#
+# DLQ message format:
+#   The original message bytes are written verbatim to the DLQ topic.
+#   Downstream consumers can inspect and selectively replay them with
+#   `kafka-console-producer --topic <source-topic>`.
+
+name: event-relay-resilient
+
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.internal:9092
+
+source:
+  type: kafka
+  config:
+    cluster: main
+    topic: user-events
+    consumerGroup: event-relay
+    startOffset: newest
+
+sink:
+  type: kafka
+  config:
+    cluster: main
+    # Processed events land here.
+    topic: enriched-events
+
+errorHandling:
+  # The DLQ topic must exist before fiso-flow starts (or Kafka
+  # auto-creation must be enabled on the broker).
+  deadLetterTopic: user-events-dlq
+
+  # Retry transient errors before routing to DLQ.
+  maxRetries: 3
+
+  # ── The key setting ──────────────────────────────────────────────
+  # Advance the consumer offset once either:
+  #   a) the sink confirms successful delivery, or
+  #   b) the failed message is written to deadLetterTopic.
+  # The pipeline keeps moving in both cases.
+  commitPolicy: sink_or_dlq

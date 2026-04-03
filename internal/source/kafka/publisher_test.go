@@ -32,6 +32,16 @@ func TestNewPublisher_NilCluster(t *testing.T) {
 	}
 }
 
+func TestNewPublisher_ClusterOptionsError(t *testing.T) {
+	_, err := NewPublisher(&intkafka.ClusterConfig{
+		Brokers: []string{"localhost:9092"},
+		Auth:    intkafka.AuthConfig{Mechanism: "INVALID"},
+	})
+	if err == nil {
+		t.Fatal("expected cluster options error")
+	}
+}
+
 func TestNewPublisher_ValidConfig(t *testing.T) {
 	pub, err := NewPublisher(&intkafka.ClusterConfig{Brokers: []string{"localhost:9092"}})
 	if err != nil {

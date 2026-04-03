@@ -1,0 +1,94 @@
+# commitPolicy: kafka_transaction — Exactly-Once Semantics (EOS)
+#
+# Implements the Kafka "consume-transform-produce" transactional
+# pattern using franz-go's GroupTransactSession.  The consumer offset
+# commit and the sink Produce are wrapped in a single Kafka
+# transaction: either both are committed atomically or neither is
+# (the transaction is aborted and the message will be redelivered).
+#
+# This guarantees exactly-once end-to-end delivery between two topics
+# on the same Kafka cluster — no duplicates in the sink, no offset
+# skips on the source.
+#
+# Hard requirements:
+#   1. source.type  must be "kafka"
+#   2. sink.type    must be "kafka"
+#   3. source.config.cluster and sink.config.cluster must name the
+#      SAME cluster entry (transactions span one broker cluster).
+#   4. errorHandling.transactionalId must be set and UNIQUE across all
+#      running instances of this consumer group.  A safe convention is
+#      "<consumer-group>-<instance-index>" (e.g. "order-pipeline-0").
+#      If two processes share a transactionalId the broker will fence
+#      the older one.
+#
+# Broker prerequisites:
+#   • Kafka 2.5+ (KRaft or ZooKeeper).  Apache Kafka 3.x / 4.x KRaft
+#     is recommended.
+#   • For single-node/dev clusters set:
+#       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+#       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+#
+# Consumers of the sink topic:
+#   • Set isolation.level=read_committed (or the franz-go equivalent
+#     kgo.FetchIsolationLevel(kgo.ReadCommitted)) so that in-flight
+#     (uncommitted) messages are invisible until the transaction
+#     commits.
+#
+# When to choose kafka_transaction:
+#   • Stream-processing pipelines where duplicate events in the output
+#     topic would cause incorrect aggregations or double-charges.
+#   • Fan-out patterns where the same event must appear in exactly one
+#     downstream topic, never twice.
+#
+# When NOT to choose kafka_transaction:
+#   • The sink is NOT Kafka (use sink or sink_or_dlq for HTTP/gRPC/
+#     Temporal sinks — they cannot participate in Kafka transactions).
+#   • Source and sink are on different Kafka clusters — cross-cluster
+#     transactions are not supported by the Kafka protocol.
+#   • You need high throughput on a heavily loaded cluster — the
+#     two-phase commit adds latency per batch.
+
+name: order-pipeline-eos
+
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.internal:9092
+      # Optional TLS / SASL config lives here when needed.
+
+source:
+  type: kafka
+  config:
+    cluster: main           # Must match sink.config.cluster exactly.
+    topic: raw-orders
+    consumerGroup: order-pipeline
+    startOffset: newest
+
+sink:
+  type: kafka
+  config:
+    cluster: main           # Same cluster as source — required for EOS.
+    topic: processed-orders
+
+errorHandling:
+  # ── The key settings ─────────────────────────────────────────────
+
+  # Enable transactional EOS.  Source and sink must both be Kafka on
+  # the same cluster (validated at startup).
+  commitPolicy: kafka_transaction
+
+  # Unique producer identity within this consumer group.  Use a
+  # stable, instance-scoped identifier.  Must NOT be shared across
+  # concurrent consumer instances (each instance needs its own ID).
+  #
+  # Pattern: "<consumer-group>-<pod-ordinal>" works well in
+  # Kubernetes StatefulSets.
+  transactionalId: order-pipeline-0
+
+  # Retries are intentionally low for transactional flows.  A failed
+  # transform aborts the transaction; the message is redelivered by
+  # Kafka and retried from scratch.  High retry counts here interact
+  # with the transaction timeout — keep maxRetries * retry interval
+  # well below transaction.timeout.ms (default 60 s on the broker).
+  maxRetries: 2

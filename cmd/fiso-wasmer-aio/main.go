@@ -21,6 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/lsm/fiso/internal/config"
+	"github.com/lsm/fiso/internal/delivery"
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/interceptor/wasm"
@@ -340,6 +341,18 @@ func run() error {
 }
 
 func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool *httpsource.ServerPool, tracer trace.Tracer) (*pipeline.Pipeline, error) {
+	commitPolicy := delivery.NormalizeCommitPolicy(flowDef.ErrorHandling.CommitPolicy)
+	if commitPolicy == delivery.CommitPolicyKafkaTransaction {
+		if flowDef.Source.Type != "kafka" || flowDef.Sink.Type != "kafka" {
+			return nil, fmt.Errorf("commitPolicy kafka_transaction requires kafka source and kafka sink")
+		}
+		sourceCluster, _ := flowDef.Source.Config["cluster"].(string)
+		sinkCluster, _ := flowDef.Sink.Config["cluster"].(string)
+		if sourceCluster == "" || sinkCluster == "" || sourceCluster != sinkCluster {
+			return nil, fmt.Errorf("commitPolicy kafka_transaction requires source and sink to use the same kafka cluster")
+		}
+	}
+
 	var src source.Source
 	var propagateErrors bool
 
@@ -357,10 +370,15 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 			return nil, fmt.Errorf("source config: cluster %q not found", clusterName)
 		}
 		kafkaCfg := kafka_source.Config{
-			Cluster:       &cluster,
-			Topic:         topic,
-			ConsumerGroup: consumerGroup,
-			StartOffset:   startOffset,
+			Cluster:            &cluster,
+			Topic:              topic,
+			ConsumerGroup:      consumerGroup,
+			StartOffset:        startOffset,
+			StopOnHandlerError: true,
+		}
+		if commitPolicy == delivery.CommitPolicyKafkaTransaction {
+			kafkaCfg.TransactionalID = flowDef.ErrorHandling.TransactionalID
+			kafkaCfg.RequireStableFetchOffset = true
 		}
 		s, err := kafka_source.NewSource(kafkaCfg, logger)
 		if err != nil {
@@ -368,6 +386,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		}
 		s.SetTracer(tracer)
 		src = s
+		propagateErrors = true
 
 	case "grpc":
 		listenAddr, _ := flowDef.Source.Config["listenAddr"].(string)
@@ -454,42 +473,58 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		if !found {
 			return nil, fmt.Errorf("sink config: cluster %q not found", clusterName)
 		}
-		kSink, err := kafkasink.NewSink(kafkasink.Config{Cluster: &cluster, Topic: topic})
+		kSink, err := kafkasink.NewSink(kafkasink.Config{Cluster: &cluster, Topic: topic, RequireTransactional: commitPolicy == delivery.CommitPolicyKafkaTransaction})
 		if err != nil {
 			return nil, fmt.Errorf("kafka sink: %w", err)
 		}
 		kSink.SetTracer(tracer)
 		sk = kSink
+
+	default:
+		return nil, fmt.Errorf("unsupported sink type: %s", flowDef.Sink.Type)
 	}
 
 	// DLQ logic
 	var dlqHandler *dlq.Handler
 	if flowDef.Source.Type == "kafka" {
-		// ... simplified dlq ...
-		dlqHandler = dlq.NewHandler(&dlq.NoopPublisher{})
+		clusterName, _ := flowDef.Source.Config["cluster"].(string)
+		cluster, found := flowDef.Kafka.Clusters[clusterName]
+		if !found {
+			return nil, fmt.Errorf("dlq publisher: cluster %q not found", clusterName)
+		}
+		pub, err := kafka_source.NewPublisher(&cluster)
+		if err != nil {
+			return nil, fmt.Errorf("dlq publisher: %w", err)
+		}
+		dlqHandler = dlq.NewHandler(pub)
+		if flowDef.ErrorHandling.DeadLetterTopic != "" {
+			dlqHandler = dlq.NewHandler(pub, dlq.WithTopicFunc(func(_ string) string {
+				return flowDef.ErrorHandling.DeadLetterTopic
+			}))
+		}
 	} else {
 		dlqHandler = dlq.NewHandler(&dlq.NoopPublisher{})
 	}
 
-	cfg := pipeline.Config{FlowName: flowDef.Name, PropagateErrors: propagateErrors}
+	cfg := pipeline.Config{FlowName: flowDef.Name, SourceType: flowDef.Source.Type, PropagateErrors: propagateErrors, CommitPolicy: commitPolicy}
 
 	// Interceptors
 	var chain *interceptor.Chain
 	if len(flowDef.Interceptors) > 0 {
 		var interceptors []interceptor.Interceptor
+		// Create the factory once, outside the loop, so it is reused across all wasm interceptors.
+		factory := wasmruntime.NewFactory()
 		for _, ic := range flowDef.Interceptors {
 			switch ic.Type {
 			case "wasm":
 				modulePath := getString(ic.Config, "module")
-				runtimeType := getString(ic.Config, "runtime") // read runtime type
+				runtimeType := getString(ic.Config, "runtime")
 
 				wasmCfg := wasmruntime.Config{
 					Type:       wasmruntime.RuntimeType(runtimeType),
 					ModulePath: modulePath,
 				}
 
-				// Create runtime via factory to support both Wasmer and Wazero
-				factory := wasmruntime.NewFactory()
 				rt, err := factory.Create(context.Background(), wasmCfg)
 				if err != nil {
 					return nil, fmt.Errorf("wasm runtime for %s: %w", modulePath, err)
