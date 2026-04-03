@@ -10,6 +10,10 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+---
+
+## [0.19.0] — 2026-04-03
+
 ### Added
 
 - **Configurable Kafka commit policies** (`errorHandling.commitPolicy`).
@@ -98,4 +102,5 @@ unreleased work and will be versioned when a release tag is cut.
 
 ---
 
-[Unreleased]: https://github.com/lsm/fiso/compare/main...HEAD
+[Unreleased]: https://github.com/lsm/fiso/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/lsm/fiso/compare/v0.18.0...v0.19.0
