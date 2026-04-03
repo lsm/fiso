@@ -526,7 +526,7 @@ errorHandling:
   commitPolicy: sink_or_dlq
 ```
 
-**4) Kafka transactional EOS (`kafka_transaction`)**
+**3) Kafka transactional EOS (`kafka_transaction`)**
 ```yaml
 source:
   type: kafka

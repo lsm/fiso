@@ -1,0 +1,60 @@
+# commitPolicy: sink — Strict offset-commit-after-sink-success
+#
+# Use this policy when you need a strong guarantee that every Kafka
+# message has been successfully delivered to the sink before the
+# consumer offset is advanced.  The trade-off is that a single
+# persistent delivery failure will stall the pipeline (no progress
+# on subsequent messages) until the problem is resolved.
+#
+# When to choose sink:
+#   • The sink is idempotent and you cannot tolerate duplicate
+#     processing on replay (e.g. financial transactions, metered API
+#     calls billed per request).
+#   • You prefer pipeline stalls over silent data loss.
+#   • There is no DLQ infrastructure available and you want failures
+#     to surface as an operational alert rather than be silently
+#     swallowed.
+#
+# When NOT to choose sink:
+#   • Your sink is occasionally unreliable — one bad message will
+#     block all subsequent messages indefinitely.
+#   • You need high throughput and can tolerate at-least-once DLQ
+#     semantics (use sink_or_dlq instead).
+
+name: order-ingest-strict
+
+kafka:
+  clusters:
+    main:
+      brokers:
+        - kafka.internal:9092
+
+source:
+  type: kafka
+  config:
+    cluster: main
+    topic: raw-orders
+    consumerGroup: order-ingest-strict
+    # Start from the most-recent offset on first launch.  Remove (or
+    # set to 0) to reprocess the full topic history on a fresh group.
+    startOffset: newest
+
+sink:
+  type: http
+  config:
+    # Order-processing microservice.  Must return 2xx for every
+    # message; a non-2xx response is treated as a delivery failure and
+    # the pipeline stalls.
+    url: http://order-service:8080/orders
+    method: POST
+
+errorHandling:
+  # Retry up to 5 times with exponential back-off before giving up.
+  # With commitPolicy: sink, "giving up" means stalling the pipeline.
+  maxRetries: 5
+
+  # ── The key setting ──────────────────────────────────────────────
+  # Commit the Kafka offset only after the sink returns 2xx.
+  # If the sink fails after all retries the offset is NOT committed
+  # and the pipeline stops processing further messages.
+  commitPolicy: sink
