@@ -486,3 +486,57 @@ jobs:
         run: bash test.sh
         env:
           E2E_BUILD_FLAG: " "
+
+  e2e-kafka-commit-policies:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+
+      - name: Build fiso-flow Docker image from pre-compiled binary
+        run: |
+          chmod +x bin/fiso-flow
+          printf 'FROM alpine:3.20\nRUN apk add --no-cache ca-certificates tzdata\nCOPY fiso-flow /usr/local/bin/fiso-flow\nENTRYPOINT ["fiso-flow"]\n' \
+            | docker build -t fiso-flow:e2e -f - bin/
+
+      - name: Run Kafka commit policies E2E tests
+        working-directory: test/e2e/kafka-commit-policies
+        run: bash test.sh
+        env:
+          E2E_BUILD_FLAG: " "
+
+  # ── Single gate job ──────────────────────────────────────────────────────
+  # Depends on every other CI job. Branch protection only needs to require
+  # this one check instead of enumerating every job individually.
+  all-tests-passing:
+    runs-on: ubuntu-latest
+    needs:
+      - test
+      - test-windows
+      - lint
+      - checks
+      - build
+      - integration
+      - cli-smoke
+      - e2e
+      - e2e-kafka
+      - e2e-kafka-temporal
+      - e2e-kafka-temporal-signal
+      - e2e-temporal-auth-oidc
+      - e2e-wasm
+      - e2e-flow-wasmer
+      - e2e-wasmer-link
+      - e2e-wasmer-aio
+      - e2e-wasmer-standalone
+      - e2e-operator
+      - e2e-debezium
+      - e2e-kafka-commit-policies
+    steps:
+      - name: All CI jobs passed
+        run: echo "All CI jobs passed."
