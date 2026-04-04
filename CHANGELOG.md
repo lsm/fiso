@@ -10,6 +10,13 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Chore
+
+- Closed obsolete PR #3 (lint/aio fixes and dep updates that were already
+  included in the PR #2 squash merge to `main` as commit `76a356d`).
+  Deleted stale branches `feat/kafka-commit-policies` and
+  `task/continue-work-on-pr-2-configurable-kafka-commit-po`.
+
 ---
 
 ## [0.19.0] — 2026-04-03
