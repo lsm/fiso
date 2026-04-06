@@ -10,6 +10,8 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+_No changes yet._
+
 ---
 
 ## [0.19.0] — 2026-04-03
