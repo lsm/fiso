@@ -1,3 +1,5 @@
+> **Historical, non-authoritative draft:** This preserved v1.3.0 document contains architecture and phase statements that have been superseded by the implementation. Its Phase 1 checklist is historical, not active work. For current authorities, see the [documentation map](README.md), [project README](../README.md), [product vision](product-vision.md), [roadmap](roadmap.md), and [ADR index](adr/README.md).
+
 # Project Fiso: High-Level Design Specification
 
 **Version:** 1.3.0

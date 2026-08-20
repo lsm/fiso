@@ -14,6 +14,22 @@ Fiso is built on two principles:
 
 The result: your app talks to localhost, Fiso talks to the world. Infrastructure and external services become pluggable, observable, and independently evolvable.
 
+## Product Direction: The Application's Perfect World
+
+Fiso aims to give every application a stable, contract-defined world, independent of the systems that happen to exist around it. Fiso-Flow adapts inbound reality into the inputs the application wants; Fiso-Link binds the application's outbound needs to mocks, legacy systems, or future providers. The goal is to let teams build before real integrations exist and replace those integrations later without changing application code.
+
+**Application Contract**, **Port**, **Operation**, **Binding**, and **Adapter** describe this product direction; they are not yet first-class Fiso APIs or CRDs. Read the [full product vision](docs/product-vision.md) for the promise, vocabulary, current foundation, and explicit gaps.
+
+## Documentation
+
+- [Documentation map and authority](docs/README.md)
+- [Product vision](docs/product-vision.md)
+- [80/20 iterative development method](docs/development-methodology.md)
+- [Current roadmap](docs/roadmap.md)
+- [Contributing](CONTRIBUTING.md)
+- [Architecture decision records](docs/adr/README.md)
+- [Changelog](CHANGELOG.md)
+
 ## Quick Start
 
 ### Install
@@ -279,7 +295,7 @@ transform:
 
 **Available variables:** `data`, `time`, `source`, `type`, `id`, `subject`
 
-**Performance:** 60% faster than the previous CEL implementation through compiled optimization and direct evaluation (no per-event goroutines).
+**Performance:** Expressions are compiled once and evaluated directly without per-event goroutines. See the [roadmap](docs/roadmap.md) for work to establish a reproducible comparative baseline.
 
 #### CloudEvents Customization
 
@@ -1643,6 +1659,8 @@ This command:
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the proposal, decision, verification, and pull-request workflow.
+
 ### Prerequisites
 
 - Go 1.25+
@@ -1732,11 +1750,11 @@ test/
 
 ### CI
 
-GitHub Actions runs on every push and PR to `main`:
+GitHub Actions runs on every push and PR to `main`. The table below is a representative summary; [the workflow](.github/workflows/ci.yml) is the complete gate.
 
 | Job | Description |
 |-----|-------------|
-| **test** | `go test -race` with 95% coverage gate |
+| **test** | `go test -race` with a coverage gate |
 | **lint** | golangci-lint v2 |
 | **checks** | gofmt, go mod tidy, go mod verify, govulncheck |
 | **build** | Compile all 4 binaries, upload artifacts |
@@ -1773,7 +1791,7 @@ This builds cross-platform binaries (linux/darwin, amd64/arm64), multi-arch Dock
 The new system:
 - Uses `fields:` map instead of `cel:` or `mapping:`
 - Compiles all transforms to optimized CEL expressions internally
-- Delivers 60% better performance than the old CEL implementation
+- Evaluates compiled expressions directly without per-event goroutines
 - Provides all the power of CEL with simpler syntax
 
 ### Migrating from CEL Syntax

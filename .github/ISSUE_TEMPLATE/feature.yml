@@ -1,0 +1,134 @@
+name: Outcome or feature proposal
+description: Propose a small, evidence-backed outcome for Fiso
+title: "[Proposal]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before proposing work, read the [product vision](https://github.com/lsm/fiso/blob/main/docs/product-vision.md), [80/20 development method](https://github.com/lsm/fiso/blob/main/docs/development-methodology.md), and [roadmap](https://github.com/lsm/fiso/blob/main/docs/roadmap.md).
+
+        Submission, scoring, or roadmap ranking does not approve implementation. Do not disclose sensitive vulnerability details in this public form; use private vulnerability reporting when available.
+
+        You may report a non-sensitive suspected correctness defect here. Fill the estimates with the best available evidence; if maintainers confirm it as a blocker or urgent defect, urgent triage takes precedence and the normal ROI score will not determine priority.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Work category
+      description: Choose the primary outcome category.
+      options:
+        - Product or contract
+        - Suspected non-sensitive correctness defect
+        - Reliability or maintenance
+        - Performance
+        - Documentation
+        - Brand or community
+        - Experiment
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem-outcome
+    attributes:
+      label: Problem and desired outcome
+      description: Who experiences the problem, what happens today, and what observable outcome should improve?
+      placeholder: |
+        Affected user:
+        Current problem:
+        Desired outcome:
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and affected users
+      description: Link reproductions, incidents, support reports, measurements, code, tests, or research. Explain who is affected and how often.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reach
+    attributes:
+      label: Reach
+      description: How much of Fiso or its target audience is affected?
+      options:
+        - "1 — isolated edge case"
+        - "2 — small user group or narrow path"
+        - "3 — meaningful user segment or component"
+        - "4 — several major workflows or user groups"
+        - "5 — project-wide or most target users"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      description: How valuable is the outcome for those reached?
+      options:
+        - "1 — minor improvement"
+        - "2 — useful but nonessential improvement"
+        - "3 — removes material friction"
+        - "4 — enables a major workflow or adoption step"
+        - "5 — blocking, transformational, or essential to the product promise"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: risk-reduction
+    attributes:
+      label: Risk reduction
+      description: How much security, data, operational, reliability, or adoption risk is removed?
+      options:
+        - "0 — no meaningful risk reduction"
+        - "1 — small local risk reduction"
+        - "2 — moderate risk reduction"
+        - "3 — significant reliability or adoption risk removed"
+        - "4 — major security, data, operational, or trust risk removed"
+        - "5 — critical risk removed"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: confidence
+    attributes:
+      label: Confidence
+      description: How strong is the supporting evidence?
+      options:
+        - "0.25 — assumption without direct evidence"
+        - "0.5 — weak or indirect evidence"
+        - "0.8 — strong reproduced or user evidence"
+        - "1.0 — measured and repeatedly reproduced evidence"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: effort
+    attributes:
+      label: Focused effort
+      description: Include implementation, verification, documentation, and rollback. Work above three days must be split before selection.
+      options:
+        - "0.5 day"
+        - "1 day"
+        - "1.5 days"
+        - "2 days"
+        - "2.5 days"
+        - "3 days"
+        - "More than 3 days — split before roadmap selection"
+    validations:
+      required: true
+
+  - type: textarea
+    id: slice-contract
+    attributes:
+      label: Smallest independently verifiable slice
+      description: Define the exact slice that can be accepted, rejected, or measured independently.
+      placeholder: |
+        Smallest slice:
+        One observable claim:
+        Verification method:
+        Rollback or stop path:
+        Dependencies or related issues:
+    validations:
+      required: true
