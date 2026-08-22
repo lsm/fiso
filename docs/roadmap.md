@@ -7,7 +7,7 @@ The roadmap applies the [80/20 Iterative Development Method](development-methodo
 ## Operating Rules
 
 - Keep at most **10 active entries** across `candidate`, `approved`, and `in progress`.
-- Keep at most one foundation and one product slice `in progress`.
+- Keep at most one foundation and one product slice selected across `approved` and `in progress`; approval reserves that class's WIP slot until the slice completes or returns to `candidate`.
 - Maintain no icebox, someday list, or exhaustive phase plan here. Broader ideas remain discoverable in issues.
 - Adding an eleventh entry requires removing an existing entry from this page first; preserve the broader idea in its issue if it remains useful.
 - `approved` applies only to the exact smallest slice written here, not its theme, dependencies, or likely follow-ups.
@@ -55,22 +55,7 @@ All seeded entries are unapproved candidates from the August 2026 repository aud
 - **Dependencies:** Entry 1.
 - **Last material evidence change:** 2026-08-20 repository audit.
 
-### 3. Establish one reproducible performance baseline
-
-- **Status:** candidate
-- **WIP class:** foundation
-- **Portfolio class:** proven outcome
-- **Problem and outcome:** Public performance claims are not tied to a recorded, reproducible environment and baseline. Make one consequential claim auditable before expanding benchmark governance.
-- **Evidence and baseline:** [`internal/transform/unified/unified_benchmark_test.go`](../internal/transform/unified/unified_benchmark_test.go) contains useful benchmarks, while the README makes a relative transform-performance claim without a stored benchmark result.
-- **Score inputs:** reach `3`; impact `3`; risk reduction `2`; confidence `0.8`; effort `1.5` focused days. Provisional score: `6.93`. Validate which public claim matters before selection.
-- **Smallest slice:** Select one consequential transform claim, document environment and command, record raw before/current results, and compare them with `benchstat` or an equivalent reproducible method.
-- **Observable claim:** A reader can reproduce and evaluate the selected performance claim from a clean checkout.
-- **Verification:** Run the documented benchmark multiple times and verify the recorded comparison and environment metadata.
-- **Rollback:** Remove the unsupported claim or baseline artifact if it cannot be reproduced.
-- **Dependencies:** None.
-- **Last material evidence change:** 2026-08-20 repository audit.
-
-### 4. Trial a public-claim-to-evidence matrix
+### 3. Trial a public-claim-to-evidence matrix
 
 - **Status:** candidate
 - **WIP class:** product
