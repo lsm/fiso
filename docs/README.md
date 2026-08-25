@@ -10,7 +10,7 @@ This page explains where Fiso's product direction, current behavior, decisions, 
 - [Roadmap](roadmap.md) — bounded, evidence-ranked candidates and explicitly selected slices
 - [Contributing](../CONTRIBUTING.md) — how to propose, implement, and verify a change
 - [Architecture Decision Records](adr/README.md) — accepted cross-cutting decisions and their history
-- [Changelog](../CHANGELOG.md) — shipped user-visible changes
+- [Changelog](../CHANGELOG.md) — pending `[Unreleased]` entries and versioned release history
 
 ## Document Authority
 
@@ -21,7 +21,7 @@ This page explains where Fiso's product direction, current behavior, decisions, 
 | Prioritization and delivery process | [80/20 Iterative Development Method](development-methodology.md) | Durable working method |
 | Current ranked hypotheses and selected slices | [Roadmap](roadmap.md) | Dynamic and deliberately bounded |
 | Cross-cutting architecture and public-contract decisions | [ADRs](adr/README.md) | Durable; superseded explicitly |
-| Shipped release deltas | [Changelog](../CHANGELOG.md) | Append-only release history |
+| Pending and shipped user-visible deltas | [Changelog](../CHANGELOG.md) | `[Unreleased]` is pending; versioned sections are shipped history |
 | Superseded design context | Historical documents such as the [v1.3 HLD draft](hld-specification.md) | Preserved, non-authoritative |
 
 Implementation evidence has the final say about what the current software actually does. Prose should make that behavior understandable, but prose cannot create a capability that the code does not implement.
@@ -34,7 +34,7 @@ Implementation evidence has the final say about what the current software actual
 4. Historical documents never override current behavior documentation or implementation evidence.
 5. If a current guide conflicts with code, public API definitions, configuration schemas, or tests, treat the conflict as a defect to reconcile. Do not silently choose the more convenient claim.
 6. A change to public behavior must update the corresponding current documentation.
-7. Record a user-visible delta in the changelog when it ships, not when it is proposed.
+7. Record a merged user-visible delta under `[Unreleased]`; it becomes shipped release history only when moved into a versioned section as part of a release.
 
 ## Document Lifecycles
 
@@ -61,7 +61,11 @@ An ADR is normally unnecessary for a routine bug fix, an isolated implementation
 - Use repository-relative links.
 - Describe implemented behavior in present tense. Label future behavior as direction, a hypothesis, or a proposal.
 - Use current implementation names such as `Source`, `Sink`, and `LinkTarget` when documenting existing code.
-- Use **Application Contract**, **Port**, **Operation**, **Binding**, and **Adapter** for the directional product model only until first-class implementations are accepted and shipped.
+- Use **Application Contract**, **Interaction**, and **Environment Binding** as the core directional concepts. An Interaction is exactly one of **Command**, **Query**, or **Event**.
+- Use **provides** and **requires** from the application's viewpoint: the application provides Interactions to and requires Interactions from its environment.
+- Reserve **inbound** and **outbound** for runtime traffic through Fiso-Flow and Fiso-Link; do not use them as substitutes for provides and requires.
+- Treat connectors, transformations, authentication, resilience, and other policies as technical details inside an Environment Binding.
+- Do not elevate Port, Operation, Adapter, standalone Binding, or Capability to core directional concepts. Ordinary network ports and current implementation symbols remain valid technical language.
 
 ## Current Guides
 

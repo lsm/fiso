@@ -16,9 +16,9 @@ The result: your app talks to localhost, Fiso talks to the world. Infrastructure
 
 ## Product Direction: The Application's Perfect World
 
-Fiso aims to give every application a stable, contract-defined world, independent of the systems that happen to exist around it. Fiso-Flow adapts inbound reality into the inputs the application wants; Fiso-Link binds the application's outbound needs to mocks, legacy systems, or future providers. The goal is to let teams build before real integrations exist and replace those integrations later without changing application code.
+Fiso aims to give every application a stable, contract-defined world, independent of the systems that happen to exist around it. Fiso-Flow mediates inbound runtime traffic; Fiso-Link mediates outbound runtime traffic. Independently of traffic direction, the application provides some interactions and requires others. The goal is to let teams build before real integrations exist and replace those integrations later without changing application code.
 
-**Application Contract**, **Port**, **Operation**, **Binding**, and **Adapter** describe this product direction; they are not yet first-class Fiso APIs or CRDs. Read the [full product vision](docs/product-vision.md) for the promise, vocabulary, current foundation, and explicit gaps.
+The directional model has three core concepts: an **Application Contract** identifies the **Interactions** the application provides and requires; each Interaction is a **Command**, **Query**, or **Event**; and an **Environment Binding** realizes those Interactions through mocks, legacy systems, or future providers in a particular environment. These are not yet first-class Fiso APIs or CRDs. Read the [full product vision](docs/product-vision.md) for definitions, diagrams, the current foundation, and explicit gaps.
 
 ## Documentation
 
@@ -295,7 +295,7 @@ transform:
 
 **Available variables:** `data`, `time`, `source`, `type`, `id`, `subject`
 
-**Performance:** Expressions are compiled once and evaluated directly without per-event goroutines. See the [roadmap](docs/roadmap.md) for work to establish a reproducible comparative baseline.
+**Performance:** Expressions are compiled once and evaluated directly without per-event goroutines.
 
 #### CloudEvents Customization
 
