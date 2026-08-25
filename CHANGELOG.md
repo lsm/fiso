@@ -16,6 +16,8 @@ unreleased work and will be versioned when a release tag is cut.
 
 ### Added
 
+- **Product direction and lightweight project governance** — added a directional product vision built around Application Contracts, Interactions, and Environment Bindings; documented authority and ADR practices; established an evidence-ranked roadmap and 80/20 development method; and added contributor and proposal-intake guidance. These documentation and governance additions do not introduce runtime or API behavior.
+
 - **Configurable Kafka commit policies** (`errorHandling.commitPolicy`).
   Three modes are available for Kafka-source flows:
 
