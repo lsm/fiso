@@ -10,6 +10,14 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Security
+
+- **Go toolchain and dependency vulnerability remediation** — upgraded the root
+  module and CI to Go 1.25.14, OpenTelemetry to 1.44.0 with contrib
+  instrumentation 0.69.0, gRPC to 1.82.1, `golang.org/x/net` to 0.55.0,
+  and `golang.org/x/text` to 0.39.0. These versions clear the 22 reachable
+  vulnerabilities reported by `govulncheck` on `main`.
+
 ---
 
 ## [0.19.0] — 2026-04-03
