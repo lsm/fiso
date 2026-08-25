@@ -18,7 +18,7 @@ The vision describes direction, not current capability. The roadmap is a bounded
 
 1. Search existing issues and the roadmap for the same problem or evidence.
 2. For normal work, open an **Outcome or feature proposal** and provide the affected user, desired outcome, evidence, score inputs, smallest slice, verification, rollback, and dependencies.
-3. Do not disclose sensitive vulnerability details in a public issue. Use the repository owner's private contact or GitHub private vulnerability reporting when available.
+3. Do not disclose sensitive vulnerability details in a public issue. Use **Report a vulnerability** on the repository's **Security** tab when available. Otherwise, open a public issue titled `Private security contact request` with no vulnerability details and include a private contact method the maintainer can use.
 4. Maintainers validate score inputs and select the exact slice. Submitting or ranking a proposal does not approve implementation.
 
 Confirmed security, correctness, data-loss, and production blockers can bypass normal ROI ordering, but still need the smallest safe repair and objective verification.
@@ -69,4 +69,4 @@ Follow the [documentation authority policy](docs/README.md):
 - update current behavior documentation with public behavior changes;
 - keep future direction out of current capability claims;
 - preserve accepted decisions through ADR supersession rather than rewriting history; and
-- update the changelog only for user-visible changes that ship.
+- record merged user-visible changes under `[Unreleased]`; move them into versioned shipped history when releasing.

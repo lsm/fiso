@@ -11,7 +11,7 @@ The roadmap applies the [80/20 Iterative Development Method](development-methodo
 - Maintain no icebox, someday list, or exhaustive phase plan here. Broader ideas remain discoverable in issues.
 - Adding an eleventh entry requires removing an existing entry from this page first; preserve the broader idea in its issue if it remains useful.
 - `approved` applies only to the exact smallest slice written here, not its theme, dependencies, or likely follow-ups.
-- Remove completed work from this page. Preserve its outcome in the issue and PR, an ADR when applicable, and the changelog when a user-visible change ships.
+- Remove completed work from this page. Preserve its outcome in the issue and PR, an ADR when applicable, and `[Unreleased]` when a user-visible change merges; it becomes shipped history when released.
 - Re-rank only after a material evidence trigger defined by the methodology.
 - Unknown inputs block selection; do not manufacture precision to force a rank.
 

@@ -31,8 +31,9 @@ The conceptual model describes relationships from the application's viewpoint. T
                          \                  /
                           \                /
                    realized for an environment by
-                         Environment Binding
-               [connectors | transformations | policies]
+                one or more Environment Bindings
+     [each covers one or more Interactions using connectors,
+                transformations, and policies]
 ```
 
 Runtime traffic direction is separate:
@@ -56,7 +57,7 @@ Application code depends on domain-meaningful Interactions, not on whichever inf
 
 ### 2. Integrations are inverted
 
-The Application Contract declares what the application provides and requires. Environment Bindings realize that contract instead of allowing environmental details to shape business logic.
+The Application Contract declares what the application provides and requires. One or more Environment Bindings realize its Interactions without allowing environmental details to shape business logic.
 
 ### 3. Development does not wait for integration
 
@@ -68,7 +69,7 @@ Connectors, transformations, authentication, routing, resilience, and failure po
 
 ### 5. Provider migration preserves application behavior
 
-Legacy and replacement providers may differ internally, but their Environment Bindings must satisfy the same Application Contract. Cutover and rollback should change an Environment Binding, not the application.
+Legacy and replacement providers may differ internally, but their Environment Bindings must satisfy the same Application Contract. Cutover and rollback should select between those Environment Bindings, not change the application.
 
 ### 6. Compatibility is measured from the application outward
 
@@ -109,8 +110,6 @@ A request for information without an intended business-state change: **please te
 
 A fact that has already happened: **something happened**. Delivery can be acknowledged, but a consumer cannot semantically reject the historical fact described by the Event. Event names should normally use the past tense, such as `OrderCreated`, `PaymentAuthorized`, or `CustomerUpdated`.
 
-“Action” is not a formal Interaction kind because it can ambiguously mean a Command, an internal step, or an Event.
-
 ### Environment Binding
 
 The environment-specific realization of one or more contract Interactions.
@@ -124,15 +123,6 @@ Future production   GetCustomer ──> Customer Platform v2 over HTTP and OAuth
 ```
 
 The Application Contract and application code remain stable. The Environment Binding contains technical details such as connectors, request and response transformations, authentication, routing, retries, circuit breaking, and other policies.
-
-### Intentionally Not Core Concepts
-
-- **Port** is excluded because it is easily confused with a network port and carries framework-specific meaning from ports-and-adapters architecture.
-- **Operation** is excluded because it does not clearly distinguish a Command, a Query, and an Event.
-- **Adapter** is a useful implementation word, but connectors and transformations are technical details within an Environment Binding rather than a concept every application team must model.
-- **Capability** may later become optional grouping for large contracts, but it is not core vocabulary without concrete evidence that the grouping is necessary.
-
-Current implementation terms such as `Source`, `Transformer`, `Sink`, `FlowDefinition`, and `LinkTarget` remain the names of existing constructs. They are foundations that can help realize this direction, not one-to-one equivalents of the three conceptual concepts.
 
 ## Desired Outcomes
 
@@ -148,7 +138,7 @@ Fiso-Flow adapts a legacy event, webhook, CDC record, or API call arriving throu
 
 ### Replace a downstream provider without changing the application
 
-The application continues using the same required Interaction while its Environment Binding moves from a legacy service to a new platform. Both bindings pass the same conformance checks, and rollback restores the old binding.
+The application continues using the same required Interaction while one Environment Binding for a legacy service is replaced by another for the new platform. Both bindings pass the same conformance checks, and rollback selects the previous binding.
 
 ### Test the boundary independently
 
@@ -161,6 +151,8 @@ Validation and CI reject an Environment Binding or provider change that would vi
 These are desired product outcomes, not claims that Fiso supports every scenario today.
 
 ## Current Foundation
+
+Current implementation terms such as `Source`, `Transformer`, `Sink`, `FlowDefinition`, and `LinkTarget` retain their existing meanings. They are foundations for this direction, not one-to-one equivalents of its three conceptual concepts.
 
 Fiso already contains important building blocks for this direction:
 

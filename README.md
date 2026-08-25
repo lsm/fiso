@@ -1,24 +1,24 @@
 # Fiso
 
-Cloud-native event mediation runtime that decouples application business logic from external infrastructure dependencies. Fiso standardizes inbound events via **Fiso-Flow** and abstracts outbound dependencies via **Fiso-Link**, managed at scale by the **Fiso-Operator**.
+Cloud-native event mediation runtime that helps decouple application business logic from external infrastructure dependencies. Fiso standardizes supported inbound event paths via **Fiso-Flow** and mediates configured outbound dependencies via **Fiso-Link**, managed at scale by the **Fiso-Operator**.
 
 ## Why Fiso
 
 Most applications spend significant code on things that aren't business logic: connecting to message brokers, calling external APIs, managing auth tokens, implementing retry loops, wiring circuit breakers. This code is tedious, error-prone, and creates tight coupling between your application and the infrastructure it runs on.
 
-Fiso is built on two principles:
+Fiso applies two principles to the integrations it mediates:
 
-**1. Abstract every external dependency.** Your application should never directly interact with anything outside its own process — not Kafka, not Stripe, not Salesforce, not any message broker or third-party API. Every external dependency, whether infrastructure or service, is mediated through a local interface that Fiso provides. Inbound events arrive as transformed CloudEvents on a local endpoint. Outbound requests go through `localhost:3500/link/{target}`. Your app doesn't import broker clients or embed API SDKs.
+**1. Give applications stable local interfaces.** For supported inbound paths, Fiso-Flow receives external traffic, transforms it, and delivers a CloudEvents envelope where configured. For configured outbound targets, Fiso-Link exposes `localhost:3500/link/{target}`. Application business logic can use these interfaces instead of embedding the corresponding broker clients, provider SDKs, and integration policies.
 
-**2. Invert every integration.** Instead of your application reaching out to external systems, Fiso inverts the relationship. Your app depends on stable local interfaces. The concrete details — which broker, which API endpoint, what auth method, what retry policy — are declared in configuration and managed by the runtime. Swap Kafka for HTTP ingestion, change an API provider, rotate credentials — all through config changes, zero application code touched, no redeployment of your service.
+**2. Move integration mechanics into the runtime.** Endpoints, authentication, discovery, retries, circuit breaking, rate limiting, and transformations for mediated integrations are declared in configuration and handled by Fiso. Compatible configuration changes can evolve those integrations independently of application business logic.
 
-The result: your app talks to localhost, Fiso talks to the world. Infrastructure and external services become pluggable, observable, and independently evolvable.
+The result: applications use local interfaces while Fiso communicates with supported external systems. Mediated integrations gain centralized configuration, observability, and runtime controls.
 
 ## Product Direction: The Application's Perfect World
 
 Fiso aims to give every application a stable, contract-defined world, independent of the systems that happen to exist around it. Fiso-Flow mediates inbound runtime traffic; Fiso-Link mediates outbound runtime traffic. Independently of traffic direction, the application provides some interactions and requires others. The goal is to let teams build before real integrations exist and replace those integrations later without changing application code.
 
-The directional model has three core concepts: an **Application Contract** identifies the **Interactions** the application provides and requires; each Interaction is a **Command**, **Query**, or **Event**; and an **Environment Binding** realizes those Interactions through mocks, legacy systems, or future providers in a particular environment. These are not yet first-class Fiso APIs or CRDs. Read the [full product vision](docs/product-vision.md) for definitions, diagrams, the current foundation, and explicit gaps.
+The directional model has three core concepts: an **Application Contract** identifies the **Interactions** the application provides and requires; each Interaction is a **Command**, **Query**, or **Event**; and one or more **Environment Bindings** realize those Interactions through mocks, legacy systems, or future providers in a particular environment. These are not yet first-class Fiso APIs or CRDs. Read the [full product vision](docs/product-vision.md) for definitions, diagrams, the current foundation, and explicit gaps.
 
 ## Documentation
 

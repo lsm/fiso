@@ -9,7 +9,7 @@ This page explains where Fiso's product direction, current behavior, decisions, 
 - [80/20 Iterative Development Method](development-methodology.md) — how work is framed, selected, and evaluated
 - [Roadmap](roadmap.md) — bounded, evidence-ranked candidates and explicitly selected slices
 - [Contributing](../CONTRIBUTING.md) — how to propose, implement, and verify a change
-- [Architecture Decision Records](adr/README.md) — accepted cross-cutting decisions and their history
+- [Architecture Decision Records](adr/README.md) — cross-cutting proposals, adopted decisions, and their history
 - [Changelog](../CHANGELOG.md) — pending `[Unreleased]` entries and versioned release history
 
 ## Document Authority
@@ -20,7 +20,7 @@ This page explains where Fiso's product direction, current behavior, decisions, 
 | Product purpose and directional vocabulary | [Product Vision](product-vision.md) | Durable direction; not evidence of availability |
 | Prioritization and delivery process | [80/20 Iterative Development Method](development-methodology.md) | Durable working method |
 | Current ranked hypotheses and selected slices | [Roadmap](roadmap.md) | Dynamic and deliberately bounded |
-| Cross-cutting architecture and public-contract decisions | [ADRs](adr/README.md) | Durable; superseded explicitly |
+| Cross-cutting architecture and public-contract decisions | [ADRs](adr/README.md) | Proposals are reviewed; accepted decisions are durable and superseded explicitly |
 | Pending and shipped user-visible deltas | [Changelog](../CHANGELOG.md) | `[Unreleased]` is pending; versioned sections are shipped history |
 | Superseded design context | Historical documents such as the [v1.3 HLD draft](hld-specification.md) | Preserved, non-authoritative |
 
@@ -41,7 +41,7 @@ Implementation evidence has the final say about what the current software actual
 - **Current** documents describe behavior users can rely on now and change alongside that behavior.
 - **Directional** documents describe durable product intent and must clearly distinguish desired outcomes from shipped capabilities.
 - **Dynamic** documents, such as the roadmap, are working decision surfaces and change as evidence changes.
-- **Decision records** preserve the context, choice, and consequences of an accepted decision. They are superseded rather than rewritten.
+- **Decision records** begin as proposals. Once accepted, they preserve the context, choice, and consequences of the decision and are superseded rather than rewritten.
 - **Historical** documents are retained for context but begin with a visible non-authoritative warning.
 
 ## When to Write an ADR
@@ -65,7 +65,7 @@ An ADR is normally unnecessary for a routine bug fix, an isolated implementation
 - Use **provides** and **requires** from the application's viewpoint: the application provides Interactions to and requires Interactions from its environment.
 - Reserve **inbound** and **outbound** for runtime traffic through Fiso-Flow and Fiso-Link; do not use them as substitutes for provides and requires.
 - Treat connectors, transformations, authentication, resilience, and other policies as technical details inside an Environment Binding.
-- Do not elevate Port, Operation, Adapter, standalone Binding, or Capability to core directional concepts. Ordinary network ports and current implementation symbols remain valid technical language.
+- Use other technical or implementation-specific terms according to their documented context; they do not add concepts to this directional model.
 
 ## Current Guides
 

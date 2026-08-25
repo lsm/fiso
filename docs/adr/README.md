@@ -31,7 +31,7 @@ Once accepted, do not substantively rewrite an ADR. Correct trivial errors or ad
 
 | ADR | Status | Decision |
 |---|---|---|
-| [0001](0001-adopt-documentation-authority-and-evidence-driven-planning.md) | Accepted | Adopt documentation authority and evidence-driven planning |
+| [0001](0001-adopt-documentation-authority-and-evidence-driven-planning.md) | Proposed | Adopt documentation authority and evidence-driven planning |
 
 ## Template
 

@@ -119,7 +119,7 @@ A slice is done when:
 - the observable claim is supported—or the failed hypothesis is explicitly closed;
 - relevant public behavior, examples, and decisions are updated;
 - rollback remains understood;
-- shipped user-visible changes are ready for the changelog; and
+- the applicable user-visible change is recorded under `[Unreleased]`; and
 - follow-up work is re-evaluated rather than automatically promoted.
 
 ## Anti-Patterns

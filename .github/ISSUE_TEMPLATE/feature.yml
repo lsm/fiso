@@ -7,7 +7,7 @@ body:
       value: |
         Before proposing work, read the [product vision](https://github.com/lsm/fiso/blob/main/docs/product-vision.md), [80/20 development method](https://github.com/lsm/fiso/blob/main/docs/development-methodology.md), and [roadmap](https://github.com/lsm/fiso/blob/main/docs/roadmap.md).
 
-        Submission, scoring, or roadmap ranking does not approve implementation. Do not disclose sensitive vulnerability details in this public form; use private vulnerability reporting when available.
+        Submission, scoring, or roadmap ranking does not approve implementation. Do not disclose sensitive vulnerability details in this public form. Use **Report a vulnerability** on the repository's **Security** tab when available; otherwise, open a public issue titled `Private security contact request` with no vulnerability details and include a private contact method the maintainer can use.
 
         You may report a non-sensitive suspected correctness defect here. Fill the estimates with the best available evidence; if maintainers confirm it as a blocker or urgent defect, urgent triage takes precedence and the normal ROI score will not determine priority.
 

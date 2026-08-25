@@ -1,6 +1,6 @@
 # ADR 0001: Adopt Documentation Authority and Evidence-Driven Planning
 
-- **Status:** Accepted
+- **Status:** Proposed
 - **Decision date:** 2026-08-20
 
 ## Context
@@ -23,7 +23,7 @@ Fiso adopts:
 6. this minimal ADR practice for durable cross-cutting decisions; and
 7. a concise [contributor workflow](../../CONTRIBUTING.md) that links these authorities rather than duplicating them.
 
-The root README remains the primary user-facing overview of current behavior. Code, public API/configuration definitions, and tests remain the final implementation evidence. The changelog remains the record of shipped user-visible deltas.
+The root README remains the primary user-facing overview of current behavior. Code, public API/configuration definitions, and tests remain the final implementation evidence. The changelog records pending user-visible deltas under `[Unreleased]` and shipped history in versioned sections.
 
 ## Scope and Non-Decisions
 
@@ -31,7 +31,7 @@ This decision governs documentation authority and work-selection process only.
 
 It does **not**:
 
-- approve implementation of an `ApplicationContract`, `Port`, `Operation`, `Binding`, or `Adapter` runtime or API;
+- approve runtime or API implementation of the directional Application Contract, Interaction, or Environment Binding concepts;
 - approve a new CRD or API version;
 - decide configuration migration or compatibility rules;
 - approve a canonical local verification target;
