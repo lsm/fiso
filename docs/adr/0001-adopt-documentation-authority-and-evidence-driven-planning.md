@@ -1,6 +1,6 @@
 # ADR 0001: Adopt Documentation Authority and Evidence-Driven Planning
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Decision date:** 2026-08-20
 
 ## Context
