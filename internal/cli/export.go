@@ -333,6 +333,9 @@ func validateFlowFieldTypes(root *yaml.Node) error {
 			return unsupportedExportField("errorHandling.maxRetries", "explicit zero would be omitted from the FlowDefinition")
 		}
 	}
+	if deadLetterTopic := yamlMappingValue(errorHandling, "deadLetterTopic"); deadLetterTopic != nil && deadLetterTopic.Value == "" {
+		return unsupportedExportField("errorHandling.deadLetterTopic", "explicit empty value would be omitted from the FlowDefinition")
+	}
 	cloudEvents := yamlMappingValue(document, "cloudevents")
 	if cloudEvents != nil && cloudEvents.Kind == yaml.MappingNode {
 		for _, field := range []string{"id", "type", "source", "subject", "data", "datacontenttype", "dataschema"} {
@@ -453,6 +456,9 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		if protocol := yamlMappingValue(target, "protocol"); protocol != nil && protocol.Value == "" {
 			return unsupportedExportField(prefix+".protocol", "explicit empty value cannot be replaced by the default protocol")
 		}
+		if yamlMappingValue(target, "basePath") != nil {
+			return unsupportedExportField(prefix+".basePath", "base path has no LinkTarget representation")
+		}
 		if port := yamlMappingValue(target, "port"); port != nil {
 			if err := requireYAMLScalarTag(port, prefix+".port", "!!int"); err != nil {
 				return err
@@ -485,10 +491,8 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}
 		if enabled := yamlMappingValue(circuitBreaker, "enabled"); enabled != nil {
 			var value bool
-			if err := enabled.Decode(&value); err == nil && !value &&
-				yamlMappingValue(circuitBreaker, "failureThreshold") == nil &&
-				yamlMappingValue(circuitBreaker, "resetTimeout") == nil {
-				return unsupportedExportField(prefix+".circuitBreaker.enabled", "explicit false would omit the circuit breaker")
+			if err := enabled.Decode(&value); err == nil && !value {
+				return unsupportedExportField(prefix+".circuitBreaker.enabled", "an explicitly disabled circuit breaker has no LinkTarget representation")
 			}
 		}
 		if resetTimeout := yamlMappingValue(circuitBreaker, "resetTimeout"); resetTimeout != nil && resetTimeout.Value == "" {
@@ -517,6 +521,9 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 			if err := maxAttempts.Decode(&attempts); err == nil && attempts == 0 {
 				return unsupportedExportField(prefix+".retry.maxAttempts", "explicit zero would be omitted and is invalid in the LinkTarget CRD")
 			}
+		}
+		if backoff := yamlMappingValue(retry, "backoff"); backoff != nil && backoff.Value == "" {
+			return unsupportedExportField(prefix+".retry.backoff", "explicit empty value would be omitted from the LinkTarget")
 		}
 		for _, field := range []string{"initialInterval", "maxInterval", "jitter"} {
 			if yamlMappingValue(retry, field) != nil {

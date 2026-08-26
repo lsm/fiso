@@ -743,6 +743,20 @@ errorHandling:
 			wantPath: "errorHandling.maxRetries",
 		},
 		{
+			name: "explicit empty dead-letter topic",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  deadLetterTopic: ""
+`,
+			wantPath: "errorHandling.deadLetterTopic",
+		},
+		{
 			name: "boolean CloudEvents field",
 			flowYAML: `name: flow
 source:
@@ -1220,7 +1234,9 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "explicit zero success threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      successThreshold: 0\n", wantPath: "targets[0].circuitBreaker.successThreshold"},
 		{name: "explicitly disabled circuit breaker", fragment: "    circuitBreaker:\n      enabled: false\n", wantPath: "targets[0].circuitBreaker.enabled"},
 		{name: "explicitly disabled uppercase circuit breaker", fragment: "    circuitBreaker:\n      enabled: FALSE\n", wantPath: "targets[0].circuitBreaker.enabled"},
+		{name: "disabled circuit breaker with zero threshold", fragment: "    circuitBreaker:\n      enabled: false\n      failureThreshold: 0\n", wantPath: "targets[0].circuitBreaker.enabled"},
 		{name: "explicit empty reset timeout", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      resetTimeout: \"\"\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
+		{name: "explicit empty retry backoff", fragment: "    retry:\n      maxAttempts: 3\n      backoff: \"\"\n", wantPath: "targets[0].retry.backoff"},
 		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "oversized retry attempts", fragment: "    retry:\n      maxAttempts: 18446744073709551615\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "explicit zero retry attempts", fragment: "    retry:\n      maxAttempts: 0\n", wantPath: "targets[0].retry.maxAttempts"},
@@ -1236,6 +1252,7 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "port", fragment: "    port: 8443\n", wantPath: "targets[0].port"},
 		{name: "explicit zero port", fragment: "    port: 0\n", wantPath: "targets[0].port"},
 		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
+		{name: "explicit empty base path", fragment: "    basePath: \"\"\n", wantPath: "targets[0].basePath"},
 		{name: "coerced auth type", fragment: "    auth:\n      type: !!binary bm9uZQ==\n", wantPath: "targets[0].auth.type"},
 		{
 			name: "local authentication reference",
@@ -1262,7 +1279,7 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
       enabled: false
       failureThreshold: 3
 `,
-			wantPath: "targets[0].circuitBreaker.failureThreshold",
+			wantPath: "targets[0].circuitBreaker.enabled",
 		},
 		{
 			name: "enabled circuit breaker without threshold",
