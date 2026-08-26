@@ -276,15 +276,6 @@ func validateExportableFlow(flow *config.FlowDefinition) error {
 	if len(flow.Interceptors) > 0 {
 		return unsupportedExportField("interceptors", "interceptors have no FlowDefinition representation")
 	}
-	if flow.ErrorHandling.Backoff != "" {
-		return unsupportedExportField("errorHandling.backoff", "retry backoff has no FlowDefinition representation")
-	}
-	if flow.ErrorHandling.CommitPolicy != "" {
-		return unsupportedExportField("errorHandling.commitPolicy", "commit policy has no FlowDefinition representation")
-	}
-	if flow.ErrorHandling.TransactionalID != "" {
-		return unsupportedExportField("errorHandling.transactionalId", "transactional ID has no FlowDefinition representation")
-	}
 	if _, err := copyStringMap("source.config", flow.Source.Config); err != nil {
 		return err
 	}
@@ -335,6 +326,11 @@ func validateFlowFieldTypes(root *yaml.Node) error {
 	}
 	if deadLetterTopic := yamlMappingValue(errorHandling, "deadLetterTopic"); deadLetterTopic != nil && deadLetterTopic.Value == "" {
 		return unsupportedExportField("errorHandling.deadLetterTopic", "explicit empty value would be omitted from the FlowDefinition")
+	}
+	for _, field := range []string{"backoff", "commitPolicy", "transactionalId"} {
+		if yamlMappingValue(errorHandling, field) != nil {
+			return unsupportedExportField("errorHandling."+field, field+" has no FlowDefinition representation")
+		}
 	}
 	cloudEvents := yamlMappingValue(document, "cloudevents")
 	if cloudEvents != nil && cloudEvents.Kind == yaml.MappingNode {
@@ -493,6 +489,12 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 			var value bool
 			if err := enabled.Decode(&value); err == nil && !value {
 				return unsupportedExportField(prefix+".circuitBreaker.enabled", "an explicitly disabled circuit breaker has no LinkTarget representation")
+			}
+		} else {
+			for _, field := range []string{"failureThreshold", "resetTimeout"} {
+				if yamlMappingValue(circuitBreaker, field) != nil {
+					return unsupportedExportField(prefix+".circuitBreaker."+field, field+" without an enabled circuit breaker would be discarded")
+				}
 			}
 		}
 		if resetTimeout := yamlMappingValue(circuitBreaker, "resetTimeout"); resetTimeout != nil && resetTimeout.Value == "" {

@@ -971,6 +971,51 @@ errorHandling:
 			wantPath: "errorHandling.transactionalId",
 		},
 		{
+			name: "explicit empty retry backoff setting",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  backoff: ""
+`,
+			wantPath: "errorHandling.backoff",
+		},
+		{
+			name: "explicit empty commit policy",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  commitPolicy: ""
+`,
+			wantPath: "errorHandling.commitPolicy",
+		},
+		{
+			name: "explicit empty transactional ID",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  transactionalId: ""
+`,
+			wantPath: "errorHandling.transactionalId",
+		},
+		{
 			name: "list source config",
 			fragment: `source:
   type: grpc
@@ -1235,6 +1280,9 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "explicitly disabled circuit breaker", fragment: "    circuitBreaker:\n      enabled: false\n", wantPath: "targets[0].circuitBreaker.enabled"},
 		{name: "explicitly disabled uppercase circuit breaker", fragment: "    circuitBreaker:\n      enabled: FALSE\n", wantPath: "targets[0].circuitBreaker.enabled"},
 		{name: "disabled circuit breaker with zero threshold", fragment: "    circuitBreaker:\n      enabled: false\n      failureThreshold: 0\n", wantPath: "targets[0].circuitBreaker.enabled"},
+		{name: "zero threshold without enabled", fragment: "    circuitBreaker:\n      failureThreshold: 0\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "threshold without enabled", fragment: "    circuitBreaker:\n      failureThreshold: 3\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "reset timeout without enabled", fragment: "    circuitBreaker:\n      resetTimeout: 30s\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
 		{name: "explicit empty reset timeout", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      resetTimeout: \"\"\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
 		{name: "explicit empty retry backoff", fragment: "    retry:\n      maxAttempts: 3\n      backoff: \"\"\n", wantPath: "targets[0].retry.backoff"},
 		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
