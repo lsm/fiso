@@ -1209,6 +1209,8 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 	}{
 		{name: "listen address", fragment: "listenAddr: :4500\n", wantPath: "listenAddr"},
 		{name: "metrics address", fragment: "metricsAddr: :9191\n", wantPath: "metricsAddr"},
+		{name: "explicit empty listen address", fragment: "listenAddr: \"\"\n", wantPath: "listenAddr"},
+		{name: "explicit empty metrics address", fragment: "metricsAddr: \"\"\n", wantPath: "metricsAddr"},
 		{name: "invalid Kubernetes resource name", targetName: "Invalid_Name", wantPath: "targets[0].name"},
 		{name: "invalid circuit breaker enabled type", fragment: "    circuitBreaker:\n      enabled: \"true\"\n", wantPath: "targets[0].circuitBreaker.enabled"},
 		{name: "invalid circuit breaker threshold type", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: \"3\"\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
@@ -1217,6 +1219,8 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "oversized circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 18446744073709551615\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
 		{name: "explicit zero success threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      successThreshold: 0\n", wantPath: "targets[0].circuitBreaker.successThreshold"},
 		{name: "explicitly disabled circuit breaker", fragment: "    circuitBreaker:\n      enabled: false\n", wantPath: "targets[0].circuitBreaker.enabled"},
+		{name: "explicitly disabled uppercase circuit breaker", fragment: "    circuitBreaker:\n      enabled: FALSE\n", wantPath: "targets[0].circuitBreaker.enabled"},
+		{name: "explicit empty reset timeout", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      resetTimeout: \"\"\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
 		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "oversized retry attempts", fragment: "    retry:\n      maxAttempts: 18446744073709551615\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "explicit zero retry attempts", fragment: "    retry:\n      maxAttempts: 0\n", wantPath: "targets[0].retry.maxAttempts"},

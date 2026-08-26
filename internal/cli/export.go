@@ -431,6 +431,11 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 	if err := rejectYAMLMergeKeys(document, ""); err != nil {
 		return err
 	}
+	for _, field := range []string{"listenAddr", "metricsAddr"} {
+		if yamlMappingValue(document, field) != nil {
+			return unsupportedExportField(field, "process-level setting has no LinkTarget representation")
+		}
+	}
 	targets := yamlMappingValue(document, "targets")
 	if targets == nil || targets.Kind != yaml.SequenceNode {
 		return nil
@@ -478,10 +483,16 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}); err != nil {
 			return err
 		}
-		if enabled := yamlMappingValue(circuitBreaker, "enabled"); enabled != nil && enabled.Value == "false" &&
-			yamlMappingValue(circuitBreaker, "failureThreshold") == nil &&
-			yamlMappingValue(circuitBreaker, "resetTimeout") == nil {
-			return unsupportedExportField(prefix+".circuitBreaker.enabled", "explicit false would omit the circuit breaker")
+		if enabled := yamlMappingValue(circuitBreaker, "enabled"); enabled != nil {
+			var value bool
+			if err := enabled.Decode(&value); err == nil && !value &&
+				yamlMappingValue(circuitBreaker, "failureThreshold") == nil &&
+				yamlMappingValue(circuitBreaker, "resetTimeout") == nil {
+				return unsupportedExportField(prefix+".circuitBreaker.enabled", "explicit false would omit the circuit breaker")
+			}
+		}
+		if resetTimeout := yamlMappingValue(circuitBreaker, "resetTimeout"); resetTimeout != nil && resetTimeout.Value == "" {
+			return unsupportedExportField(prefix+".circuitBreaker.resetTimeout", "explicit empty value would be omitted")
 		}
 		if yamlMappingValue(circuitBreaker, "successThreshold") != nil {
 			return unsupportedExportField(prefix+".circuitBreaker.successThreshold", "success threshold has no LinkTarget representation")
