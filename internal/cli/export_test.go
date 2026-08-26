@@ -742,6 +742,30 @@ sink:
 `,
 			wantPath: "cloudevents.type",
 		},
+		{
+			name: "binary source type",
+			flowYAML: `name: flow
+source:
+  type: !!binary Z3JwYw==
+  config: {}
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "source.type",
+		},
+		{
+			name: "binary sink type",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: !!binary aHR0cA==
+  config: {}
+`,
+			wantPath: "sink.type",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1290,6 +1314,54 @@ func TestRunExport_ExportsAlternateLinkConfigPaths(t *testing.T) {
 			}
 			if !strings.Contains(buf.String(), "kind: LinkTarget") {
 				t.Fatalf("expected alternate Link config to export, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsNonStringStructuralKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		flowYAML string
+		linkYAML string
+		wantPath string
+	}{
+		{
+			name: "Flow field key",
+			flowYAML: `!!binary bmFtZQ==: 123
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "name",
+		},
+		{
+			name: "Link target field key",
+			linkYAML: `targets:
+  - !!binary bmFtZQ==: 123
+    protocol: https
+    host: api.example.com
+`,
+			wantPath: "targets[0].name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, tt.flowYAML, tt.linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected non-string structural key to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected field path %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
 			}
 		})
 	}

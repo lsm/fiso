@@ -292,6 +292,12 @@ func validateFlowFieldTypes(root *yaml.Node) error {
 	if err := requireYAMLScalarTag(yamlMappingValue(document, "name"), "name", "!!str"); err != nil {
 		return err
 	}
+	if err := requireYAMLScalarTag(yamlMappingValue(yamlMappingValue(document, "source"), "type"), "source.type", "!!str"); err != nil {
+		return err
+	}
+	if err := requireYAMLScalarTag(yamlMappingValue(yamlMappingValue(document, "sink"), "type"), "sink.type", "!!str"); err != nil {
+		return err
+	}
 	if err := validateStringMap(yamlMappingValue(yamlMappingValue(document, "source"), "config"), "source.config"); err != nil {
 		return err
 	}
@@ -345,12 +351,22 @@ func rejectYAMLMergeKeys(node *yaml.Node, path string) error {
 	if node.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := node.Content[i]
-			fieldPath := key.Value
+			fieldName := key.Value
+			if key.Tag != "!!str" && key.Tag != "!!merge" {
+				var decoded string
+				if err := key.Decode(&decoded); err == nil {
+					fieldName = decoded
+				}
+			}
+			fieldPath := fieldName
 			if path != "" {
-				fieldPath = path + "." + key.Value
+				fieldPath = path + "." + fieldName
 			}
 			if key.Tag == "!!merge" {
 				return unsupportedExportField(fieldPath, "YAML merge keys are not supported")
+			}
+			if key.Tag != "!!str" {
+				return unsupportedExportField(fieldPath, fmt.Sprintf("field name has YAML type %s", key.Tag))
 			}
 			if err := rejectYAMLMergeKeys(node.Content[i+1], fieldPath); err != nil {
 				return err
