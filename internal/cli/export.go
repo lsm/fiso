@@ -604,14 +604,11 @@ func yamlMappingValue(mapping *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
+// validateExportableLink checks decoded Link settings that raw-node
+// validation cannot see, such as Kubernetes name rules and block semantics.
+// Field presence, scalar tags, and unknown keys are rejected earlier from the
+// YAML node itself in validateLinkFieldTypes.
 func validateExportableLink(cfg *link.Config) error {
-	if cfg.ListenAddr != "" {
-		return unsupportedExportField("listenAddr", "the process listen address has no LinkTarget representation")
-	}
-	if cfg.MetricsAddr != "" {
-		return unsupportedExportField("metricsAddr", "the process metrics address has no LinkTarget representation")
-	}
-
 	for i := range cfg.Targets {
 		target := &cfg.Targets[i]
 		prefix := fmt.Sprintf("targets[%d]", i)
@@ -620,12 +617,6 @@ func validateExportableLink(cfg *link.Config) error {
 		}
 		if target.Protocol == "kafka" {
 			return unsupportedExportField(prefix+".protocol", "Kafka targets have no LinkTarget representation")
-		}
-		if target.Port != 0 {
-			return unsupportedExportField(prefix+".port", "port has no LinkTarget representation")
-		}
-		if target.BasePath != "" {
-			return unsupportedExportField(prefix+".basePath", "base path has no LinkTarget representation")
 		}
 		if target.Auth.Type != "" && target.Auth.Type != "none" {
 			return unsupportedExportField(prefix+".auth.type", "local authentication configuration has no lossless LinkTarget representation")
@@ -636,15 +627,6 @@ func validateExportableLink(cfg *link.Config) error {
 		if target.Auth.VaultRef != nil {
 			return unsupportedExportField(prefix+".auth.vaultRef", "local Vault settings have no lossless LinkTarget representation")
 		}
-		if target.CircuitBreaker.SuccessThreshold != 0 {
-			return unsupportedExportField(prefix+".circuitBreaker.successThreshold", "success threshold has no LinkTarget representation")
-		}
-		if !target.CircuitBreaker.Enabled && target.CircuitBreaker.FailureThreshold != 0 {
-			return unsupportedExportField(prefix+".circuitBreaker.failureThreshold", "settings for a disabled circuit breaker would be discarded")
-		}
-		if !target.CircuitBreaker.Enabled && target.CircuitBreaker.ResetTimeout != "" {
-			return unsupportedExportField(prefix+".circuitBreaker.resetTimeout", "settings for a disabled circuit breaker would be discarded")
-		}
 		if target.CircuitBreaker.Enabled && target.CircuitBreaker.FailureThreshold < 1 {
 			return unsupportedExportField(prefix+".circuitBreaker.failureThreshold", "enabled circuit breakers require a value of at least 1 in the LinkTarget CRD")
 		}
@@ -653,18 +635,6 @@ func validateExportableLink(cfg *link.Config) error {
 		}
 		if target.Retry.MaxAttempts == 0 && target.Retry.Backoff != "" {
 			return unsupportedExportField(prefix+".retry.backoff", "backoff without enabled retries would be discarded")
-		}
-		if target.Retry.InitialInterval != "" {
-			return unsupportedExportField(prefix+".retry.initialInterval", "initial interval has no LinkTarget representation")
-		}
-		if target.Retry.MaxInterval != "" {
-			return unsupportedExportField(prefix+".retry.maxInterval", "maximum interval has no LinkTarget representation")
-		}
-		if target.Retry.Jitter != 0 {
-			return unsupportedExportField(prefix+".retry.jitter", "jitter has no LinkTarget representation")
-		}
-		if target.RateLimit.RequestsPerSecond != 0 || target.RateLimit.Burst != 0 {
-			return unsupportedExportField(prefix+".rateLimit", "rate limiting has no LinkTarget representation")
 		}
 		if target.Kafka != nil {
 			return unsupportedExportField(prefix+".kafka", "Kafka target settings have no LinkTarget representation")
