@@ -404,7 +404,9 @@ func rejectYAMLMergeKeys(node *yaml.Node, path string) error {
 }
 
 // yamlSubtreeHasValues reports whether a YAML subtree contains any populated
-// scalar value, treating empty mappings and lists as unpopulated.
+// scalar value, treating nulls and empty mappings and lists as unpopulated.
+// An explicit empty string is a populated value, matching the scalar
+// fail-closed contract.
 func yamlSubtreeHasValues(node *yaml.Node) bool {
 	if node == nil {
 		return false
@@ -425,7 +427,7 @@ func yamlSubtreeHasValues(node *yaml.Node) bool {
 		}
 		return false
 	default:
-		return node.Tag != "!!null" && node.Value != ""
+		return node.Tag != "!!null"
 	}
 }
 

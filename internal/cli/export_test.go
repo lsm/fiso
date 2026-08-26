@@ -665,6 +665,32 @@ sink:
 	}
 }
 
+func TestRunExport_RejectsEmptyCloudEventsLeaf(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+cloudevents:
+  source: ""
+sink:
+  type: http
+  config: {}
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected empty CloudEvents leaf to fail")
+	}
+	if !strings.Contains(err.Error(), "cloudevents") {
+		t.Fatalf("expected cloudevents path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
 func TestRunExport_RejectsCoercedFlowScalars(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1165,6 +1191,34 @@ func TestRunExport_AllowsEmptyReferenceMappings(t *testing.T) {
 			}
 			if !strings.Contains(buf.String(), "kind: LinkTarget") {
 				t.Fatalf("expected target to export, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsEmptyUnsupportedLeaves(t *testing.T) {
+	tests := []struct {
+		name     string
+		fragment string
+		wantPath string
+	}{
+		{name: "empty kafka topic leaf", fragment: "    kafka:\n      topic: \"\"\n", wantPath: "targets[0].kafka"},
+		{name: "empty auth secret leaf", fragment: "    auth:\n      secretRef:\n        envVar: \"\"\n", wantPath: "targets[0].auth.secretRef"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			linkYAML := "targets:\n  - name: api\n    protocol: https\n    host: api.example.com\n" + tt.fragment
+			fisoDir := writeExportFixture(t, "", linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected empty unsupported leaf to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected path %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
 			}
 		})
 	}
