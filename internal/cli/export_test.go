@@ -573,6 +573,30 @@ func TestRunExport_DefaultsOmittedLinkProtocol(t *testing.T) {
 	}
 }
 
+func TestRunExport_RejectsInvalidNamespaceWithoutOutput(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir, "--namespace=Invalid_Name"}, &buf)
+	if err == nil {
+		t.Fatal("expected invalid namespace to fail")
+	}
+	if !strings.Contains(err.Error(), "namespace") {
+		t.Fatalf("expected namespace validation path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
 func TestRunExport_RejectsInvalidSourceWithoutOutput(t *testing.T) {
 	flowYAML := `name: invalid-flow
 source:
@@ -849,6 +873,10 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "listen address", fragment: "listenAddr: :4500\n", wantPath: "listenAddr"},
 		{name: "metrics address", fragment: "metricsAddr: :9191\n", wantPath: "metricsAddr"},
 		{name: "invalid Kubernetes resource name", targetName: "Invalid_Name", wantPath: "targets[0].name"},
+		{name: "invalid circuit breaker enabled type", fragment: "    circuitBreaker:\n      enabled: \"true\"\n", wantPath: "targets[0].circuitBreaker.enabled"},
+		{name: "invalid circuit breaker threshold type", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: \"3\"\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
+		{name: "invalid rate limit type", fragment: "    rateLimit:\n      requestsPerSecond: \"10\"\n", wantPath: "targets[0].rateLimit.requestsPerSecond"},
 		{name: "port", fragment: "    port: 8443\n", wantPath: "targets[0].port"},
 		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
 		{

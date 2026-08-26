@@ -62,6 +62,9 @@ Examples:
 	if format != "crd" {
 		return fmt.Errorf("unsupported format %q (supported: crd)", format)
 	}
+	if problems := validation.IsDNS1123Label(namespace); len(problems) > 0 {
+		return unsupportedExportField("namespace", "not a valid Kubernetes namespace: "+strings.Join(problems, "; "))
+	}
 
 	var docs [][]byte
 
@@ -158,7 +161,14 @@ func exportLinks(path, namespace string) ([][]byte, error) {
 	}
 
 	var cfg link.Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if err := validateLinkFieldTypes(&root); err != nil {
+		return nil, fmt.Errorf("validate %s: %w", path, err)
+	}
+	if err := root.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	for i := range cfg.Targets {
@@ -216,6 +226,82 @@ func validateExportableFlow(flow *config.FlowDefinition) error {
 	}
 	if _, err := copyStringMap("sink.config", flow.Sink.Config); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateLinkFieldTypes(root *yaml.Node) error {
+	document := root
+	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
+		document = root.Content[0]
+	}
+	targets := yamlMappingValue(document, "targets")
+	if targets == nil || targets.Kind != yaml.SequenceNode {
+		return nil
+	}
+	for i, target := range targets.Content {
+		if target.Kind != yaml.MappingNode {
+			continue
+		}
+		prefix := fmt.Sprintf("targets[%d]", i)
+		if err := validateYAMLScalarTags(yamlMappingValue(target, "circuitBreaker"), prefix+".circuitBreaker", map[string][]string{
+			"enabled":          {"!!bool"},
+			"failureThreshold": {"!!int", "!!float"},
+			"successThreshold": {"!!int", "!!float"},
+			"resetTimeout":     {"!!str", "!!int", "!!float"},
+		}); err != nil {
+			return err
+		}
+		if err := validateYAMLScalarTags(yamlMappingValue(target, "retry"), prefix+".retry", map[string][]string{
+			"maxAttempts":     {"!!int", "!!float"},
+			"backoff":         {"!!str"},
+			"initialInterval": {"!!str", "!!int", "!!float"},
+			"maxInterval":     {"!!str", "!!int", "!!float"},
+			"jitter":          {"!!int", "!!float"},
+		}); err != nil {
+			return err
+		}
+		if err := validateYAMLScalarTags(yamlMappingValue(target, "rateLimit"), prefix+".rateLimit", map[string][]string{
+			"requestsPerSecond": {"!!int", "!!float"},
+			"burst":             {"!!int", "!!float"},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateYAMLScalarTags(mapping *yaml.Node, prefix string, fields map[string][]string) error {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+	for field, tags := range fields {
+		value := yamlMappingValue(mapping, field)
+		if value == nil {
+			continue
+		}
+		if value.Kind != yaml.ScalarNode {
+			return unsupportedExportField(prefix+"."+field, "unexpected YAML value type")
+		}
+		for _, tag := range tags {
+			if value.Tag == tag {
+				goto nextField
+			}
+		}
+		return unsupportedExportField(prefix+"."+field, fmt.Sprintf("value has YAML type %s", value.Tag))
+	nextField:
+	}
+	return nil
+}
+
+func yamlMappingValue(mapping *yaml.Node, key string) *yaml.Node {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1]
+		}
 	}
 	return nil
 }
