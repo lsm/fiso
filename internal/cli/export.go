@@ -465,6 +465,9 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		if err := requireYAMLScalarTag(yamlMappingValue(auth, "type"), prefix+".auth.type", "!!str"); err != nil {
 			return err
 		}
+		if yamlMappingValue(auth, "type") != nil {
+			return unsupportedExportField(prefix+".auth.type", "an explicitly configured auth block has no LinkTarget representation")
+		}
 		allowedPaths := yamlMappingValue(target, "allowedPaths")
 		if allowedPaths != nil {
 			if allowedPaths.Kind != yaml.SequenceNode {
@@ -619,9 +622,6 @@ func validateExportableLink(cfg *link.Config) error {
 		}
 		if target.Protocol == "kafka" {
 			return unsupportedExportField(prefix+".protocol", "Kafka targets have no LinkTarget representation")
-		}
-		if target.Auth.Type != "" && target.Auth.Type != "none" {
-			return unsupportedExportField(prefix+".auth.type", "local authentication configuration has no lossless LinkTarget representation")
 		}
 		if target.Auth.SecretRef != nil {
 			return unsupportedExportField(prefix+".auth.secretRef", "local file and environment references are not Kubernetes Secret names")

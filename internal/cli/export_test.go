@@ -621,14 +621,7 @@ sink:
 	}
 }
 
-func TestRunExport_LinkWithNoneAuth(t *testing.T) {
-	dir := t.TempDir()
-	fisoDir := filepath.Join(dir, "fiso")
-	linkDir := filepath.Join(fisoDir, "link")
-	if err := os.MkdirAll(linkDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
+func TestRunExport_RejectsExplicitNoneAuth(t *testing.T) {
 	linkYAML := `targets:
   - name: api
     protocol: http
@@ -636,19 +629,18 @@ func TestRunExport_LinkWithNoneAuth(t *testing.T) {
     auth:
       type: none
 `
-	if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), []byte(linkYAML), 0644); err != nil {
-		t.Fatal(err)
-	}
+	fisoDir := writeExportFixture(t, "", linkYAML)
 
 	var buf bytes.Buffer
-	if err := RunExport([]string{fisoDir}, &buf); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected explicit none auth to fail")
 	}
-
-	out := buf.String()
-	// Should not have auth spec when type is "none"
-	if strings.Contains(out, "auth:") {
-		t.Error("output should not contain auth spec for type 'none'")
+	if !strings.Contains(err.Error(), "targets[0].auth.type") {
+		t.Fatalf("expected auth type path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
 	}
 }
 
@@ -1302,6 +1294,7 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
 		{name: "explicit empty base path", fragment: "    basePath: \"\"\n", wantPath: "targets[0].basePath"},
 		{name: "coerced auth type", fragment: "    auth:\n      type: !!binary bm9uZQ==\n", wantPath: "targets[0].auth.type"},
+		{name: "auth secret reference without type", fragment: "    auth:\n      secretRef:\n        envVar: API_TOKEN\n", wantPath: "targets[0].auth.secretRef"},
 		{
 			name: "local authentication reference",
 			fragment: `    auth:
