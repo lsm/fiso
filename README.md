@@ -1526,7 +1526,11 @@ fiso export                              # Export from default fiso/ directory
 fiso export --namespace=my-namespace     # Override namespace (default: fiso-system)
 ```
 
-This generates `FlowDefinition` and `LinkTarget` CRs that can be applied with `kubectl apply`.
+Export is a fail-closed projection into the checked-in `fiso.io/v1alpha1` CRDs. A successful export preserves every populated value that the current local and CRD models can represent with the same structure. For example, source and sink `config` values must already be strings.
+
+If a populated field has no lossless CRD representation, `fiso export` returns a resource/field-path error and writes no YAML. This includes HTTP Flow sources, Flow CloudEvents overrides and interceptors, process-level Link settings such as `listenAddr`, local Link authentication references, and Link rate limiting or interceptors. Edit or remove unsupported settings before exporting; `fiso init --defaults` intentionally remains a local-development scaffold and is not wholly exportable.
+
+Successfully generated `FlowDefinition` and `LinkTarget` CRs are structurally accepted by the checked-in CRDs and can be submitted with `kubectl apply`. Export does not claim that the validation-only operator starts a runtime for them.
 
 ### Sidecar Injection
 
@@ -1769,7 +1773,7 @@ GitHub Actions runs on every push and PR to `main`. The table below is a represe
 | **e2e-wasmer-link** | Link + Wasmer E2E test (Docker Compose) |
 | **e2e-wasmer-aio** | All-in-one Wasmer E2E test (Docker Compose) |
 | **e2e-operator** | CRD operator E2E test (kind cluster — CRD reconciliation, status updates) |
-| **cli-smoke** | `fiso init --defaults` + `fiso validate` smoke test |
+| **cli-smoke** | `fiso init --defaults`, validation, and fail-closed/representable export smoke tests |
 
 ### Release
 

@@ -10,6 +10,13 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fail-closed Kubernetes export** — `fiso export` now rejects local Flow or
+  Link configuration that cannot be represented losslessly by the checked-in
+  `fiso.io/v1alpha1` CRDs, identifies the unsupported resource field, and emits
+  no partial YAML.
+
 ### Security
 
 - **Go toolchain and dependency vulnerability remediation** — upgraded the root

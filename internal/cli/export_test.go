@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,10 +19,9 @@ func TestRunExport_BasicFlow(t *testing.T) {
 
 	flowYAML := `name: test-flow
 source:
-  type: http
+  type: grpc
   config:
     listenAddr: ":8081"
-    path: /ingest
 sink:
   type: http
   config:
@@ -62,7 +62,6 @@ errorHandling:
 		t.Error("output should contain maxRetries")
 	}
 
-	// Source/sink config should be stringified
 	if !strings.Contains(out, "listenAddr:") {
 		t.Error("output should contain source config listenAddr")
 	}
@@ -80,9 +79,7 @@ func TestRunExport_FlowWithCELTransform(t *testing.T) {
 source:
   type: kafka
   config:
-    brokers:
-      - broker1:9092
-      - broker2:9092
+    brokers: broker1:9092,broker2:9092
     topic: events
     consumerGroup: fiso-cel
 transform:
@@ -112,54 +109,8 @@ errorHandling:
 	if !strings.Contains(out, `fields:`) {
 		t.Error("output should contain fields transform")
 	}
-	// Kafka brokers list should be comma-separated
 	if !strings.Contains(out, "broker1:9092,broker2:9092") {
-		t.Error("output should contain comma-separated brokers")
-	}
-}
-
-func TestRunExport_FlowWithCloudEvents(t *testing.T) {
-	dir := t.TempDir()
-	fisoDir := filepath.Join(dir, "fiso")
-	flowsDir := filepath.Join(fisoDir, "flows")
-	if err := os.MkdirAll(flowsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	flowYAML := `name: ce-flow
-source:
-  type: http
-  config:
-    listenAddr: ":8081"
-cloudevents:
-  type: com.example.order
-  source: /orders
-  subject: order.created
-sink:
-  type: http
-  config:
-    url: http://api:8080
-`
-	if err := os.WriteFile(filepath.Join(flowsDir, "ce-flow.yaml"), []byte(flowYAML), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	if err := RunExport([]string{fisoDir}, &buf); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	out := buf.String()
-
-	// CloudEvents should be preserved as annotations
-	if !strings.Contains(out, "fiso.io/cloudevents-type: com.example.order") {
-		t.Error("output should contain cloudevents-type annotation")
-	}
-	if !strings.Contains(out, "fiso.io/cloudevents-source: /orders") {
-		t.Error("output should contain cloudevents-source annotation")
-	}
-	if !strings.Contains(out, "fiso.io/cloudevents-subject: order.created") {
-		t.Error("output should contain cloudevents-subject annotation")
+		t.Error("output should preserve string-valued brokers")
 	}
 }
 
@@ -171,16 +122,10 @@ func TestRunExport_LinkTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	linkYAML := `listenAddr: ":3500"
-metricsAddr: ":9091"
-targets:
+	linkYAML := `targets:
   - name: crm
     protocol: https
     host: api.salesforce.com
-    auth:
-      type: bearer
-      secretRef:
-        filePath: /secrets/crm-token
     circuitBreaker:
       enabled: true
       failureThreshold: 5
@@ -217,9 +162,6 @@ targets:
 	if !strings.Contains(out, "host: api.salesforce.com") {
 		t.Error("output should contain salesforce host")
 	}
-	if !strings.Contains(out, "secretName: /secrets/crm-token") {
-		t.Error("output should contain secretName from secretRef.filePath")
-	}
 	if !strings.Contains(out, "failureThreshold: 5") {
 		t.Error("output should contain circuit breaker failureThreshold")
 	}
@@ -247,7 +189,7 @@ func TestRunExport_FlowAndLinkCombined(t *testing.T) {
 
 	flowYAML := `name: my-flow
 source:
-  type: http
+  type: grpc
   config:
     listenAddr: ":8081"
 sink:
@@ -296,7 +238,7 @@ func TestRunExport_CustomNamespace(t *testing.T) {
 
 	flowYAML := `name: ns-flow
 source:
-  type: http
+  type: grpc
   config:
     listenAddr: ":8081"
 sink:
@@ -336,6 +278,77 @@ func TestRunExport_NoConfigs(t *testing.T) {
 	}
 }
 
+func TestRunExport_WritesManifestStreamOnce(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`
+	linkYAML := `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+`
+	fisoDir := writeExportFixture(t, flowYAML, linkYAML)
+	writer := &countingWriter{}
+
+	if err := RunExport([]string{fisoDir}, writer); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if writer.writes != 1 {
+		t.Fatalf("expected one manifest write, got %d", writer.writes)
+	}
+	if !strings.Contains(writer.String(), "---") {
+		t.Fatalf("expected multi-document output, got %q", writer.String())
+	}
+}
+
+func TestRunExport_ReturnsWriterError(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
+	wantErr := errors.New("write failed")
+
+	err := RunExport([]string{fisoDir}, errorWriter{err: wantErr})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected writer error, got %v", err)
+	}
+}
+
+func TestRunExport_HelpReturnsWriterError(t *testing.T) {
+	wantErr := errors.New("write failed")
+	if err := RunExport([]string{"--help"}, errorWriter{err: wantErr}); !errors.Is(err, wantErr) {
+		t.Fatalf("expected writer error, got %v", err)
+	}
+}
+
+type countingWriter struct {
+	bytes.Buffer
+	writes int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.writes++
+	return w.Buffer.Write(p)
+}
+
+type errorWriter struct {
+	err error
+}
+
+func (w errorWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
+
 func TestRunExport_UnsupportedFormat(t *testing.T) {
 	err := RunExport([]string{"--format=helm"}, nil)
 	if err == nil {
@@ -347,10 +360,15 @@ func TestRunExport_UnsupportedFormat(t *testing.T) {
 }
 
 func TestRunExport_Help(t *testing.T) {
-	// Should not error on --help
-	err := RunExport([]string{"--help"}, nil)
-	if err != nil {
+	var buf bytes.Buffer
+	if err := RunExport([]string{"--help"}, &buf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "losslessly representable subset") {
+		t.Fatalf("help should describe the bounded export contract, got %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "before any YAML is written") {
+		t.Fatalf("help should describe fail-closed output, got %q", buf.String())
 	}
 }
 
@@ -414,7 +432,7 @@ func TestRunExport_NonYAMLFilesIgnored(t *testing.T) {
 	// Create a valid .yaml file
 	flowYAML := `name: test-flow
 source:
-  type: http
+  type: grpc
   config:
     listenAddr: ":8081"
 sink:
@@ -466,7 +484,7 @@ func TestExportFlows_DirectorySkipped(t *testing.T) {
 	// Create a valid flow file
 	flowYAML := `name: test-flow
 source:
-  type: http
+  type: grpc
   config: {}
 sink:
   type: http
@@ -539,84 +557,43 @@ func TestExportLinks_ReadFileError(t *testing.T) {
 	}
 }
 
-func TestStringifyMap_Nil(t *testing.T) {
-	result := stringifyMap(nil)
-	if result != nil {
-		t.Errorf("expected nil for nil input, got %v", result)
-	}
-}
-
-func TestStringifyMap_MapValue(t *testing.T) {
-	input := map[string]interface{}{
-		"nested": map[string]string{"key": "value"},
-	}
-	result := stringifyMap(input)
-	if result["nested"] != "map[key:value]" {
-		t.Errorf("expected map[key:value], got %s", result["nested"])
-	}
-}
-
-func TestRunExport_LinkWithEnvVarAuth(t *testing.T) {
-	dir := t.TempDir()
-	fisoDir := filepath.Join(dir, "fiso")
-	linkDir := filepath.Join(fisoDir, "link")
-	if err := os.MkdirAll(linkDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
+func TestRunExport_DefaultsOmittedLinkProtocol(t *testing.T) {
 	linkYAML := `targets:
   - name: api
-    protocol: https
     host: api.example.com
-    auth:
-      type: bearer
-      secretRef:
-        envVar: API_TOKEN
 `
-	if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), []byte(linkYAML), 0644); err != nil {
-		t.Fatal(err)
-	}
+	fisoDir := writeExportFixture(t, "", linkYAML)
 
 	var buf bytes.Buffer
 	if err := RunExport([]string{fisoDir}, &buf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	out := buf.String()
-	if !strings.Contains(out, "secretName: API_TOKEN") {
-		t.Error("output should contain secretName from secretRef.envVar")
+	if !strings.Contains(buf.String(), "protocol: https") {
+		t.Fatalf("expected omitted local protocol to default to https, got %q", buf.String())
 	}
 }
 
-func TestRunExport_LinkWithVaultAuth(t *testing.T) {
-	dir := t.TempDir()
-	fisoDir := filepath.Join(dir, "fiso")
-	linkDir := filepath.Join(fisoDir, "link")
-	if err := os.MkdirAll(linkDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	linkYAML := `targets:
-  - name: api
-    protocol: https
-    host: api.example.com
-    auth:
-      type: vault
-      vaultRef:
-        path: secret/data/api
+func TestRunExport_RejectsInvalidSourceWithoutOutput(t *testing.T) {
+	flowYAML := `name: invalid-flow
+source:
+  type: invalid
+  config: {}
+sink:
+  type: http
+  config: {}
 `
-	if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), []byte(linkYAML), 0644); err != nil {
-		t.Fatal(err)
-	}
+	fisoDir := writeExportFixture(t, flowYAML, "")
 
 	var buf bytes.Buffer
-	if err := RunExport([]string{fisoDir}, &buf); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected invalid source to fail")
 	}
-
-	out := buf.String()
-	if !strings.Contains(out, "vaultPath: secret/data/api") {
-		t.Error("output should contain vaultPath from vaultRef")
+	if !strings.Contains(err.Error(), "source.type") {
+		t.Fatalf("expected source validation path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
 	}
 }
 
@@ -654,9 +631,24 @@ func TestRunExport_LinkWithNoneAuth(t *testing.T) {
 func TestRunExport_RejectsLossyFlowConfiguration(t *testing.T) {
 	tests := []struct {
 		name     string
+		flowName string
 		fragment string
 		wantPath string
 	}{
+		{
+			name:     "invalid Kubernetes resource name",
+			flowName: "Invalid_Name",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "name",
+		},
 		{
 			name: "HTTP source excluded by FlowDefinition CRD",
 			fragment: `source:
@@ -780,6 +772,21 @@ sink:
 			wantPath: "source.config.metadata",
 		},
 		{
+			name: "list Kafka brokers",
+			fragment: `source:
+  type: kafka
+  config:
+    brokers: [broker1:9092, broker2:9092]
+    topic: events
+    consumerGroup: fiso
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "source.config.brokers",
+		},
+		{
 			name: "nested sink config",
 			fragment: `source:
   type: grpc
@@ -812,7 +819,11 @@ sink:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fisoDir := writeExportFixture(t, "name: lossy-flow\n"+tt.fragment, "")
+			flowName := tt.flowName
+			if flowName == "" {
+				flowName = "lossy-flow"
+			}
+			fisoDir := writeExportFixture(t, "name: "+flowName+"\n"+tt.fragment, "")
 			var buf bytes.Buffer
 			err := RunExport([]string{fisoDir}, &buf)
 			if err == nil {
@@ -830,12 +841,14 @@ sink:
 
 func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 	tests := []struct {
-		name     string
-		fragment string
-		wantPath string
+		name       string
+		targetName string
+		fragment   string
+		wantPath   string
 	}{
 		{name: "listen address", fragment: "listenAddr: :4500\n", wantPath: "listenAddr"},
 		{name: "metrics address", fragment: "metricsAddr: :9191\n", wantPath: "metricsAddr"},
+		{name: "invalid Kubernetes resource name", targetName: "Invalid_Name", wantPath: "targets[0].name"},
 		{name: "port", fragment: "    port: 8443\n", wantPath: "targets[0].port"},
 		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
 		{
@@ -856,6 +869,28 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
       resetTimeout: 30s
 `,
 			wantPath: "targets[0].circuitBreaker.successThreshold",
+		},
+		{
+			name: "disabled circuit breaker settings",
+			fragment: `    circuitBreaker:
+      enabled: false
+      failureThreshold: 3
+`,
+			wantPath: "targets[0].circuitBreaker.failureThreshold",
+		},
+		{
+			name: "enabled circuit breaker without threshold",
+			fragment: `    circuitBreaker:
+      enabled: true
+`,
+			wantPath: "targets[0].circuitBreaker.failureThreshold",
+		},
+		{
+			name: "retry backoff without attempts",
+			fragment: `    retry:
+      backoff: exponential
+`,
+			wantPath: "targets[0].retry.backoff",
 		},
 		{
 			name: "retry timing",
@@ -899,7 +934,11 @@ kafka:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			linkYAML := "targets:\n  - name: api\n    protocol: https\n    host: api.example.com\n" + tt.fragment
+			targetName := tt.targetName
+			if targetName == "" {
+				targetName = "api"
+			}
+			linkYAML := "targets:\n  - name: " + targetName + "\n    protocol: https\n    host: api.example.com\n" + tt.fragment
 			fisoDir := writeExportFixture(t, "", linkYAML)
 			var buf bytes.Buffer
 			err := RunExport([]string{fisoDir}, &buf)
