@@ -729,6 +729,20 @@ errorHandling:
 			wantPath: "errorHandling.maxRetries",
 		},
 		{
+			name: "explicit zero max retries",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  maxRetries: 0
+`,
+			wantPath: "errorHandling.maxRetries",
+		},
+		{
 			name: "boolean CloudEvents field",
 			flowYAML: `name: flow
 source:
@@ -1187,6 +1201,8 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "invalid rate limit type", fragment: "    rateLimit:\n      requestsPerSecond: \"10\"\n", wantPath: "targets[0].rateLimit.requestsPerSecond"},
 		{name: "fractional rate limit burst", fragment: "    rateLimit:\n      burst: 0.5\n", wantPath: "targets[0].rateLimit.burst"},
 		{name: "oversized rate limit burst", fragment: "    rateLimit:\n      burst: 18446744073709551615\n", wantPath: "targets[0].rateLimit.burst"},
+		{name: "explicit zero rate", fragment: "    rateLimit:\n      requestsPerSecond: 0\n", wantPath: "targets[0].rateLimit"},
+		{name: "explicit zero burst", fragment: "    rateLimit:\n      burst: 0\n", wantPath: "targets[0].rateLimit"},
 		{name: "port", fragment: "    port: 8443\n", wantPath: "targets[0].port"},
 		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
 		{
@@ -1494,6 +1510,65 @@ targets:
 			}
 		})
 	}
+}
+
+func TestRunExport_RejectsDuplicateResourceNames(t *testing.T) {
+	t.Run("FlowDefinitions", func(t *testing.T) {
+		fisoDir := filepath.Join(t.TempDir(), "fiso")
+		flowsDir := filepath.Join(fisoDir, "flows")
+		if err := os.MkdirAll(flowsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		flowYAML := []byte(`name: duplicate
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+		for _, name := range []string{"first.yaml", "second.yaml"} {
+			if err := os.WriteFile(filepath.Join(flowsDir, name), flowYAML, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		var buf bytes.Buffer
+		err := RunExport([]string{fisoDir}, &buf)
+		if err == nil {
+			t.Fatal("expected duplicate FlowDefinition names to fail")
+		}
+		if !strings.Contains(err.Error(), `duplicate FlowDefinition name "duplicate"`) {
+			t.Fatalf("expected duplicate FlowDefinition error, got %v", err)
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("expected no output, got %q", buf.String())
+		}
+	})
+
+	t.Run("LinkTargets", func(t *testing.T) {
+		linkYAML := `targets:
+  - name: duplicate
+    protocol: https
+    host: first.example.com
+  - name: duplicate
+    protocol: https
+    host: second.example.com
+`
+		fisoDir := writeExportFixture(t, "", linkYAML)
+
+		var buf bytes.Buffer
+		err := RunExport([]string{fisoDir}, &buf)
+		if err == nil {
+			t.Fatal("expected duplicate LinkTarget names to fail")
+		}
+		if !strings.Contains(err.Error(), `duplicate LinkTarget name "duplicate"`) {
+			t.Fatalf("expected duplicate LinkTarget error, got %v", err)
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("expected no output, got %q", buf.String())
+		}
+	})
 }
 
 func TestRunExport_RejectsMultipleLinkConfigPaths(t *testing.T) {

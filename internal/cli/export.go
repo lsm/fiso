@@ -139,6 +139,7 @@ func exportFlows(dir, namespace string) ([][]byte, error) {
 	}
 
 	var docs [][]byte
+	names := make(map[string]string)
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -176,6 +177,10 @@ func exportFlows(dir, namespace string) ([][]byte, error) {
 		if err := validateExportableFlow(&flow); err != nil {
 			return nil, fmt.Errorf("flow %q: %w", flow.Name, err)
 		}
+		if previous, ok := names[flow.Name]; ok {
+			return nil, fmt.Errorf("duplicate FlowDefinition name %q in %s and %s", flow.Name, previous, path)
+		}
+		names[flow.Name] = path
 
 		crd, err := convertFlowToCRD(&flow, namespace)
 		if err != nil {
@@ -221,7 +226,12 @@ func exportLinks(path, namespace string) ([][]byte, error) {
 	}
 
 	var docs [][]byte
+	names := make(map[string]int)
 	for i := range cfg.Targets {
+		if previous, ok := names[cfg.Targets[i].Name]; ok {
+			return nil, fmt.Errorf("duplicate LinkTarget name %q at targets[%d] and targets[%d]", cfg.Targets[i].Name, previous, i)
+		}
+		names[cfg.Targets[i].Name] = i
 		crd := convertLinkToCRD(&cfg.Targets[i], namespace)
 		out, err := sigyaml.Marshal(crd)
 		if err != nil {
@@ -316,6 +326,12 @@ func validateFlowFieldTypes(root *yaml.Node) error {
 		"transactionalId": {"!!str"},
 	}); err != nil {
 		return err
+	}
+	if maxRetries := yamlMappingValue(errorHandling, "maxRetries"); maxRetries != nil {
+		var retries int
+		if err := maxRetries.Decode(&retries); err == nil && retries == 0 {
+			return unsupportedExportField("errorHandling.maxRetries", "explicit zero would be omitted from the FlowDefinition")
+		}
 	}
 	cloudEvents := yamlMappingValue(document, "cloudevents")
 	if cloudEvents != nil && cloudEvents.Kind == yaml.MappingNode {
@@ -477,13 +493,17 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}); err != nil {
 			return err
 		}
-		if err := validateYAMLScalarTags(yamlMappingValue(target, "rateLimit"), prefix+".rateLimit", map[string][]string{
+		rateLimit := yamlMappingValue(target, "rateLimit")
+		if err := validateYAMLScalarTags(rateLimit, prefix+".rateLimit", map[string][]string{
 			"requestsPerSecond": {"!!int", "!!float"},
 			"burst":             {"!!int"},
 		}); err != nil {
 			return err
 		}
-		if err := rejectUnknownYAMLFields(yamlMappingValue(target, "rateLimit"), prefix+".rateLimit", map[string]bool{
+		if yamlMappingValue(rateLimit, "requestsPerSecond") != nil || yamlMappingValue(rateLimit, "burst") != nil {
+			return unsupportedExportField(prefix+".rateLimit", "rate limiting has no LinkTarget representation")
+		}
+		if err := rejectUnknownYAMLFields(rateLimit, prefix+".rateLimit", map[string]bool{
 			"requestsPerSecond": true,
 			"burst":             true,
 		}); err != nil {
