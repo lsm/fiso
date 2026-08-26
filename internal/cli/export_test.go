@@ -1154,6 +1154,7 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "invalid circuit breaker enabled type", fragment: "    circuitBreaker:\n      enabled: \"true\"\n", wantPath: "targets[0].circuitBreaker.enabled"},
 		{name: "invalid circuit breaker threshold type", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: \"3\"\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
 		{name: "fractional circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 2.9\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "integer circuit breaker reset timeout", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      resetTimeout: 30\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
 		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "fractional retry attempts", fragment: "    retry:\n      maxAttempts: 3.7\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "invalid rate limit type", fragment: "    rateLimit:\n      requestsPerSecond: \"10\"\n", wantPath: "targets[0].rateLimit.requestsPerSecond"},
@@ -1286,6 +1287,64 @@ func TestRunExport_ExportsAlternateLinkConfigPaths(t *testing.T) {
 			}
 			if !strings.Contains(buf.String(), "kind: LinkTarget") {
 				t.Fatalf("expected alternate Link config to export, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsTrailingYAMLDocuments(t *testing.T) {
+	tests := []struct {
+		name     string
+		flowYAML string
+		linkYAML string
+	}{
+		{
+			name: "Flow file",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+---
+name: omitted-flow
+source:
+  type: http
+  config: {}
+sink:
+  type: http
+  config: {}
+`,
+		},
+		{
+			name: "Link file",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+---
+targets:
+  - name: omitted-api
+    protocol: kafka
+    host: broker.example.com
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, tt.flowYAML, tt.linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected trailing YAML document to fail")
+			}
+			if !strings.Contains(err.Error(), "multiple YAML documents") {
+				t.Fatalf("expected multiple-document error, got %v", err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
 			}
 		})
 	}

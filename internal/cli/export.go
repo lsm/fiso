@@ -236,7 +236,18 @@ func exportLinks(path, namespace string) ([][]byte, error) {
 func decodeKnownFields(data []byte, target interface{}) error {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
-	return decoder.Decode(target)
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+
+	var trailing yaml.Node
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("multiple YAML documents are not supported")
+	}
+	return nil
 }
 
 func validateExportableFlow(flow *config.FlowDefinition) error {
@@ -380,7 +391,7 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 			"enabled":          {"!!bool"},
 			"failureThreshold": {"!!int"},
 			"successThreshold": {"!!int"},
-			"resetTimeout":     {"!!str", "!!int"},
+			"resetTimeout":     {"!!str"},
 		}); err != nil {
 			return err
 		}
