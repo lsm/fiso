@@ -349,11 +349,13 @@ func validateStringMap(mapping *yaml.Node, prefix string) error {
 	}
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
 		path := prefix + "." + mapping.Content[i].Value
-		if err := requireYAMLScalarTag(mapping.Content[i], path, "!!str"); err != nil {
-			return err
-		}
-		if err := requireYAMLScalarTag(mapping.Content[i+1], path, "!!str"); err != nil {
-			return err
+		for _, entry := range mapping.Content[i : i+2] {
+			if entry.Tag == "!!null" {
+				return unsupportedExportField(path, "null entries cannot be represented")
+			}
+			if err := requireYAMLScalarTag(entry, path, "!!str"); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -513,7 +515,11 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 				return unsupportedExportField(prefix+".allowedPaths", "unexpected YAML value type")
 			}
 			for j, value := range allowedPaths.Content {
-				if err := requireYAMLScalarTag(value, fmt.Sprintf("%s.allowedPaths[%d]", prefix, j), "!!str"); err != nil {
+				path := fmt.Sprintf("%s.allowedPaths[%d]", prefix, j)
+				if value.Tag == "!!null" {
+					return unsupportedExportField(path, "null list entries cannot be represented")
+				}
+				if err := requireYAMLScalarTag(value, path, "!!str"); err != nil {
 					return err
 				}
 			}

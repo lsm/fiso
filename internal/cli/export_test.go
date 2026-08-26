@@ -725,6 +725,21 @@ sink:
 			wantPath: "transform.fields.id",
 		},
 		{
+			name: "null transform expression",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+transform:
+  fields:
+    id: null
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "transform.fields.id",
+		},
+		{
 			name: "numeric transform key",
 			flowYAML: `name: flow
 source:
@@ -1325,6 +1340,16 @@ func TestRunExport_RejectsCoercedLinkScalars(t *testing.T) {
     protocol: https
     host: api.example.com
     allowedPaths: [1, true]
+`,
+			wantPath: "targets[0].allowedPaths[0]",
+		},
+		{
+			name: "null allowed path",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    allowedPaths: [null]
 `,
 			wantPath: "targets[0].allowedPaths[0]",
 		},
