@@ -1182,6 +1182,7 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "oversized circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 18446744073709551615\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
 		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "oversized retry attempts", fragment: "    retry:\n      maxAttempts: 18446744073709551615\n", wantPath: "targets[0].retry.maxAttempts"},
+		{name: "explicit zero retry attempts", fragment: "    retry:\n      maxAttempts: 0\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "fractional retry attempts", fragment: "    retry:\n      maxAttempts: 3.7\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "invalid rate limit type", fragment: "    rateLimit:\n      requestsPerSecond: \"10\"\n", wantPath: "targets[0].rateLimit.requestsPerSecond"},
 		{name: "fractional rate limit burst", fragment: "    rateLimit:\n      burst: 0.5\n", wantPath: "targets[0].rateLimit.burst"},
@@ -1316,6 +1317,30 @@ func TestRunExport_ExportsAlternateLinkConfigPaths(t *testing.T) {
 				t.Fatalf("expected alternate Link config to export, got %q", buf.String())
 			}
 		})
+	}
+}
+
+func TestRunExport_RejectsYAMLAliases(t *testing.T) {
+	linkYAML := `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    circuitBreaker: &opts
+      failureThreshold: 0
+    retry: *opts
+`
+	fisoDir := writeExportFixture(t, "", linkYAML)
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected YAML alias to fail")
+	}
+	if !strings.Contains(err.Error(), "targets[0].retry") {
+		t.Fatalf("expected alias field path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
 	}
 }
 

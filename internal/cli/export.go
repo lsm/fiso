@@ -348,6 +348,9 @@ func rejectYAMLMergeKeys(node *yaml.Node, path string) error {
 	if node == nil {
 		return nil
 	}
+	if node.Kind == yaml.AliasNode {
+		return unsupportedExportField(path, "YAML aliases are not supported")
+	}
 	if node.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := node.Content[i]
@@ -453,7 +456,8 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}); err != nil {
 			return err
 		}
-		if err := validateYAMLScalarTags(yamlMappingValue(target, "retry"), prefix+".retry", map[string][]string{
+		retry := yamlMappingValue(target, "retry")
+		if err := validateYAMLScalarTags(retry, prefix+".retry", map[string][]string{
 			"maxAttempts":     {"!!int"},
 			"backoff":         {"!!str"},
 			"initialInterval": {"!!str", "!!int"},
@@ -461,6 +465,12 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 			"jitter":          {"!!int", "!!float"},
 		}); err != nil {
 			return err
+		}
+		if maxAttempts := yamlMappingValue(retry, "maxAttempts"); maxAttempts != nil {
+			var attempts int
+			if err := maxAttempts.Decode(&attempts); err == nil && attempts == 0 {
+				return unsupportedExportField(prefix+".retry.maxAttempts", "explicit zero would be omitted and is invalid in the LinkTarget CRD")
+			}
 		}
 		if err := rejectUnknownYAMLFields(yamlMappingValue(target, "retry"), prefix+".retry", map[string]bool{
 			"maxAttempts": true, "backoff": true, "initialInterval": true, "maxInterval": true, "jitter": true,
