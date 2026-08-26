@@ -459,7 +459,8 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 				}
 			}
 		}
-		if err := validateYAMLScalarTags(yamlMappingValue(target, "circuitBreaker"), prefix+".circuitBreaker", map[string][]string{
+		circuitBreaker := yamlMappingValue(target, "circuitBreaker")
+		if err := validateYAMLScalarTags(circuitBreaker, prefix+".circuitBreaker", map[string][]string{
 			"enabled":          {"!!bool"},
 			"failureThreshold": {"!!int"},
 			"successThreshold": {"!!int"},
@@ -467,7 +468,10 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}); err != nil {
 			return err
 		}
-		if err := rejectUnknownYAMLFields(yamlMappingValue(target, "circuitBreaker"), prefix+".circuitBreaker", map[string]bool{
+		if yamlMappingValue(circuitBreaker, "successThreshold") != nil {
+			return unsupportedExportField(prefix+".circuitBreaker.successThreshold", "success threshold has no LinkTarget representation")
+		}
+		if err := rejectUnknownYAMLFields(circuitBreaker, prefix+".circuitBreaker", map[string]bool{
 			"enabled": true, "failureThreshold": true, "successThreshold": true, "resetTimeout": true,
 		}); err != nil {
 			return err

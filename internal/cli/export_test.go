@@ -1194,6 +1194,7 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "fractional circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 2.9\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
 		{name: "integer circuit breaker reset timeout", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      resetTimeout: 30\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
 		{name: "oversized circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 18446744073709551615\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "explicit zero success threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      successThreshold: 0\n", wantPath: "targets[0].circuitBreaker.successThreshold"},
 		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "oversized retry attempts", fragment: "    retry:\n      maxAttempts: 18446744073709551615\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "explicit zero retry attempts", fragment: "    retry:\n      maxAttempts: 0\n", wantPath: "targets[0].retry.maxAttempts"},
