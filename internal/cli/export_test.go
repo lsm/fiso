@@ -1051,6 +1051,27 @@ sink:
 	}
 }
 
+func TestRunExport_RejectsExplicitEmptyLinkProtocol(t *testing.T) {
+	linkYAML := `targets:
+  - name: api
+    protocol: ""
+    host: api.example.com
+`
+	fisoDir := writeExportFixture(t, "", linkYAML)
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected explicit empty protocol to fail")
+	}
+	if !strings.Contains(err.Error(), "targets[0].protocol") {
+		t.Fatalf("expected protocol field path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
 func TestRunExport_RejectsCoercedLinkScalars(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1195,10 +1216,14 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "integer circuit breaker reset timeout", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      resetTimeout: 30\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
 		{name: "oversized circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 18446744073709551615\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
 		{name: "explicit zero success threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      successThreshold: 0\n", wantPath: "targets[0].circuitBreaker.successThreshold"},
+		{name: "explicitly disabled circuit breaker", fragment: "    circuitBreaker:\n      enabled: false\n", wantPath: "targets[0].circuitBreaker.enabled"},
 		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "oversized retry attempts", fragment: "    retry:\n      maxAttempts: 18446744073709551615\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "explicit zero retry attempts", fragment: "    retry:\n      maxAttempts: 0\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "fractional retry attempts", fragment: "    retry:\n      maxAttempts: 3.7\n", wantPath: "targets[0].retry.maxAttempts"},
+		{name: "explicit zero retry jitter", fragment: "    retry:\n      maxAttempts: 3\n      jitter: 0\n", wantPath: "targets[0].retry.jitter"},
+		{name: "explicit empty retry initial interval", fragment: "    retry:\n      maxAttempts: 3\n      initialInterval: \"\"\n", wantPath: "targets[0].retry.initialInterval"},
+		{name: "explicit empty retry max interval", fragment: "    retry:\n      maxAttempts: 3\n      maxInterval: \"\"\n", wantPath: "targets[0].retry.maxInterval"},
 		{name: "invalid rate limit type", fragment: "    rateLimit:\n      requestsPerSecond: \"10\"\n", wantPath: "targets[0].rateLimit.requestsPerSecond"},
 		{name: "fractional rate limit burst", fragment: "    rateLimit:\n      burst: 0.5\n", wantPath: "targets[0].rateLimit.burst"},
 		{name: "oversized rate limit burst", fragment: "    rateLimit:\n      burst: 18446744073709551615\n", wantPath: "targets[0].rateLimit.burst"},

@@ -445,6 +445,9 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 				return err
 			}
 		}
+		if protocol := yamlMappingValue(target, "protocol"); protocol != nil && protocol.Value == "" {
+			return unsupportedExportField(prefix+".protocol", "explicit empty value cannot be replaced by the default protocol")
+		}
 		if port := yamlMappingValue(target, "port"); port != nil {
 			if err := requireYAMLScalarTag(port, prefix+".port", "!!int"); err != nil {
 				return err
@@ -475,6 +478,11 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}); err != nil {
 			return err
 		}
+		if enabled := yamlMappingValue(circuitBreaker, "enabled"); enabled != nil && enabled.Value == "false" &&
+			yamlMappingValue(circuitBreaker, "failureThreshold") == nil &&
+			yamlMappingValue(circuitBreaker, "resetTimeout") == nil {
+			return unsupportedExportField(prefix+".circuitBreaker.enabled", "explicit false would omit the circuit breaker")
+		}
 		if yamlMappingValue(circuitBreaker, "successThreshold") != nil {
 			return unsupportedExportField(prefix+".circuitBreaker.successThreshold", "success threshold has no LinkTarget representation")
 		}
@@ -497,6 +505,11 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 			var attempts int
 			if err := maxAttempts.Decode(&attempts); err == nil && attempts == 0 {
 				return unsupportedExportField(prefix+".retry.maxAttempts", "explicit zero would be omitted and is invalid in the LinkTarget CRD")
+			}
+		}
+		for _, field := range []string{"initialInterval", "maxInterval", "jitter"} {
+			if yamlMappingValue(retry, field) != nil {
+				return unsupportedExportField(prefix+".retry."+field, field+" has no LinkTarget representation")
 			}
 		}
 		if err := rejectUnknownYAMLFields(yamlMappingValue(target, "retry"), prefix+".retry", map[string]bool{
