@@ -1155,10 +1155,13 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "invalid circuit breaker threshold type", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: \"3\"\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
 		{name: "fractional circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 2.9\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
 		{name: "integer circuit breaker reset timeout", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      resetTimeout: 30\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
+		{name: "oversized circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 18446744073709551615\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
 		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
+		{name: "oversized retry attempts", fragment: "    retry:\n      maxAttempts: 18446744073709551615\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "fractional retry attempts", fragment: "    retry:\n      maxAttempts: 3.7\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "invalid rate limit type", fragment: "    rateLimit:\n      requestsPerSecond: \"10\"\n", wantPath: "targets[0].rateLimit.requestsPerSecond"},
 		{name: "fractional rate limit burst", fragment: "    rateLimit:\n      burst: 0.5\n", wantPath: "targets[0].rateLimit.burst"},
+		{name: "oversized rate limit burst", fragment: "    rateLimit:\n      burst: 18446744073709551615\n", wantPath: "targets[0].rateLimit.burst"},
 		{name: "port", fragment: "    port: 8443\n", wantPath: "targets[0].port"},
 		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
 		{
@@ -1287,6 +1290,52 @@ func TestRunExport_ExportsAlternateLinkConfigPaths(t *testing.T) {
 			}
 			if !strings.Contains(buf.String(), "kind: LinkTarget") {
 				t.Fatalf("expected alternate Link config to export, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsYAMLMergeKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		flowYAML string
+		linkYAML string
+		wantPath string
+	}{
+		{
+			name: "Flow mapping",
+			flowYAML: `<<: {name: 123}
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "<<",
+		},
+		{
+			name: "Link target mapping",
+			linkYAML: `targets:
+  - <<: {name: 123, protocol: https, host: api.example.com}
+`,
+			wantPath: "targets[0].<<",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, tt.flowYAML, tt.linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected YAML merge key to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected merge-key path %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
 			}
 		})
 	}

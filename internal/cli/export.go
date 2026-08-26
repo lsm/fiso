@@ -286,6 +286,9 @@ func validateExportableFlow(flow *config.FlowDefinition) error {
 
 func validateFlowFieldTypes(root *yaml.Node) error {
 	document := yamlDocument(root)
+	if err := rejectYAMLMergeKeys(document, ""); err != nil {
+		return err
+	}
 	if err := requireYAMLScalarTag(yamlMappingValue(document, "name"), "name", "!!str"); err != nil {
 		return err
 	}
@@ -335,6 +338,37 @@ func validateStringMap(mapping *yaml.Node, prefix string) error {
 	return nil
 }
 
+func rejectYAMLMergeKeys(node *yaml.Node, path string) error {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := node.Content[i]
+			fieldPath := key.Value
+			if path != "" {
+				fieldPath = path + "." + key.Value
+			}
+			if key.Tag == "!!merge" {
+				return unsupportedExportField(fieldPath, "YAML merge keys are not supported")
+			}
+			if err := rejectYAMLMergeKeys(node.Content[i+1], fieldPath); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if node.Kind == yaml.SequenceNode {
+		for i, value := range node.Content {
+			valuePath := fmt.Sprintf("%s[%d]", path, i)
+			if err := rejectYAMLMergeKeys(value, valuePath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func requireYAMLScalarTag(value *yaml.Node, path string, tags ...string) error {
 	if value == nil {
 		return nil
@@ -359,6 +393,9 @@ func yamlDocument(root *yaml.Node) *yaml.Node {
 
 func validateLinkFieldTypes(root *yaml.Node) error {
 	document := yamlDocument(root)
+	if err := rejectYAMLMergeKeys(document, ""); err != nil {
+		return err
+	}
 	targets := yamlMappingValue(document, "targets")
 	if targets == nil || targets.Kind != yaml.SequenceNode {
 		return nil
@@ -435,8 +472,16 @@ func validateYAMLScalarTags(mapping *yaml.Node, prefix string, fields map[string
 		return nil
 	}
 	for field, tags := range fields {
-		if err := requireYAMLScalarTag(yamlMappingValue(mapping, field), prefix+"."+field, tags...); err != nil {
+		value := yamlMappingValue(mapping, field)
+		path := prefix + "." + field
+		if err := requireYAMLScalarTag(value, path, tags...); err != nil {
 			return err
+		}
+		if value != nil && value.Tag == "!!int" {
+			var integer int
+			if err := value.Decode(&integer); err != nil {
+				return unsupportedExportField(path, "integer is outside the supported range")
+			}
 		}
 	}
 	return nil
