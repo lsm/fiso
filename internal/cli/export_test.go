@@ -1254,6 +1254,7 @@ func TestRunExport_AllowsNullOmittedSettings(t *testing.T) {
 		{name: "null success threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      successThreshold: null\n"},
 		{name: "null retry timing", fragment: "    retry:\n      maxAttempts: 3\n      initialInterval: null\n"},
 		{name: "null rate limit", fragment: "    rateLimit:\n      burst: null\n"},
+		{name: "null allowed paths", fragment: "    allowedPaths: null\n"},
 	}
 	for _, tt := range linkTests {
 		t.Run("link/"+tt.name, func(t *testing.T) {

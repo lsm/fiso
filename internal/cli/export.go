@@ -510,7 +510,7 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 			return unsupportedExportField(prefix+".kafka", "Kafka target settings have no LinkTarget representation")
 		}
 		allowedPaths := yamlMappingValue(target, "allowedPaths")
-		if allowedPaths != nil {
+		if allowedPaths != nil && allowedPaths.Tag != "!!null" {
 			if allowedPaths.Kind != yaml.SequenceNode {
 				return unsupportedExportField(prefix+".allowedPaths", "unexpected YAML value type")
 			}
