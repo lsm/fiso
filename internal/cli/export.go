@@ -445,7 +445,14 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 				return err
 			}
 		}
-		if err := requireYAMLScalarTag(yamlMappingValue(target, "port"), prefix+".port", "!!int"); err != nil {
+		if port := yamlMappingValue(target, "port"); port != nil {
+			if err := requireYAMLScalarTag(port, prefix+".port", "!!int"); err != nil {
+				return err
+			}
+			return unsupportedExportField(prefix+".port", "port has no LinkTarget representation")
+		}
+		auth := yamlMappingValue(target, "auth")
+		if err := requireYAMLScalarTag(yamlMappingValue(auth, "type"), prefix+".auth.type", "!!str"); err != nil {
 			return err
 		}
 		allowedPaths := yamlMappingValue(target, "allowedPaths")

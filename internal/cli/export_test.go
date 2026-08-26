@@ -1205,7 +1205,9 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "explicit zero rate", fragment: "    rateLimit:\n      requestsPerSecond: 0\n", wantPath: "targets[0].rateLimit"},
 		{name: "explicit zero burst", fragment: "    rateLimit:\n      burst: 0\n", wantPath: "targets[0].rateLimit"},
 		{name: "port", fragment: "    port: 8443\n", wantPath: "targets[0].port"},
+		{name: "explicit zero port", fragment: "    port: 0\n", wantPath: "targets[0].port"},
 		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
+		{name: "coerced auth type", fragment: "    auth:\n      type: !!binary bm9uZQ==\n", wantPath: "targets[0].auth.type"},
 		{
 			name: "local authentication reference",
 			fragment: `    auth:
