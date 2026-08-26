@@ -650,3 +650,325 @@ func TestRunExport_LinkWithNoneAuth(t *testing.T) {
 		t.Error("output should not contain auth spec for type 'none'")
 	}
 }
+
+func TestRunExport_RejectsLossyFlowConfiguration(t *testing.T) {
+	tests := []struct {
+		name     string
+		fragment string
+		wantPath string
+	}{
+		{
+			name: "HTTP source excluded by FlowDefinition CRD",
+			fragment: `source:
+  type: http
+  config:
+    listenAddr: ":8081"
+    path: /ingest
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "source.type",
+		},
+		{
+			name: "named Kafka clusters",
+			fragment: `kafka:
+  clusters:
+    main:
+      brokers: [broker:9092]
+source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "kafka",
+		},
+		{
+			name: "CloudEvents overrides",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+cloudevents:
+  type: com.example.event
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "cloudevents",
+		},
+		{
+			name: "interceptors",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+interceptors:
+  - type: wasm
+    config:
+      module: enrich.wasm
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "interceptors",
+		},
+		{
+			name: "retry backoff",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  backoff: exponential
+`,
+			wantPath: "errorHandling.backoff",
+		},
+		{
+			name: "commit policy",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  commitPolicy: sink
+`,
+			wantPath: "errorHandling.commitPolicy",
+		},
+		{
+			name: "transactional ID",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  transactionalId: tx-orders
+`,
+			wantPath: "errorHandling.transactionalId",
+		},
+		{
+			name: "list source config",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+    metadata: [one, two]
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "source.config.metadata",
+		},
+		{
+			name: "nested sink config",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+    tls:
+      enabled: true
+`,
+			wantPath: "sink.config.tls",
+		},
+		{
+			name: "scalar type coercion",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+    enabled: true
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "source.config.enabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, "name: lossy-flow\n"+tt.fragment, "")
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected lossy export to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected error to name %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no partial output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
+	tests := []struct {
+		name     string
+		fragment string
+		wantPath string
+	}{
+		{name: "listen address", fragment: "listenAddr: :4500\n", wantPath: "listenAddr"},
+		{name: "metrics address", fragment: "metricsAddr: :9191\n", wantPath: "metricsAddr"},
+		{name: "port", fragment: "    port: 8443\n", wantPath: "targets[0].port"},
+		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
+		{
+			name: "local authentication reference",
+			fragment: `    auth:
+      type: bearer
+      secretRef:
+        envVar: API_TOKEN
+`,
+			wantPath: "targets[0].auth",
+		},
+		{
+			name: "circuit breaker success threshold",
+			fragment: `    circuitBreaker:
+      enabled: true
+      failureThreshold: 3
+      successThreshold: 2
+      resetTimeout: 30s
+`,
+			wantPath: "targets[0].circuitBreaker.successThreshold",
+		},
+		{
+			name: "retry timing",
+			fragment: `    retry:
+      maxAttempts: 3
+      backoff: exponential
+      initialInterval: 200ms
+`,
+			wantPath: "targets[0].retry.initialInterval",
+		},
+		{
+			name: "rate limit",
+			fragment: `    rateLimit:
+      requestsPerSecond: 10
+      burst: 20
+`,
+			wantPath: "targets[0].rateLimit",
+		},
+		{
+			name: "interceptors",
+			fragment: `    interceptors:
+      - type: wasm
+        config:
+          module: auth.wasm
+`,
+			wantPath: "targets[0].interceptors",
+		},
+		{
+			name: "Kafka target configuration",
+			fragment: `    kafka:
+      cluster: main
+      topic: events
+kafka:
+  clusters:
+    main:
+      brokers: [broker:9092]
+`,
+			wantPath: "targets[0].kafka",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			linkYAML := "targets:\n  - name: api\n    protocol: https\n    host: api.example.com\n" + tt.fragment
+			fisoDir := writeExportFixture(t, "", linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected lossy export to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected error to name %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no partial output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_LossyResourceProducesNoPartialOutput(t *testing.T) {
+	flowYAML := `name: representable-flow
+source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`
+	linkYAML := `targets:
+  - name: lossy-link
+    protocol: https
+    host: api.example.com
+    port: 8443
+`
+	fisoDir := writeExportFixture(t, flowYAML, linkYAML)
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected lossy link to fail the combined export")
+	}
+	if !strings.Contains(err.Error(), "targets[0].port") {
+		t.Fatalf("expected error to name targets[0].port, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected all-or-nothing output, got %q", buf.String())
+	}
+}
+
+func writeExportFixture(t *testing.T, flowYAML, linkYAML string) string {
+	t.Helper()
+
+	fisoDir := filepath.Join(t.TempDir(), "fiso")
+	if flowYAML != "" {
+		flowsDir := filepath.Join(fisoDir, "flows")
+		if err := os.MkdirAll(flowsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(flowsDir, "flow.yaml"), []byte(flowYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if linkYAML != "" {
+		linkDir := filepath.Join(fisoDir, "link")
+		if err := os.MkdirAll(linkDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), []byte(linkYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return fisoDir
+}
