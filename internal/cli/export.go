@@ -81,15 +81,16 @@ Examples:
 	}
 
 	// Export link targets
-	linkPath := filepath.Join(dir, "link", "config.yaml")
-	if _, err := os.Stat(linkPath); err == nil {
+	linkPath, err := findLinkConfig(dir)
+	if err != nil {
+		return err
+	}
+	if linkPath != "" {
 		linkDocs, exportErr := exportLinks(linkPath, namespace)
 		if exportErr != nil {
 			return fmt.Errorf("export links: %w", exportErr)
 		}
 		docs = append(docs, linkDocs...)
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect link config %s: %w", linkPath, err)
 	}
 
 	if len(docs) == 0 {
@@ -103,8 +104,31 @@ Examples:
 		}
 		output.Write(doc)
 	}
-	_, err := w.Write(output.Bytes())
+	_, err = w.Write(output.Bytes())
 	return err
+}
+
+func findLinkConfig(dir string) (string, error) {
+	candidates := []string{
+		filepath.Join(dir, "link", "config.yaml"),
+		filepath.Join(dir, "link-config.yaml"),
+		filepath.Join(dir, "links.yaml"),
+	}
+	var found []string
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			found = append(found, path)
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("inspect link config %s: %w", path, err)
+		}
+	}
+	if len(found) > 1 {
+		return "", fmt.Errorf("multiple link configs found: %s", strings.Join(found, ", "))
+	}
+	if len(found) == 1 {
+		return found[0], nil
+	}
+	return "", nil
 }
 
 func exportFlows(dir, namespace string) ([][]byte, error) {
@@ -137,7 +161,7 @@ func exportFlows(dir, namespace string) ([][]byte, error) {
 		if err := validateFlowFieldTypes(&root); err != nil {
 			return nil, fmt.Errorf("validate %s: %w", path, err)
 		}
-		if err := root.Decode(&flow); err != nil {
+		if err := decodeKnownFields(data, &flow); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
 		}
 		if err := flow.Validate(); err != nil {
@@ -175,7 +199,7 @@ func exportLinks(path, namespace string) ([][]byte, error) {
 	if err := validateLinkFieldTypes(&root); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
-	if err := root.Decode(&cfg); err != nil {
+	if err := decodeKnownFields(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	for i := range cfg.Targets {
@@ -201,6 +225,12 @@ func exportLinks(path, namespace string) ([][]byte, error) {
 	}
 
 	return docs, nil
+}
+
+func decodeKnownFields(data []byte, target interface{}) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	return decoder.Decode(target)
 }
 
 func validateExportableFlow(flow *config.FlowDefinition) error {
@@ -245,6 +275,16 @@ func validateFlowFieldTypes(root *yaml.Node) error {
 	if err := validateStringMap(yamlMappingValue(yamlMappingValue(document, "transform"), "fields"), "transform.fields"); err != nil {
 		return err
 	}
+	errorHandling := yamlMappingValue(document, "errorHandling")
+	if err := validateYAMLScalarTags(errorHandling, "errorHandling", map[string][]string{
+		"deadLetterTopic": {"!!str"},
+		"maxRetries":      {"!!int"},
+		"backoff":         {"!!str"},
+		"commitPolicy":    {"!!str"},
+		"transactionalId": {"!!str"},
+	}); err != nil {
+		return err
+	}
 	cloudEvents := yamlMappingValue(document, "cloudevents")
 	if cloudEvents != nil && cloudEvents.Kind == yaml.MappingNode {
 		for _, field := range []string{"id", "type", "source", "subject", "data", "datacontenttype", "dataschema"} {
@@ -261,7 +301,11 @@ func validateStringMap(mapping *yaml.Node, prefix string) error {
 		return nil
 	}
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if err := requireYAMLScalarTag(mapping.Content[i+1], prefix+"."+mapping.Content[i].Value, "!!str"); err != nil {
+		path := prefix + "." + mapping.Content[i].Value
+		if err := requireYAMLScalarTag(mapping.Content[i], path, "!!str"); err != nil {
+			return err
+		}
+		if err := requireYAMLScalarTag(mapping.Content[i+1], path, "!!str"); err != nil {
 			return err
 		}
 	}
@@ -301,6 +345,25 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 			continue
 		}
 		prefix := fmt.Sprintf("targets[%d]", i)
+		for _, field := range []string{"name", "protocol", "host", "basePath"} {
+			if err := requireYAMLScalarTag(yamlMappingValue(target, field), prefix+"."+field, "!!str"); err != nil {
+				return err
+			}
+		}
+		if err := requireYAMLScalarTag(yamlMappingValue(target, "port"), prefix+".port", "!!int"); err != nil {
+			return err
+		}
+		allowedPaths := yamlMappingValue(target, "allowedPaths")
+		if allowedPaths != nil {
+			if allowedPaths.Kind != yaml.SequenceNode {
+				return unsupportedExportField(prefix+".allowedPaths", "unexpected YAML value type")
+			}
+			for j, value := range allowedPaths.Content {
+				if err := requireYAMLScalarTag(value, fmt.Sprintf("%s.allowedPaths[%d]", prefix, j), "!!str"); err != nil {
+					return err
+				}
+			}
+		}
 		if err := validateYAMLScalarTags(yamlMappingValue(target, "circuitBreaker"), prefix+".circuitBreaker", map[string][]string{
 			"enabled":          {"!!bool"},
 			"failureThreshold": {"!!int"},

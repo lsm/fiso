@@ -686,6 +686,49 @@ sink:
 			wantPath: "transform.fields.id",
 		},
 		{
+			name: "numeric transform key",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+transform:
+  fields:
+    123: data.id
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "transform.fields.123",
+		},
+		{
+			name: "numeric dead-letter topic",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  deadLetterTopic: 123
+`,
+			wantPath: "errorHandling.deadLetterTopic",
+		},
+		{
+			name: "fractional max retries",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  maxRetries: 2.9
+`,
+			wantPath: "errorHandling.maxRetries",
+		},
+		{
 			name: "boolean CloudEvents field",
 			flowYAML: `name: flow
 source:
@@ -930,6 +973,86 @@ sink:
 	}
 }
 
+func TestRunExport_RejectsCoercedLinkScalars(t *testing.T) {
+	tests := []struct {
+		name     string
+		linkYAML string
+		wantPath string
+	}{
+		{
+			name: "numeric name",
+			linkYAML: `targets:
+  - name: 123
+    protocol: https
+    host: api.example.com
+`,
+			wantPath: "targets[0].name",
+		},
+		{
+			name: "numeric host",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: 456
+`,
+			wantPath: "targets[0].host",
+		},
+		{
+			name: "non-string allowed path",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    allowedPaths: [1, true]
+`,
+			wantPath: "targets[0].allowedPaths[0]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, "", tt.linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected scalar coercion to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected error to name %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsUnknownFields(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  maxRetry: 5
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected unknown field to fail")
+	}
+	if !strings.Contains(err.Error(), "maxRetry") {
+		t.Fatalf("expected error to name maxRetry, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
 func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1049,6 +1172,60 @@ kafka:
 				t.Fatalf("expected no partial output, got %q", buf.String())
 			}
 		})
+	}
+}
+
+func TestRunExport_ExportsAlternateLinkConfigPaths(t *testing.T) {
+	for _, name := range []string{"link-config.yaml", "links.yaml"} {
+		t.Run(name, func(t *testing.T) {
+			fisoDir := filepath.Join(t.TempDir(), "fiso")
+			if err := os.MkdirAll(fisoDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			linkYAML := `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+`
+			if err := os.WriteFile(filepath.Join(fisoDir, name), []byte(linkYAML), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			var buf bytes.Buffer
+			if err := RunExport([]string{fisoDir}, &buf); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(buf.String(), "kind: LinkTarget") {
+				t.Fatalf("expected alternate Link config to export, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsMultipleLinkConfigPaths(t *testing.T) {
+	fisoDir := filepath.Join(t.TempDir(), "fiso")
+	linkDir := filepath.Join(fisoDir, "link")
+	if err := os.MkdirAll(linkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linkYAML := []byte("targets:\n  - name: api\n    protocol: https\n    host: api.example.com\n")
+	if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), linkYAML, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fisoDir, "links.yaml"), linkYAML, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected ambiguous Link configs to fail")
+	}
+	if !strings.Contains(err.Error(), "multiple link configs") {
+		t.Fatalf("expected ambiguous Link config error, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
 	}
 }
 
