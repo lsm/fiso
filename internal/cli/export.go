@@ -130,7 +130,14 @@ func exportFlows(dir, namespace string) ([][]byte, error) {
 		}
 
 		var flow config.FlowDefinition
-		if err := yaml.Unmarshal(data, &flow); err != nil {
+		var root yaml.Node
+		if err := yaml.Unmarshal(data, &root); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if err := validateFlowFieldTypes(&root); err != nil {
+			return nil, fmt.Errorf("validate %s: %w", path, err)
+		}
+		if err := root.Decode(&flow); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
 		}
 		if err := flow.Validate(); err != nil {
@@ -230,11 +237,61 @@ func validateExportableFlow(flow *config.FlowDefinition) error {
 	return nil
 }
 
-func validateLinkFieldTypes(root *yaml.Node) error {
-	document := root
-	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
-		document = root.Content[0]
+func validateFlowFieldTypes(root *yaml.Node) error {
+	document := yamlDocument(root)
+	if err := requireYAMLScalarTag(yamlMappingValue(document, "name"), "name", "!!str"); err != nil {
+		return err
 	}
+	if err := validateStringMap(yamlMappingValue(yamlMappingValue(document, "transform"), "fields"), "transform.fields"); err != nil {
+		return err
+	}
+	cloudEvents := yamlMappingValue(document, "cloudevents")
+	if cloudEvents != nil && cloudEvents.Kind == yaml.MappingNode {
+		for _, field := range []string{"id", "type", "source", "subject", "data", "datacontenttype", "dataschema"} {
+			if err := requireYAMLScalarTag(yamlMappingValue(cloudEvents, field), "cloudevents."+field, "!!str"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateStringMap(mapping *yaml.Node, prefix string) error {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if err := requireYAMLScalarTag(mapping.Content[i+1], prefix+"."+mapping.Content[i].Value, "!!str"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requireYAMLScalarTag(value *yaml.Node, path string, tags ...string) error {
+	if value == nil {
+		return nil
+	}
+	if value.Kind != yaml.ScalarNode {
+		return unsupportedExportField(path, "unexpected YAML value type")
+	}
+	for _, tag := range tags {
+		if value.Tag == tag {
+			return nil
+		}
+	}
+	return unsupportedExportField(path, fmt.Sprintf("value has YAML type %s", value.Tag))
+}
+
+func yamlDocument(root *yaml.Node) *yaml.Node {
+	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
+		return root.Content[0]
+	}
+	return root
+}
+
+func validateLinkFieldTypes(root *yaml.Node) error {
+	document := yamlDocument(root)
 	targets := yamlMappingValue(document, "targets")
 	if targets == nil || targets.Kind != yaml.SequenceNode {
 		return nil
@@ -246,17 +303,17 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		prefix := fmt.Sprintf("targets[%d]", i)
 		if err := validateYAMLScalarTags(yamlMappingValue(target, "circuitBreaker"), prefix+".circuitBreaker", map[string][]string{
 			"enabled":          {"!!bool"},
-			"failureThreshold": {"!!int", "!!float"},
-			"successThreshold": {"!!int", "!!float"},
-			"resetTimeout":     {"!!str", "!!int", "!!float"},
+			"failureThreshold": {"!!int"},
+			"successThreshold": {"!!int"},
+			"resetTimeout":     {"!!str", "!!int"},
 		}); err != nil {
 			return err
 		}
 		if err := validateYAMLScalarTags(yamlMappingValue(target, "retry"), prefix+".retry", map[string][]string{
-			"maxAttempts":     {"!!int", "!!float"},
+			"maxAttempts":     {"!!int"},
 			"backoff":         {"!!str"},
-			"initialInterval": {"!!str", "!!int", "!!float"},
-			"maxInterval":     {"!!str", "!!int", "!!float"},
+			"initialInterval": {"!!str", "!!int"},
+			"maxInterval":     {"!!str", "!!int"},
 			"jitter":          {"!!int", "!!float"},
 		}); err != nil {
 			return err
@@ -276,20 +333,9 @@ func validateYAMLScalarTags(mapping *yaml.Node, prefix string, fields map[string
 		return nil
 	}
 	for field, tags := range fields {
-		value := yamlMappingValue(mapping, field)
-		if value == nil {
-			continue
+		if err := requireYAMLScalarTag(yamlMappingValue(mapping, field), prefix+"."+field, tags...); err != nil {
+			return err
 		}
-		if value.Kind != yaml.ScalarNode {
-			return unsupportedExportField(prefix+"."+field, "unexpected YAML value type")
-		}
-		for _, tag := range tags {
-			if value.Tag == tag {
-				goto nextField
-			}
-		}
-		return unsupportedExportField(prefix+"."+field, fmt.Sprintf("value has YAML type %s", value.Tag))
-	nextField:
 	}
 	return nil
 }

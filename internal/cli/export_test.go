@@ -652,6 +652,73 @@ func TestRunExport_LinkWithNoneAuth(t *testing.T) {
 	}
 }
 
+func TestRunExport_RejectsCoercedFlowScalars(t *testing.T) {
+	tests := []struct {
+		name     string
+		flowYAML string
+		wantPath string
+	}{
+		{
+			name: "numeric name",
+			flowYAML: `name: 123
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "name",
+		},
+		{
+			name: "numeric transform expression",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+transform:
+  fields:
+    id: 123
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "transform.fields.id",
+		},
+		{
+			name: "boolean CloudEvents field",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+cloudevents:
+  type: true
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "cloudevents.type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, tt.flowYAML, "")
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected scalar coercion to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected error to name %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
+			}
+		})
+	}
+}
+
 func TestRunExport_RejectsLossyFlowConfiguration(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -875,7 +942,9 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "invalid Kubernetes resource name", targetName: "Invalid_Name", wantPath: "targets[0].name"},
 		{name: "invalid circuit breaker enabled type", fragment: "    circuitBreaker:\n      enabled: \"true\"\n", wantPath: "targets[0].circuitBreaker.enabled"},
 		{name: "invalid circuit breaker threshold type", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: \"3\"\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "fractional circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 2.9\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
 		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
+		{name: "fractional retry attempts", fragment: "    retry:\n      maxAttempts: 3.7\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "invalid rate limit type", fragment: "    rateLimit:\n      requestsPerSecond: \"10\"\n", wantPath: "targets[0].rateLimit.requestsPerSecond"},
 		{name: "port", fragment: "    port: 8443\n", wantPath: "targets[0].port"},
 		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
