@@ -1218,7 +1218,9 @@ func TestRunExport_RejectsEmptyUnsupportedLeaves(t *testing.T) {
 		wantPath string
 	}{
 		{name: "empty kafka topic leaf", fragment: "    kafka:\n      topic: \"\"\n", wantPath: "targets[0].kafka"},
+		{name: "null kafka header value", fragment: "    kafka:\n      headers:\n        x: null\n", wantPath: "targets[0].kafka"},
 		{name: "empty auth secret leaf", fragment: "    auth:\n      secretRef:\n        envVar: \"\"\n", wantPath: "targets[0].auth.secretRef"},
+		{name: "null auth secret leaf", fragment: "    auth:\n      secretRef:\n        envVar: null\n", wantPath: "targets[0].auth.secretRef"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
