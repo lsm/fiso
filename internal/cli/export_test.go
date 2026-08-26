@@ -1224,6 +1224,76 @@ func TestRunExport_RejectsEmptyUnsupportedLeaves(t *testing.T) {
 	}
 }
 
+func TestRunExport_AllowsNullOmittedSettings(t *testing.T) {
+	linkTests := []struct {
+		name     string
+		fragment string
+	}{
+		{name: "null listen address", fragment: "listenAddr: null\n"},
+		{name: "null metrics address", fragment: "metricsAddr: null\n"},
+		{name: "null base path", fragment: "    basePath: null\n"},
+		{name: "null port", fragment: "    port: null\n"},
+		{name: "null auth type", fragment: "    auth:\n      type: null\n"},
+		{name: "null auth secret reference", fragment: "    auth:\n      secretRef: null\n"},
+		{name: "null target kafka", fragment: "    kafka: null\n"},
+		{name: "null success threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      successThreshold: null\n"},
+		{name: "null retry timing", fragment: "    retry:\n      maxAttempts: 3\n      initialInterval: null\n"},
+		{name: "null rate limit", fragment: "    rateLimit:\n      burst: null\n"},
+	}
+	for _, tt := range linkTests {
+		t.Run("link/"+tt.name, func(t *testing.T) {
+			linkYAML := "targets:\n  - name: api\n    protocol: https\n    host: api.example.com\n" + tt.fragment
+			fisoDir := writeExportFixture(t, "", linkYAML)
+			var buf bytes.Buffer
+			if err := RunExport([]string{fisoDir}, &buf); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(buf.String(), "kind: LinkTarget") {
+				t.Fatalf("expected target to export, got %q", buf.String())
+			}
+		})
+	}
+
+	t.Run("flow/null error handling", func(t *testing.T) {
+		flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  maxRetries: null
+  deadLetterTopic: null
+  backoff: null
+`
+		fisoDir := writeExportFixture(t, flowYAML, "")
+		var buf bytes.Buffer
+		if err := RunExport([]string{fisoDir}, &buf); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "kind: FlowDefinition") {
+			t.Fatalf("expected flow to export, got %q", buf.String())
+		}
+	})
+
+	t.Run("link/null protocol", func(t *testing.T) {
+		linkYAML := `targets:
+  - name: api
+    protocol: null
+    host: api.example.com
+`
+		fisoDir := writeExportFixture(t, "", linkYAML)
+		var buf bytes.Buffer
+		if err := RunExport([]string{fisoDir}, &buf); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "kind: LinkTarget") {
+			t.Fatalf("expected target to export, got %q", buf.String())
+		}
+	})
+}
+
 func TestRunExport_RejectsCoercedLinkScalars(t *testing.T) {
 	tests := []struct {
 		name     string

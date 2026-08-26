@@ -315,17 +315,17 @@ func validateFlowFieldTypes(root *yaml.Node) error {
 	}); err != nil {
 		return err
 	}
-	if maxRetries := yamlMappingValue(errorHandling, "maxRetries"); maxRetries != nil {
+	if maxRetries := yamlMappingValue(errorHandling, "maxRetries"); yamlSubtreeHasValues(maxRetries) {
 		var retries int
 		if err := maxRetries.Decode(&retries); err == nil && retries == 0 {
 			return unsupportedExportField("errorHandling.maxRetries", "explicit zero would be omitted from the FlowDefinition")
 		}
 	}
-	if deadLetterTopic := yamlMappingValue(errorHandling, "deadLetterTopic"); deadLetterTopic != nil && deadLetterTopic.Value == "" {
+	if deadLetterTopic := yamlMappingValue(errorHandling, "deadLetterTopic"); yamlSubtreeHasValues(deadLetterTopic) && deadLetterTopic.Value == "" {
 		return unsupportedExportField("errorHandling.deadLetterTopic", "explicit empty value would be omitted from the FlowDefinition")
 	}
 	for _, field := range []string{"backoff", "commitPolicy", "transactionalId"} {
-		if yamlMappingValue(errorHandling, field) != nil {
+		if yamlSubtreeHasValues(yamlMappingValue(errorHandling, field)) {
 			return unsupportedExportField("errorHandling."+field, field+" has no FlowDefinition representation")
 		}
 	}
@@ -432,7 +432,7 @@ func yamlSubtreeHasValues(node *yaml.Node) bool {
 }
 
 func requireYAMLScalarTag(value *yaml.Node, path string, tags ...string) error {
-	if value == nil {
+	if value == nil || value.Tag == "!!null" {
 		return nil
 	}
 	if value.Kind != yaml.ScalarNode {
@@ -459,7 +459,7 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		return err
 	}
 	for _, field := range []string{"listenAddr", "metricsAddr"} {
-		if yamlMappingValue(document, field) != nil {
+		if yamlSubtreeHasValues(yamlMappingValue(document, field)) {
 			return unsupportedExportField(field, "process-level setting has no LinkTarget representation")
 		}
 	}
@@ -477,13 +477,13 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 				return err
 			}
 		}
-		if protocol := yamlMappingValue(target, "protocol"); protocol != nil && protocol.Value == "" {
+		if protocol := yamlMappingValue(target, "protocol"); yamlSubtreeHasValues(protocol) && protocol.Value == "" {
 			return unsupportedExportField(prefix+".protocol", "explicit empty value cannot be replaced by the default protocol")
 		}
-		if yamlMappingValue(target, "basePath") != nil {
+		if yamlSubtreeHasValues(yamlMappingValue(target, "basePath")) {
 			return unsupportedExportField(prefix+".basePath", "base path has no LinkTarget representation")
 		}
-		if port := yamlMappingValue(target, "port"); port != nil {
+		if port := yamlMappingValue(target, "port"); yamlSubtreeHasValues(port) {
 			if err := requireYAMLScalarTag(port, prefix+".port", "!!int"); err != nil {
 				return err
 			}
@@ -493,7 +493,7 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		if err := requireYAMLScalarTag(yamlMappingValue(auth, "type"), prefix+".auth.type", "!!str"); err != nil {
 			return err
 		}
-		if yamlMappingValue(auth, "type") != nil {
+		if yamlSubtreeHasValues(yamlMappingValue(auth, "type")) {
 			return unsupportedExportField(prefix+".auth.type", "an explicitly configured auth block has no LinkTarget representation")
 		}
 		for _, field := range []string{"secretRef", "vaultRef"} {
@@ -527,22 +527,22 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}); err != nil {
 			return err
 		}
-		if enabled := yamlMappingValue(circuitBreaker, "enabled"); enabled != nil {
+		if enabled := yamlMappingValue(circuitBreaker, "enabled"); yamlSubtreeHasValues(enabled) {
 			var value bool
 			if err := enabled.Decode(&value); err == nil && !value {
 				return unsupportedExportField(prefix+".circuitBreaker.enabled", "an explicitly disabled circuit breaker has no LinkTarget representation")
 			}
 		} else {
 			for _, field := range []string{"failureThreshold", "resetTimeout"} {
-				if yamlMappingValue(circuitBreaker, field) != nil {
+				if yamlSubtreeHasValues(yamlMappingValue(circuitBreaker, field)) {
 					return unsupportedExportField(prefix+".circuitBreaker."+field, field+" without an enabled circuit breaker would be discarded")
 				}
 			}
 		}
-		if resetTimeout := yamlMappingValue(circuitBreaker, "resetTimeout"); resetTimeout != nil && resetTimeout.Value == "" {
+		if resetTimeout := yamlMappingValue(circuitBreaker, "resetTimeout"); yamlSubtreeHasValues(resetTimeout) && resetTimeout.Value == "" {
 			return unsupportedExportField(prefix+".circuitBreaker.resetTimeout", "explicit empty value would be omitted")
 		}
-		if yamlMappingValue(circuitBreaker, "successThreshold") != nil {
+		if yamlSubtreeHasValues(yamlMappingValue(circuitBreaker, "successThreshold")) {
 			return unsupportedExportField(prefix+".circuitBreaker.successThreshold", "success threshold has no LinkTarget representation")
 		}
 		if err := rejectUnknownYAMLFields(circuitBreaker, prefix+".circuitBreaker", map[string]bool{
@@ -560,17 +560,17 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}); err != nil {
 			return err
 		}
-		if maxAttempts := yamlMappingValue(retry, "maxAttempts"); maxAttempts != nil {
+		if maxAttempts := yamlMappingValue(retry, "maxAttempts"); yamlSubtreeHasValues(maxAttempts) {
 			var attempts int
 			if err := maxAttempts.Decode(&attempts); err == nil && attempts == 0 {
 				return unsupportedExportField(prefix+".retry.maxAttempts", "explicit zero would be omitted and is invalid in the LinkTarget CRD")
 			}
 		}
-		if backoff := yamlMappingValue(retry, "backoff"); backoff != nil && backoff.Value == "" {
+		if backoff := yamlMappingValue(retry, "backoff"); yamlSubtreeHasValues(backoff) && backoff.Value == "" {
 			return unsupportedExportField(prefix+".retry.backoff", "explicit empty value would be omitted from the LinkTarget")
 		}
 		for _, field := range []string{"initialInterval", "maxInterval", "jitter"} {
-			if yamlMappingValue(retry, field) != nil {
+			if yamlSubtreeHasValues(yamlMappingValue(retry, field)) {
 				return unsupportedExportField(prefix+".retry."+field, field+" has no LinkTarget representation")
 			}
 		}
@@ -586,7 +586,7 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}); err != nil {
 			return err
 		}
-		if yamlMappingValue(rateLimit, "requestsPerSecond") != nil || yamlMappingValue(rateLimit, "burst") != nil {
+		if yamlSubtreeHasValues(yamlMappingValue(rateLimit, "requestsPerSecond")) || yamlSubtreeHasValues(yamlMappingValue(rateLimit, "burst")) {
 			return unsupportedExportField(prefix+".rateLimit", "rate limiting has no LinkTarget representation")
 		}
 		if err := rejectUnknownYAMLFields(rateLimit, prefix+".rateLimit", map[string]bool{
