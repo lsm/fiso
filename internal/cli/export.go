@@ -270,9 +270,6 @@ func validateExportableFlow(flow *config.FlowDefinition) error {
 	if len(flow.Kafka.Clusters) > 0 {
 		return unsupportedExportField("kafka", "named Kafka clusters have no FlowDefinition representation")
 	}
-	if flow.CloudEvents != nil {
-		return unsupportedExportField("cloudevents", "CloudEvents overrides have no executable FlowDefinition representation")
-	}
 	if len(flow.Interceptors) > 0 {
 		return unsupportedExportField("interceptors", "interceptors have no FlowDefinition representation")
 	}
@@ -338,6 +335,9 @@ func validateFlowFieldTypes(root *yaml.Node) error {
 			if err := requireYAMLScalarTag(yamlMappingValue(cloudEvents, field), "cloudevents."+field, "!!str"); err != nil {
 				return err
 			}
+		}
+		if len(cloudEvents.Content) > 0 {
+			return unsupportedExportField("cloudevents", "populated CloudEvents overrides have no executable FlowDefinition representation")
 		}
 	}
 	return nil

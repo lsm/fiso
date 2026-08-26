@@ -644,6 +644,27 @@ func TestRunExport_RejectsExplicitNoneAuth(t *testing.T) {
 	}
 }
 
+func TestRunExport_AllowsEmptyCloudEvents(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+cloudevents: {}
+sink:
+  type: http
+  config: {}
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
+
+	var buf bytes.Buffer
+	if err := RunExport([]string{fisoDir}, &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "kind: FlowDefinition") {
+		t.Fatalf("expected flow to export, got %q", buf.String())
+	}
+}
+
 func TestRunExport_RejectsCoercedFlowScalars(t *testing.T) {
 	tests := []struct {
 		name     string
