@@ -468,6 +468,17 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		if yamlMappingValue(auth, "type") != nil {
 			return unsupportedExportField(prefix+".auth.type", "an explicitly configured auth block has no LinkTarget representation")
 		}
+		for _, field := range []string{"secretRef", "vaultRef"} {
+			if ref := yamlMappingValue(auth, field); ref != nil && ref.Kind == yaml.MappingNode && len(ref.Content) > 0 {
+				if field == "secretRef" {
+					return unsupportedExportField(prefix+".auth.secretRef", "local file and environment references are not Kubernetes Secret names")
+				}
+				return unsupportedExportField(prefix+".auth.vaultRef", "local Vault settings have no lossless LinkTarget representation")
+			}
+		}
+		if kafka := yamlMappingValue(target, "kafka"); kafka != nil && kafka.Kind == yaml.MappingNode && len(kafka.Content) > 0 {
+			return unsupportedExportField(prefix+".kafka", "Kafka target settings have no LinkTarget representation")
+		}
 		allowedPaths := yamlMappingValue(target, "allowedPaths")
 		if allowedPaths != nil {
 			if allowedPaths.Kind != yaml.SequenceNode {
@@ -623,12 +634,6 @@ func validateExportableLink(cfg *link.Config) error {
 		if target.Protocol == "kafka" {
 			return unsupportedExportField(prefix+".protocol", "Kafka targets have no LinkTarget representation")
 		}
-		if target.Auth.SecretRef != nil {
-			return unsupportedExportField(prefix+".auth.secretRef", "local file and environment references are not Kubernetes Secret names")
-		}
-		if target.Auth.VaultRef != nil {
-			return unsupportedExportField(prefix+".auth.vaultRef", "local Vault settings have no lossless LinkTarget representation")
-		}
 		if target.CircuitBreaker.Enabled && target.CircuitBreaker.FailureThreshold < 1 {
 			return unsupportedExportField(prefix+".circuitBreaker.failureThreshold", "enabled circuit breakers require a value of at least 1 in the LinkTarget CRD")
 		}
@@ -637,9 +642,6 @@ func validateExportableLink(cfg *link.Config) error {
 		}
 		if target.Retry.MaxAttempts == 0 && target.Retry.Backoff != "" {
 			return unsupportedExportField(prefix+".retry.backoff", "backoff without enabled retries would be discarded")
-		}
-		if target.Kafka != nil {
-			return unsupportedExportField(prefix+".kafka", "Kafka target settings have no LinkTarget representation")
 		}
 		if len(target.Interceptors) > 0 {
 			return unsupportedExportField(prefix+".interceptors", "interceptors have no LinkTarget representation")

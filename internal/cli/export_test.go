@@ -1144,6 +1144,30 @@ func TestRunExport_RejectsExplicitEmptyLinkProtocol(t *testing.T) {
 	}
 }
 
+func TestRunExport_AllowsEmptyReferenceMappings(t *testing.T) {
+	tests := []struct {
+		name     string
+		fragment string
+	}{
+		{name: "empty auth secret reference", fragment: "    auth:\n      secretRef: {}\n"},
+		{name: "empty auth vault reference", fragment: "    auth:\n      vaultRef: {}\n"},
+		{name: "empty target kafka mapping", fragment: "    kafka: {}\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			linkYAML := "targets:\n  - name: api\n    protocol: https\n    host: api.example.com\n" + tt.fragment
+			fisoDir := writeExportFixture(t, "", linkYAML)
+			var buf bytes.Buffer
+			if err := RunExport([]string{fisoDir}, &buf); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(buf.String(), "kind: LinkTarget") {
+				t.Fatalf("expected target to export, got %q", buf.String())
+			}
+		})
+	}
+}
+
 func TestRunExport_RejectsCoercedLinkScalars(t *testing.T) {
 	tests := []struct {
 		name     string
