@@ -1152,6 +1152,8 @@ func TestRunExport_AllowsEmptyReferenceMappings(t *testing.T) {
 		{name: "empty auth secret reference", fragment: "    auth:\n      secretRef: {}\n"},
 		{name: "empty auth vault reference", fragment: "    auth:\n      vaultRef: {}\n"},
 		{name: "empty target kafka mapping", fragment: "    kafka: {}\n"},
+		{name: "nested empty kafka headers", fragment: "    kafka:\n      headers: {}\n"},
+		{name: "nested empty kafka key", fragment: "    kafka:\n      key: {}\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

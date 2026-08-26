@@ -336,7 +336,7 @@ func validateFlowFieldTypes(root *yaml.Node) error {
 				return err
 			}
 		}
-		if len(cloudEvents.Content) > 0 {
+		if yamlSubtreeHasValues(cloudEvents) {
 			return unsupportedExportField("cloudevents", "populated CloudEvents overrides have no executable FlowDefinition representation")
 		}
 	}
@@ -401,6 +401,32 @@ func rejectYAMLMergeKeys(node *yaml.Node, path string) error {
 		}
 	}
 	return nil
+}
+
+// yamlSubtreeHasValues reports whether a YAML subtree contains any populated
+// scalar value, treating empty mappings and lists as unpopulated.
+func yamlSubtreeHasValues(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch node.Kind {
+	case yaml.MappingNode:
+		for i := 1; i < len(node.Content); i += 2 {
+			if yamlSubtreeHasValues(node.Content[i]) {
+				return true
+			}
+		}
+		return false
+	case yaml.SequenceNode:
+		for _, child := range node.Content {
+			if yamlSubtreeHasValues(child) {
+				return true
+			}
+		}
+		return false
+	default:
+		return node.Tag != "!!null" && node.Value != ""
+	}
 }
 
 func requireYAMLScalarTag(value *yaml.Node, path string, tags ...string) error {
@@ -469,14 +495,14 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 			return unsupportedExportField(prefix+".auth.type", "an explicitly configured auth block has no LinkTarget representation")
 		}
 		for _, field := range []string{"secretRef", "vaultRef"} {
-			if ref := yamlMappingValue(auth, field); ref != nil && ref.Kind == yaml.MappingNode && len(ref.Content) > 0 {
+			if yamlSubtreeHasValues(yamlMappingValue(auth, field)) {
 				if field == "secretRef" {
 					return unsupportedExportField(prefix+".auth.secretRef", "local file and environment references are not Kubernetes Secret names")
 				}
 				return unsupportedExportField(prefix+".auth.vaultRef", "local Vault settings have no lossless LinkTarget representation")
 			}
 		}
-		if kafka := yamlMappingValue(target, "kafka"); kafka != nil && kafka.Kind == yaml.MappingNode && len(kafka.Content) > 0 {
+		if yamlSubtreeHasValues(yamlMappingValue(target, "kafka")) {
 			return unsupportedExportField(prefix+".kafka", "Kafka target settings have no LinkTarget representation")
 		}
 		allowedPaths := yamlMappingValue(target, "allowedPaths")
