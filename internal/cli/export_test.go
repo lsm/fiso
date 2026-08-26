@@ -762,6 +762,33 @@ sink:
 	}
 }
 
+func TestRunExport_RejectsInvalidTransformExpression(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+transform:
+  fields:
+    id: "data.?"
+sink:
+  type: http
+  config: {}
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected invalid transform to fail")
+	}
+	if !strings.Contains(err.Error(), "transform.fields") {
+		t.Fatalf("expected transform validation path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
 func TestRunExport_RejectsLossyFlowConfiguration(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -949,6 +976,19 @@ sink:
 `,
 			wantPath: "source.config.enabled",
 		},
+		{
+			name: "non-string source config key",
+			fragment: `source:
+  type: grpc
+  config:
+    123: abc
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "source.config.123",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1028,7 +1068,15 @@ func TestRunExport_RejectsCoercedLinkScalars(t *testing.T) {
 }
 
 func TestRunExport_RejectsUnknownFields(t *testing.T) {
-	flowYAML := `name: flow
+	tests := []struct {
+		name     string
+		flowYAML string
+		linkYAML string
+		wantPath string
+	}{
+		{
+			name: "Flow field",
+			flowYAML: `name: flow
 source:
   type: grpc
   config: {}
@@ -1037,19 +1085,59 @@ sink:
   config: {}
 errorHandling:
   maxRetry: 5
-`
-	fisoDir := writeExportFixture(t, flowYAML, "")
+`,
+			wantPath: "maxRetry",
+		},
+		{
+			name: "circuit breaker field",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    circuitBreaker:
+      failThreshold: 3
+`,
+			wantPath: "targets[0].circuitBreaker.failThreshold",
+		},
+		{
+			name: "retry field",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    retry:
+      attempts: 3
+`,
+			wantPath: "targets[0].retry.attempts",
+		},
+		{
+			name: "rate limit field",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    rateLimit:
+      requests: 10
+`,
+			wantPath: "targets[0].rateLimit.requests",
+		},
+	}
 
-	var buf bytes.Buffer
-	err := RunExport([]string{fisoDir}, &buf)
-	if err == nil {
-		t.Fatal("expected unknown field to fail")
-	}
-	if !strings.Contains(err.Error(), "maxRetry") {
-		t.Fatalf("expected error to name maxRetry, got %v", err)
-	}
-	if buf.Len() != 0 {
-		t.Fatalf("expected no output, got %q", buf.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, tt.flowYAML, tt.linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected unknown field to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected error to name %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
+			}
+		})
 	}
 }
 
@@ -1069,6 +1157,7 @@ func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "fractional retry attempts", fragment: "    retry:\n      maxAttempts: 3.7\n", wantPath: "targets[0].retry.maxAttempts"},
 		{name: "invalid rate limit type", fragment: "    rateLimit:\n      requestsPerSecond: \"10\"\n", wantPath: "targets[0].rateLimit.requestsPerSecond"},
+		{name: "fractional rate limit burst", fragment: "    rateLimit:\n      burst: 0.5\n", wantPath: "targets[0].rateLimit.burst"},
 		{name: "port", fragment: "    port: 8443\n", wantPath: "targets[0].port"},
 		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
 		{

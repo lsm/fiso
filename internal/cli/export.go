@@ -15,6 +15,7 @@ import (
 	v1alpha1 "github.com/lsm/fiso/api/v1alpha1"
 	"github.com/lsm/fiso/internal/config"
 	"github.com/lsm/fiso/internal/link"
+	unifiedxform "github.com/lsm/fiso/internal/transform/unified"
 )
 
 // RunExport converts flat flow and link configs to Kubernetes CRD format.
@@ -167,6 +168,11 @@ func exportFlows(dir, namespace string) ([][]byte, error) {
 		if err := flow.Validate(); err != nil {
 			return nil, fmt.Errorf("validate %s: %w", path, err)
 		}
+		if flow.Transform != nil && len(flow.Transform.Fields) > 0 {
+			if _, err := unifiedxform.NewTransformer(flow.Transform.Fields); err != nil {
+				return nil, fmt.Errorf("validate %s transform.fields: %w", path, err)
+			}
+		}
 		if err := validateExportableFlow(&flow); err != nil {
 			return nil, fmt.Errorf("flow %q: %w", flow.Name, err)
 		}
@@ -272,6 +278,12 @@ func validateFlowFieldTypes(root *yaml.Node) error {
 	if err := requireYAMLScalarTag(yamlMappingValue(document, "name"), "name", "!!str"); err != nil {
 		return err
 	}
+	if err := validateStringMap(yamlMappingValue(yamlMappingValue(document, "source"), "config"), "source.config"); err != nil {
+		return err
+	}
+	if err := validateStringMap(yamlMappingValue(yamlMappingValue(document, "sink"), "config"), "sink.config"); err != nil {
+		return err
+	}
 	if err := validateStringMap(yamlMappingValue(yamlMappingValue(document, "transform"), "fields"), "transform.fields"); err != nil {
 		return err
 	}
@@ -372,6 +384,11 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}); err != nil {
 			return err
 		}
+		if err := rejectUnknownYAMLFields(yamlMappingValue(target, "circuitBreaker"), prefix+".circuitBreaker", map[string]bool{
+			"enabled": true, "failureThreshold": true, "successThreshold": true, "resetTimeout": true,
+		}); err != nil {
+			return err
+		}
 		if err := validateYAMLScalarTags(yamlMappingValue(target, "retry"), prefix+".retry", map[string][]string{
 			"maxAttempts":     {"!!int"},
 			"backoff":         {"!!str"},
@@ -381,9 +398,20 @@ func validateLinkFieldTypes(root *yaml.Node) error {
 		}); err != nil {
 			return err
 		}
+		if err := rejectUnknownYAMLFields(yamlMappingValue(target, "retry"), prefix+".retry", map[string]bool{
+			"maxAttempts": true, "backoff": true, "initialInterval": true, "maxInterval": true, "jitter": true,
+		}); err != nil {
+			return err
+		}
 		if err := validateYAMLScalarTags(yamlMappingValue(target, "rateLimit"), prefix+".rateLimit", map[string][]string{
 			"requestsPerSecond": {"!!int", "!!float"},
-			"burst":             {"!!int", "!!float"},
+			"burst":             {"!!int"},
+		}); err != nil {
+			return err
+		}
+		if err := rejectUnknownYAMLFields(yamlMappingValue(target, "rateLimit"), prefix+".rateLimit", map[string]bool{
+			"requestsPerSecond": true,
+			"burst":             true,
 		}); err != nil {
 			return err
 		}
@@ -398,6 +426,23 @@ func validateYAMLScalarTags(mapping *yaml.Node, prefix string, fields map[string
 	for field, tags := range fields {
 		if err := requireYAMLScalarTag(yamlMappingValue(mapping, field), prefix+"."+field, tags...); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func rejectUnknownYAMLFields(mapping *yaml.Node, prefix string, allowed map[string]bool) error {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		field := mapping.Content[i]
+		path := prefix + "." + field.Value
+		if err := requireYAMLScalarTag(field, path, "!!str"); err != nil {
+			return err
+		}
+		if !allowed[field.Value] {
+			return unsupportedExportField(path, "unknown field")
 		}
 	}
 	return nil
