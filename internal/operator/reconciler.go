@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/lsm/fiso/api/v1alpha1"
 )
@@ -84,8 +85,24 @@ func ValidateFlowSpec(spec *v1alpha1.FlowDefinitionSpec) error {
 	if !validSinkTypes[spec.Sink.Type] {
 		return fmt.Errorf("unsupported sink type: %s", spec.Sink.Type)
 	}
-	if spec.Sink.Type == "grpc" && spec.Sink.Config["address"] == "" {
-		return fmt.Errorf("sink config: address is required for grpc sink")
+	if spec.Sink.Type == "grpc" {
+		// CRD config values are strings; enforce the same executable contract as
+		// local validation and the Flow builders (ADR 0003).
+		if spec.Sink.Config["address"] == "" {
+			return fmt.Errorf("sink config: address is required for grpc sink")
+		}
+		if timeout := spec.Sink.Config["timeout"]; timeout != "" {
+			d, err := time.ParseDuration(timeout)
+			if err != nil {
+				return fmt.Errorf("sink config: timeout %q is not a valid duration", timeout)
+			}
+			if d < 0 {
+				return fmt.Errorf("sink config: timeout %q must not be negative", timeout)
+			}
+		}
+		if tlsVal := spec.Sink.Config["tls"]; tlsVal != "" && tlsVal != "false" {
+			return fmt.Errorf("sink config: tls is not supported until gRPC TLS credentials are configurable")
+		}
 	}
 	return nil
 }
