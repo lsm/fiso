@@ -435,9 +435,12 @@ sink:
   type: grpc
   config:
     address: event-service:50051  # required
-    timeout: 30s                   # optional, default 30s
-    tls: false                     # optional; true requires transport credentials
+    timeout: 30s                   # optional duration, default 30s, must not be negative
 ```
+
+TLS is not supported yet — the gRPC sink has no credentials configuration, so
+any `tls` setting other than an explicit `false` is rejected with an error
+instead of silently downgrading to an insecure connection.
 
 The sink invokes the server with a raw (non-protobuf) codec: handlers receive
 the event bytes as the request message and reply with raw bytes.

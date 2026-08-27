@@ -452,15 +452,26 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 			return nil, fmt.Errorf("sink config: address is required for grpc sink")
 		}
 		grpcCfg := grpcsink.Config{Address: address}
-		if timeoutStr, ok := flowDef.Sink.Config["timeout"].(string); ok && timeoutStr != "" {
+		if timeoutRaw, present := flowDef.Sink.Config["timeout"]; present && timeoutRaw != nil && timeoutRaw != "" {
+			timeoutStr, isStr := timeoutRaw.(string)
+			if !isStr {
+				return nil, fmt.Errorf("sink config: timeout must be a duration string")
+			}
 			timeout, err := time.ParseDuration(timeoutStr)
 			if err != nil {
 				return nil, fmt.Errorf("sink config: timeout %q is not a valid duration", timeoutStr)
 			}
+			if timeout < 0 {
+				return nil, fmt.Errorf("sink config: timeout %q must not be negative", timeoutStr)
+			}
 			grpcCfg.Timeout = timeout
 		}
-		if tlsEnabled, ok := flowDef.Sink.Config["tls"].(bool); ok {
-			grpcCfg.TLS = tlsEnabled
+		// The gRPC sink has no credentials configuration yet, so TLS cannot be
+		// enabled; reject it rather than silently downgrading to plaintext.
+		if tlsRaw, present := flowDef.Sink.Config["tls"]; present && tlsRaw != nil {
+			if enabled, isBool := tlsRaw.(bool); !isBool || enabled {
+				return nil, fmt.Errorf("sink config: tls is not supported until gRPC TLS credentials are configurable")
+			}
 		}
 		gSink, err := grpcsink.NewSink(grpcCfg)
 		if err != nil {

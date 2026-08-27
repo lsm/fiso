@@ -84,6 +84,9 @@ func ValidateFlowSpec(spec *v1alpha1.FlowDefinitionSpec) error {
 	if !validSinkTypes[spec.Sink.Type] {
 		return fmt.Errorf("unsupported sink type: %s", spec.Sink.Type)
 	}
+	if spec.Sink.Type == "grpc" && spec.Sink.Config["address"] == "" {
+		return fmt.Errorf("sink config: address is required for grpc sink")
+	}
 	return nil
 }
 

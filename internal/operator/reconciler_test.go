@@ -173,6 +173,29 @@ func TestFlowReconciler_GRPCSourceTemporalSink(t *testing.T) {
 	}
 }
 
+func TestFlowReconciler_GRPCSinkMissingAddress(t *testing.T) {
+	mc := newMockClient()
+	mc.flows["default/grpc-noaddr"] = &v1alpha1.FlowDefinition{
+		ObjectMeta: v1alpha1.ObjectMeta{Name: "grpc-noaddr", Namespace: "default"},
+		Spec: v1alpha1.FlowDefinitionSpec{
+			Source: v1alpha1.SourceSpec{Type: "grpc"},
+			Sink:   v1alpha1.SinkSpec{Type: "grpc"},
+		},
+	}
+
+	r := NewFlowReconciler(mc, nil)
+	err := r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "grpc-noaddr"})
+	if err != nil {
+		t.Fatalf("expected nil (validation errors not requeued), got %v", err)
+	}
+	if mc.lastFlowStatus.Phase != "Error" {
+		t.Errorf("expected phase 'Error', got %q", mc.lastFlowStatus.Phase)
+	}
+	if !strings.Contains(mc.lastFlowStatus.Message, "address is required for grpc sink") {
+		t.Errorf("expected grpc address requirement, got %q", mc.lastFlowStatus.Message)
+	}
+}
+
 func TestLinkReconciler_ValidTarget(t *testing.T) {
 	mc := newMockClient()
 	mc.links["default/crm"] = &v1alpha1.LinkTarget{

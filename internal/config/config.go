@@ -68,15 +68,27 @@ func (f *FlowDefinition) Validate() error {
 	}
 
 	// gRPC sink validation: the wired sink constructs from address (+ optional
-	// timeout duration and tls), so require exactly those settings to be usable.
+	// timeout duration), so require exactly those settings to be usable.
 	if f.Sink.Type == "grpc" {
 		address, ok := f.Sink.Config["address"].(string)
 		if !ok || address == "" {
 			errs = append(errs, fmt.Errorf("sink.config.address is required for grpc sink"))
 		}
-		if timeout, ok := f.Sink.Config["timeout"].(string); ok && timeout != "" {
-			if _, err := time.ParseDuration(timeout); err != nil {
-				errs = append(errs, fmt.Errorf("sink.config.timeout %q is not a valid duration", timeout))
+		if timeout, present := f.Sink.Config["timeout"]; present && timeout != nil && timeout != "" {
+			timeoutStr, isStr := timeout.(string)
+			if !isStr {
+				errs = append(errs, fmt.Errorf("sink.config.timeout must be a duration string"))
+			} else if d, err := time.ParseDuration(timeoutStr); err != nil {
+				errs = append(errs, fmt.Errorf("sink.config.timeout %q is not a valid duration", timeoutStr))
+			} else if d < 0 {
+				errs = append(errs, fmt.Errorf("sink.config.timeout %q must not be negative", timeoutStr))
+			}
+		}
+		// The gRPC sink has no credentials configuration yet, so TLS cannot be
+		// enabled; reject it rather than silently downgrading to plaintext.
+		if tlsVal, present := f.Sink.Config["tls"]; present && tlsVal != nil {
+			if enabled, isBool := tlsVal.(bool); !isBool || enabled {
+				errs = append(errs, fmt.Errorf("sink.config.tls is not supported until gRPC TLS credentials are configurable"))
 			}
 		}
 	}

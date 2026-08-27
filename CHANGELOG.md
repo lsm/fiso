@@ -15,9 +15,11 @@ unreleased work and will be versioned when a release tag is cut.
 - **Executable Flow gRPC sink** — all Flow-capable binaries (`fiso-flow`,
   `fiso-flow-wasmer`, `fiso-wasmer-aio`) now construct `sink.type: grpc` with
   the shipped raw-unary gRPC sink (`config.address` required; optional
-  `config.timeout` duration and `config.tls`), matching what validation already
-  accepted. Flow validation now rejects grpc sinks without a usable `address`
-  or with an invalid `timeout`.
+  non-negative `config.timeout` duration), matching what validation already
+  accepted. Flow and operator validation now reject grpc sinks without a usable
+  `address`, with a non-string or negative `timeout`, or with a `tls` setting —
+  TLS is rejected until the sink supports credentials, instead of silently
+  downgrading to an insecure connection.
 
 ### Removed
 
