@@ -91,7 +91,9 @@ func ValidateFlowSpec(spec *v1alpha1.FlowDefinitionSpec) error {
 		if spec.Sink.Config["address"] == "" {
 			return fmt.Errorf("sink config: address is required for grpc sink")
 		}
-		if timeout := spec.Sink.Config["timeout"]; timeout != "" {
+		// Presence is checked separately from value: an explicitly empty timeout
+		// or tls must be rejected, not treated as omitted.
+		if timeout, present := spec.Sink.Config["timeout"]; present {
 			d, err := time.ParseDuration(timeout)
 			if err != nil {
 				return fmt.Errorf("sink config: timeout %q is not a valid duration", timeout)
@@ -103,7 +105,7 @@ func ValidateFlowSpec(spec *v1alpha1.FlowDefinitionSpec) error {
 				return fmt.Errorf("sink config: timeout %q must be positive", timeout)
 			}
 		}
-		if tlsVal := spec.Sink.Config["tls"]; tlsVal != "" && tlsVal != "false" {
+		if tlsVal, present := spec.Sink.Config["tls"]; present && tlsVal != "false" {
 			return fmt.Errorf("sink config: tls is not supported until gRPC TLS credentials are configurable")
 		}
 	}

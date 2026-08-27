@@ -218,6 +218,16 @@ func TestFlowReconciler_GRPCSinkInvalidSettings(t *testing.T) {
 			wantErr: "sink config: tls is not supported until gRPC TLS credentials are configurable",
 		},
 		{
+			name:    "empty timeout",
+			config:  map[string]string{"address": "grpc.example.com:50051", "timeout": ""},
+			wantErr: `sink config: timeout "" is not a valid duration`,
+		},
+		{
+			name:    "empty tls",
+			config:  map[string]string{"address": "grpc.example.com:50051", "tls": ""},
+			wantErr: "sink config: tls is not supported until gRPC TLS credentials are configurable",
+		},
+		{
 			name:   "valid settings",
 			config: map[string]string{"address": "grpc.example.com:50051", "timeout": "5s", "tls": "false"},
 		},

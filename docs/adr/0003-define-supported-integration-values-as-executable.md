@@ -24,7 +24,7 @@ An integration value (source type, sink type, Link protocol, interceptor type) i
 
 Applying this rule now:
 
-- The existing Flow gRPC sink is wired into all Flow-capable builders. Its executable contract is a raw-codec unary invoke of `/fiso.v1.EventService/Deliver` with headers as gRPC metadata; `config.address` is required, `config.timeout` is a duration defaulting to 30s, and `config.tls` requires transport credentials. Flow validation rejects grpc sinks without a usable `address` or with an unparsable `timeout`.
+- The existing Flow gRPC sink is wired into all Flow-capable builders. Its executable contract is a raw-codec unary invoke of `/fiso.v1.EventService/Deliver` with non-reserved event headers as gRPC metadata (gRPC reserves `Content-Type` for its transport; the CloudEvents envelope carries `datacontenttype` in the payload); `config.address` is required, `config.timeout` is a positive duration defaulting to 30s when absent, and `config.tls` is rejected until the sink supports credentials. Flow validation rejects grpc sinks without a usable `address` or with a timeout that is not a positive duration.
 - Link `protocol: grpc` is removed from local validation, operator validation, and the LinkTarget CRD enum. Reintroducing it requires a Link gRPC routing contract (method, metadata mapping, TLS, load-balancing semantics) with its own ADR and conformance evidence — not merely re-adding the enum value.
 
 ## Scope and Non-Decisions
