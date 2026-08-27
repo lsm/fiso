@@ -1450,6 +1450,22 @@ errorHandling:
 	}
 }
 
+func TestRunExport_RejectsGRPCLinkProtocol(t *testing.T) {
+	linkYAML := "targets:\n  - name: api\n    protocol: grpc\n    host: grpc.example.com\n"
+	fisoDir := writeExportFixture(t, "", linkYAML)
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected export of grpc Link protocol to fail")
+	}
+	if !strings.Contains(err.Error(), `protocol "grpc" is not valid`) {
+		t.Fatalf("expected grpc protocol rejection, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no partial output, got %q", buf.String())
+	}
+}
+
 func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
 	tests := []struct {
 		name       string

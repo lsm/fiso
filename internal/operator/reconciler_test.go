@@ -351,7 +351,7 @@ func TestLinkReconciler_ValidationUpdateError(t *testing.T) {
 	}
 }
 
-func TestLinkReconciler_GRPCProtocol(t *testing.T) {
+func TestLinkReconciler_GRPCProtocolRejected(t *testing.T) {
 	mc := newMockClient()
 	mc.links["default/grpc-svc"] = &v1alpha1.LinkTarget{
 		ObjectMeta: v1alpha1.ObjectMeta{Name: "grpc-svc", Namespace: "default"},
@@ -364,9 +364,12 @@ func TestLinkReconciler_GRPCProtocol(t *testing.T) {
 	r := NewLinkReconciler(mc, nil)
 	err := r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "grpc-svc"})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("expected nil (validation errors not requeued), got %v", err)
 	}
-	if mc.lastLinkStatus.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", mc.lastLinkStatus.Phase)
+	if mc.lastLinkStatus.Phase != "Error" {
+		t.Errorf("expected phase 'Error', got %q", mc.lastLinkStatus.Phase)
+	}
+	if !strings.Contains(mc.lastLinkStatus.Message, "unsupported protocol: grpc") {
+		t.Errorf("expected unsupported protocol message, got %q", mc.lastLinkStatus.Message)
 	}
 }

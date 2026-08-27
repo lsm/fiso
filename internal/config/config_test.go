@@ -1357,6 +1357,62 @@ func TestFlowDefinition_ValidateGRPCSink(t *testing.T) {
 	}
 }
 
+func TestFlowDefinition_ValidateGRPCSinkConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  map[string]interface{}
+		wantErr string
+	}{
+		{
+			name:    "missing address",
+			config:  map[string]interface{}{},
+			wantErr: "sink.config.address is required for grpc sink",
+		},
+		{
+			name:    "nil config",
+			config:  nil,
+			wantErr: "sink.config.address is required for grpc sink",
+		},
+		{
+			name:    "non-string address",
+			config:  map[string]interface{}{"address": 9000},
+			wantErr: "sink.config.address is required for grpc sink",
+		},
+		{
+			name:    "invalid timeout duration",
+			config:  map[string]interface{}{"address": "localhost:9000", "timeout": "not-a-duration"},
+			wantErr: `sink.config.timeout "not-a-duration" is not a valid duration`,
+		},
+		{
+			name:   "valid timeout",
+			config: map[string]interface{}{"address": "localhost:9000", "timeout": "5s"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := FlowDefinition{
+				Name:   "grpc-sink",
+				Source: SourceConfig{Type: "kafka"},
+				Sink:   SinkConfig{Type: "grpc", Config: tt.config},
+			}
+			err := flow.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error to contain %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestLoad_SkipsNonYAMLFiles(t *testing.T) {
 	dir := t.TempDir()
 
