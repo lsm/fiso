@@ -17,7 +17,8 @@ unreleased work and will be versioned when a release tag is cut.
   the shipped raw-unary gRPC sink (`config.address` required; optional
   non-negative `config.timeout` duration), matching what validation already
   accepted. Flow and operator validation now reject grpc sinks without a usable
-  `address`, with a non-string or negative `timeout`, or with a `tls` setting —
+  `address`, with a non-string, negative, or zero `timeout` (the sink treats
+  zero as its default), or with any `tls` setting other than an explicit false —
   TLS is rejected until the sink supports credentials, instead of silently
   downgrading to an insecure connection.
 

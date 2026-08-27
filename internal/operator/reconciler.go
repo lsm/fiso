@@ -99,6 +99,9 @@ func ValidateFlowSpec(spec *v1alpha1.FlowDefinitionSpec) error {
 			if d < 0 {
 				return fmt.Errorf("sink config: timeout %q must not be negative", timeout)
 			}
+			if d == 0 {
+				return fmt.Errorf("sink config: timeout %q must be positive", timeout)
+			}
 		}
 		if tlsVal := spec.Sink.Config["tls"]; tlsVal != "" && tlsVal != "false" {
 			return fmt.Errorf("sink config: tls is not supported until gRPC TLS credentials are configurable")

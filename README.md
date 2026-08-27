@@ -435,7 +435,7 @@ sink:
   type: grpc
   config:
     address: event-service:50051  # required
-    timeout: 30s                   # optional duration, default 30s, must not be negative
+    timeout: 30s                   # optional duration, default 30s, must be positive
 ```
 
 TLS is not supported yet — the gRPC sink has no credentials configuration, so

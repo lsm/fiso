@@ -82,11 +82,16 @@ func (f *FlowDefinition) Validate() error {
 				errs = append(errs, fmt.Errorf("sink.config.timeout %q is not a valid duration", timeoutStr))
 			} else if d < 0 {
 				errs = append(errs, fmt.Errorf("sink.config.timeout %q must not be negative", timeoutStr))
+			} else if d == 0 {
+				// The sink treats a zero timeout as unset (30s default), so an
+				// explicit zero would not be honored.
+				errs = append(errs, fmt.Errorf("sink.config.timeout %q must be positive", timeoutStr))
 			}
 		}
 		// The gRPC sink has no credentials configuration yet, so TLS cannot be
-		// enabled; reject it rather than silently downgrading to plaintext.
-		if tlsVal, present := f.Sink.Config["tls"]; present && tlsVal != nil {
+		// enabled; reject every value except an explicit false — including null,
+		// which would otherwise silently select plaintext.
+		if tlsVal, present := f.Sink.Config["tls"]; present {
 			if enabled, isBool := tlsVal.(bool); !isBool || enabled {
 				errs = append(errs, fmt.Errorf("sink.config.tls is not supported until gRPC TLS credentials are configurable"))
 			}

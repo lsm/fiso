@@ -499,11 +499,15 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 			if timeout < 0 {
 				return nil, fmt.Errorf("sink config: timeout %q must not be negative", timeoutStr)
 			}
+			if timeout == 0 {
+				return nil, fmt.Errorf("sink config: timeout %q must be positive", timeoutStr)
+			}
 			grpcCfg.Timeout = timeout
 		}
 		// The gRPC sink has no credentials configuration yet, so TLS cannot be
-		// enabled; reject it rather than silently downgrading to plaintext.
-		if tlsRaw, present := flowDef.Sink.Config["tls"]; present && tlsRaw != nil {
+		// enabled; reject every value except an explicit false — including null,
+		// which would otherwise silently select plaintext.
+		if tlsRaw, present := flowDef.Sink.Config["tls"]; present {
 			if enabled, isBool := tlsRaw.(bool); !isBool || enabled {
 				return nil, fmt.Errorf("sink config: tls is not supported until gRPC TLS credentials are configurable")
 			}

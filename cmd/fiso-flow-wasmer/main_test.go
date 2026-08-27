@@ -35,6 +35,11 @@ func TestBuildPipeline_GRPCSink(t *testing.T) {
 			config: map[string]interface{}{"address": "127.0.0.1:19090", "timeout": "5s"},
 		},
 		{
+			name:    "null tls",
+			config:  map[string]interface{}{"address": "127.0.0.1:19090", "tls": nil},
+			wantErr: "sink config: tls is not supported until gRPC TLS credentials are configurable",
+		},
+		{
 			name:    "tls enabled",
 			config:  map[string]interface{}{"address": "127.0.0.1:19090", "tls": true},
 			wantErr: "sink config: tls is not supported until gRPC TLS credentials are configurable",
@@ -53,6 +58,11 @@ func TestBuildPipeline_GRPCSink(t *testing.T) {
 			name:    "negative timeout",
 			config:  map[string]interface{}{"address": "127.0.0.1:19090", "timeout": "-1s"},
 			wantErr: `sink config: timeout "-1s" must not be negative`,
+		},
+		{
+			name:    "zero timeout",
+			config:  map[string]interface{}{"address": "127.0.0.1:19090", "timeout": "0s"},
+			wantErr: `sink config: timeout "0s" must be positive`,
 		},
 	}
 

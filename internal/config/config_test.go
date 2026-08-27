@@ -1400,6 +1400,11 @@ func TestFlowDefinition_ValidateGRPCSinkConfig(t *testing.T) {
 			wantErr: `sink.config.timeout "-1s" must not be negative`,
 		},
 		{
+			name:    "zero timeout",
+			config:  map[string]interface{}{"address": "localhost:9000", "timeout": "0s"},
+			wantErr: `sink.config.timeout "0s" must be positive`,
+		},
+		{
 			name:    "tls enabled",
 			config:  map[string]interface{}{"address": "localhost:9000", "tls": true},
 			wantErr: "sink.config.tls is not supported until gRPC TLS credentials are configurable",
@@ -1412,6 +1417,11 @@ func TestFlowDefinition_ValidateGRPCSinkConfig(t *testing.T) {
 		{
 			name:   "tls disabled",
 			config: map[string]interface{}{"address": "localhost:9000", "tls": false},
+		},
+		{
+			name:    "null tls",
+			config:  map[string]interface{}{"address": "localhost:9000", "tls": nil},
+			wantErr: "sink.config.tls is not supported until gRPC TLS credentials are configurable",
 		},
 	}
 
