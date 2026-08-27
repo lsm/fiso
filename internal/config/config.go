@@ -74,7 +74,9 @@ func (f *FlowDefinition) Validate() error {
 		if !ok || address == "" {
 			errs = append(errs, fmt.Errorf("sink.config.address is required for grpc sink"))
 		}
-		if timeout, present := f.Sink.Config["timeout"]; present && timeout != nil && timeout != "" {
+		// A present timeout must be a positive duration string; null and empty
+		// values do not fall back to the default silently.
+		if timeout, present := f.Sink.Config["timeout"]; present {
 			timeoutStr, isStr := timeout.(string)
 			if !isStr {
 				errs = append(errs, fmt.Errorf("sink.config.timeout must be a duration string"))

@@ -487,7 +487,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 			return nil, fmt.Errorf("sink config: address is required for grpc sink")
 		}
 		grpcCfg := grpcsink.Config{Address: address}
-		if timeoutRaw, present := flowDef.Sink.Config["timeout"]; present && timeoutRaw != nil && timeoutRaw != "" {
+		if timeoutRaw, present := flowDef.Sink.Config["timeout"]; present {
 			timeoutStr, isStr := timeoutRaw.(string)
 			if !isStr {
 				return nil, fmt.Errorf("sink config: timeout must be a duration string")

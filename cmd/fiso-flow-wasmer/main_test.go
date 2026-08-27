@@ -64,6 +64,16 @@ func TestBuildPipeline_GRPCSink(t *testing.T) {
 			config:  map[string]interface{}{"address": "127.0.0.1:19090", "timeout": "0s"},
 			wantErr: `sink config: timeout "0s" must be positive`,
 		},
+		{
+			name:    "null timeout",
+			config:  map[string]interface{}{"address": "127.0.0.1:19090", "timeout": nil},
+			wantErr: "sink config: timeout must be a duration string",
+		},
+		{
+			name:    "empty timeout",
+			config:  map[string]interface{}{"address": "127.0.0.1:19090", "timeout": ""},
+			wantErr: `sink config: timeout "" is not a valid duration`,
+		},
 	}
 
 	for _, tt := range tests {
