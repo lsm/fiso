@@ -201,10 +201,34 @@ jobs:
           grep -q "localhost:3500" fiso/user-service/main.go
           ! test -d fiso/deploy
           $GITHUB_WORKSPACE/bin/fiso validate
-          $GITHUB_WORKSPACE/bin/fiso export | grep -q "kind: FlowDefinition"
-          $GITHUB_WORKSPACE/bin/fiso export | grep -q "kind: LinkTarget"
-          $GITHUB_WORKSPACE/bin/fiso export | grep -q "apiVersion: fiso.io/v1alpha1"
-          $GITHUB_WORKSPACE/bin/fiso export | grep -q "namespace: fiso-system"
+          if $GITHUB_WORKSPACE/bin/fiso export > export.yaml 2> export.err; then
+            echo "default local scaffold should not export lossily" >&2
+            exit 1
+          fi
+          test ! -s export.yaml
+          grep -q "source.type" export.err
+          cat > fiso/flows/example-flow.yaml <<'EOF'
+          name: example-flow
+          source:
+            type: grpc
+            config:
+              listenAddr: ":8081"
+          sink:
+            type: http
+            config:
+              url: http://user-service:8080/events
+          EOF
+          cat > fiso/link/config.yaml <<'EOF'
+          targets:
+            - name: user-service
+              protocol: http
+              host: user-service
+          EOF
+          $GITHUB_WORKSPACE/bin/fiso export > export.yaml
+          grep -q "kind: FlowDefinition" export.yaml
+          grep -q "kind: LinkTarget" export.yaml
+          grep -q "apiVersion: fiso.io/v1alpha1" export.yaml
+          grep -q "namespace: fiso-system" export.yaml
 
       - name: Doctor smoke test
         run: |

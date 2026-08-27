@@ -16,7 +16,7 @@ Commands:
   init [project-name]   Create a new Fiso project
   dev                   Start local development environment
   validate [path]       Validate flow and link configuration files
-  export [path]         Export configs as Kubernetes CRDs
+  export [path]         Losslessly export supported configs as Kubernetes CRDs
   transform test        Test a transform configuration (dry-run)
   doctor                Check environment and project health
   logs                  Show logs from fiso services

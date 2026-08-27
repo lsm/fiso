@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,10 +19,9 @@ func TestRunExport_BasicFlow(t *testing.T) {
 
 	flowYAML := `name: test-flow
 source:
-  type: http
+  type: grpc
   config:
     listenAddr: ":8081"
-    path: /ingest
 sink:
   type: http
   config:
@@ -62,7 +62,6 @@ errorHandling:
 		t.Error("output should contain maxRetries")
 	}
 
-	// Source/sink config should be stringified
 	if !strings.Contains(out, "listenAddr:") {
 		t.Error("output should contain source config listenAddr")
 	}
@@ -80,9 +79,7 @@ func TestRunExport_FlowWithCELTransform(t *testing.T) {
 source:
   type: kafka
   config:
-    brokers:
-      - broker1:9092
-      - broker2:9092
+    brokers: broker1:9092,broker2:9092
     topic: events
     consumerGroup: fiso-cel
 transform:
@@ -112,54 +109,8 @@ errorHandling:
 	if !strings.Contains(out, `fields:`) {
 		t.Error("output should contain fields transform")
 	}
-	// Kafka brokers list should be comma-separated
 	if !strings.Contains(out, "broker1:9092,broker2:9092") {
-		t.Error("output should contain comma-separated brokers")
-	}
-}
-
-func TestRunExport_FlowWithCloudEvents(t *testing.T) {
-	dir := t.TempDir()
-	fisoDir := filepath.Join(dir, "fiso")
-	flowsDir := filepath.Join(fisoDir, "flows")
-	if err := os.MkdirAll(flowsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	flowYAML := `name: ce-flow
-source:
-  type: http
-  config:
-    listenAddr: ":8081"
-cloudevents:
-  type: com.example.order
-  source: /orders
-  subject: order.created
-sink:
-  type: http
-  config:
-    url: http://api:8080
-`
-	if err := os.WriteFile(filepath.Join(flowsDir, "ce-flow.yaml"), []byte(flowYAML), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	if err := RunExport([]string{fisoDir}, &buf); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	out := buf.String()
-
-	// CloudEvents should be preserved as annotations
-	if !strings.Contains(out, "fiso.io/cloudevents-type: com.example.order") {
-		t.Error("output should contain cloudevents-type annotation")
-	}
-	if !strings.Contains(out, "fiso.io/cloudevents-source: /orders") {
-		t.Error("output should contain cloudevents-source annotation")
-	}
-	if !strings.Contains(out, "fiso.io/cloudevents-subject: order.created") {
-		t.Error("output should contain cloudevents-subject annotation")
+		t.Error("output should preserve string-valued brokers")
 	}
 }
 
@@ -171,16 +122,10 @@ func TestRunExport_LinkTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	linkYAML := `listenAddr: ":3500"
-metricsAddr: ":9091"
-targets:
+	linkYAML := `targets:
   - name: crm
     protocol: https
     host: api.salesforce.com
-    auth:
-      type: bearer
-      secretRef:
-        filePath: /secrets/crm-token
     circuitBreaker:
       enabled: true
       failureThreshold: 5
@@ -217,9 +162,6 @@ targets:
 	if !strings.Contains(out, "host: api.salesforce.com") {
 		t.Error("output should contain salesforce host")
 	}
-	if !strings.Contains(out, "secretName: /secrets/crm-token") {
-		t.Error("output should contain secretName from secretRef.filePath")
-	}
 	if !strings.Contains(out, "failureThreshold: 5") {
 		t.Error("output should contain circuit breaker failureThreshold")
 	}
@@ -247,7 +189,7 @@ func TestRunExport_FlowAndLinkCombined(t *testing.T) {
 
 	flowYAML := `name: my-flow
 source:
-  type: http
+  type: grpc
   config:
     listenAddr: ":8081"
 sink:
@@ -296,7 +238,7 @@ func TestRunExport_CustomNamespace(t *testing.T) {
 
 	flowYAML := `name: ns-flow
 source:
-  type: http
+  type: grpc
   config:
     listenAddr: ":8081"
 sink:
@@ -336,6 +278,77 @@ func TestRunExport_NoConfigs(t *testing.T) {
 	}
 }
 
+func TestRunExport_WritesManifestStreamOnce(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`
+	linkYAML := `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+`
+	fisoDir := writeExportFixture(t, flowYAML, linkYAML)
+	writer := &countingWriter{}
+
+	if err := RunExport([]string{fisoDir}, writer); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if writer.writes != 1 {
+		t.Fatalf("expected one manifest write, got %d", writer.writes)
+	}
+	if !strings.Contains(writer.String(), "---") {
+		t.Fatalf("expected multi-document output, got %q", writer.String())
+	}
+}
+
+func TestRunExport_ReturnsWriterError(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
+	wantErr := errors.New("write failed")
+
+	err := RunExport([]string{fisoDir}, errorWriter{err: wantErr})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected writer error, got %v", err)
+	}
+}
+
+func TestRunExport_HelpReturnsWriterError(t *testing.T) {
+	wantErr := errors.New("write failed")
+	if err := RunExport([]string{"--help"}, errorWriter{err: wantErr}); !errors.Is(err, wantErr) {
+		t.Fatalf("expected writer error, got %v", err)
+	}
+}
+
+type countingWriter struct {
+	bytes.Buffer
+	writes int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.writes++
+	return w.Buffer.Write(p)
+}
+
+type errorWriter struct {
+	err error
+}
+
+func (w errorWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
+
 func TestRunExport_UnsupportedFormat(t *testing.T) {
 	err := RunExport([]string{"--format=helm"}, nil)
 	if err == nil {
@@ -347,10 +360,15 @@ func TestRunExport_UnsupportedFormat(t *testing.T) {
 }
 
 func TestRunExport_Help(t *testing.T) {
-	// Should not error on --help
-	err := RunExport([]string{"--help"}, nil)
-	if err != nil {
+	var buf bytes.Buffer
+	if err := RunExport([]string{"--help"}, &buf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "losslessly representable subset") {
+		t.Fatalf("help should describe the bounded export contract, got %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "before any YAML is written") {
+		t.Fatalf("help should describe fail-closed output, got %q", buf.String())
 	}
 }
 
@@ -414,7 +432,7 @@ func TestRunExport_NonYAMLFilesIgnored(t *testing.T) {
 	// Create a valid .yaml file
 	flowYAML := `name: test-flow
 source:
-  type: http
+  type: grpc
   config:
     listenAddr: ":8081"
 sink:
@@ -466,7 +484,7 @@ func TestExportFlows_DirectorySkipped(t *testing.T) {
 	// Create a valid flow file
 	flowYAML := `name: test-flow
 source:
-  type: http
+  type: grpc
   config: {}
 sink:
   type: http
@@ -539,95 +557,71 @@ func TestExportLinks_ReadFileError(t *testing.T) {
 	}
 }
 
-func TestStringifyMap_Nil(t *testing.T) {
-	result := stringifyMap(nil)
-	if result != nil {
-		t.Errorf("expected nil for nil input, got %v", result)
-	}
-}
-
-func TestStringifyMap_MapValue(t *testing.T) {
-	input := map[string]interface{}{
-		"nested": map[string]string{"key": "value"},
-	}
-	result := stringifyMap(input)
-	if result["nested"] != "map[key:value]" {
-		t.Errorf("expected map[key:value], got %s", result["nested"])
-	}
-}
-
-func TestRunExport_LinkWithEnvVarAuth(t *testing.T) {
-	dir := t.TempDir()
-	fisoDir := filepath.Join(dir, "fiso")
-	linkDir := filepath.Join(fisoDir, "link")
-	if err := os.MkdirAll(linkDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
+func TestRunExport_DefaultsOmittedLinkProtocol(t *testing.T) {
 	linkYAML := `targets:
   - name: api
-    protocol: https
     host: api.example.com
-    auth:
-      type: bearer
-      secretRef:
-        envVar: API_TOKEN
 `
-	if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), []byte(linkYAML), 0644); err != nil {
-		t.Fatal(err)
-	}
+	fisoDir := writeExportFixture(t, "", linkYAML)
 
 	var buf bytes.Buffer
 	if err := RunExport([]string{fisoDir}, &buf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	out := buf.String()
-	if !strings.Contains(out, "secretName: API_TOKEN") {
-		t.Error("output should contain secretName from secretRef.envVar")
+	if !strings.Contains(buf.String(), "protocol: https") {
+		t.Fatalf("expected omitted local protocol to default to https, got %q", buf.String())
 	}
 }
 
-func TestRunExport_LinkWithVaultAuth(t *testing.T) {
-	dir := t.TempDir()
-	fisoDir := filepath.Join(dir, "fiso")
-	linkDir := filepath.Join(fisoDir, "link")
-	if err := os.MkdirAll(linkDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	linkYAML := `targets:
-  - name: api
-    protocol: https
-    host: api.example.com
-    auth:
-      type: vault
-      vaultRef:
-        path: secret/data/api
+func TestRunExport_RejectsInvalidNamespaceWithoutOutput(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
 `
-	if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), []byte(linkYAML), 0644); err != nil {
-		t.Fatal(err)
-	}
+	fisoDir := writeExportFixture(t, flowYAML, "")
 
 	var buf bytes.Buffer
-	if err := RunExport([]string{fisoDir}, &buf); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := RunExport([]string{fisoDir, "--namespace=Invalid_Name"}, &buf)
+	if err == nil {
+		t.Fatal("expected invalid namespace to fail")
 	}
-
-	out := buf.String()
-	if !strings.Contains(out, "vaultPath: secret/data/api") {
-		t.Error("output should contain vaultPath from vaultRef")
+	if !strings.Contains(err.Error(), "namespace") {
+		t.Fatalf("expected namespace validation path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
 	}
 }
 
-func TestRunExport_LinkWithNoneAuth(t *testing.T) {
-	dir := t.TempDir()
-	fisoDir := filepath.Join(dir, "fiso")
-	linkDir := filepath.Join(fisoDir, "link")
-	if err := os.MkdirAll(linkDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+func TestRunExport_RejectsInvalidSourceWithoutOutput(t *testing.T) {
+	flowYAML := `name: invalid-flow
+source:
+  type: invalid
+  config: {}
+sink:
+  type: http
+  config: {}
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
 
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected invalid source to fail")
+	}
+	if !strings.Contains(err.Error(), "source.type") {
+		t.Fatalf("expected source validation path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
+func TestRunExport_RejectsExplicitNoneAuth(t *testing.T) {
 	linkYAML := `targets:
   - name: api
     protocol: http
@@ -635,18 +629,1317 @@ func TestRunExport_LinkWithNoneAuth(t *testing.T) {
     auth:
       type: none
 `
-	if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), []byte(linkYAML), 0644); err != nil {
-		t.Fatal(err)
+	fisoDir := writeExportFixture(t, "", linkYAML)
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected explicit none auth to fail")
 	}
+	if !strings.Contains(err.Error(), "targets[0].auth.type") {
+		t.Fatalf("expected auth type path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
+func TestRunExport_AllowsEmptyCloudEvents(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+cloudevents: {}
+sink:
+  type: http
+  config: {}
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
 
 	var buf bytes.Buffer
 	if err := RunExport([]string{fisoDir}, &buf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	out := buf.String()
-	// Should not have auth spec when type is "none"
-	if strings.Contains(out, "auth:") {
-		t.Error("output should not contain auth spec for type 'none'")
+	if !strings.Contains(buf.String(), "kind: FlowDefinition") {
+		t.Fatalf("expected flow to export, got %q", buf.String())
 	}
+}
+
+func TestRunExport_RejectsEmptyCloudEventsLeaf(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+cloudevents:
+  source: ""
+sink:
+  type: http
+  config: {}
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected empty CloudEvents leaf to fail")
+	}
+	if !strings.Contains(err.Error(), "cloudevents") {
+		t.Fatalf("expected cloudevents path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
+func TestRunExport_RejectsCoercedFlowScalars(t *testing.T) {
+	tests := []struct {
+		name     string
+		flowYAML string
+		wantPath string
+	}{
+		{
+			name: "numeric name",
+			flowYAML: `name: 123
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "name",
+		},
+		{
+			name: "numeric transform expression",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+transform:
+  fields:
+    id: 123
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "transform.fields.id",
+		},
+		{
+			name: "null transform expression",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+transform:
+  fields:
+    id: null
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "transform.fields.id",
+		},
+		{
+			name: "numeric transform key",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+transform:
+  fields:
+    123: data.id
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "transform.fields.123",
+		},
+		{
+			name: "numeric dead-letter topic",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  deadLetterTopic: 123
+`,
+			wantPath: "errorHandling.deadLetterTopic",
+		},
+		{
+			name: "fractional max retries",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  maxRetries: 2.9
+`,
+			wantPath: "errorHandling.maxRetries",
+		},
+		{
+			name: "explicit zero max retries",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  maxRetries: 0
+`,
+			wantPath: "errorHandling.maxRetries",
+		},
+		{
+			name: "explicit empty dead-letter topic",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  deadLetterTopic: ""
+`,
+			wantPath: "errorHandling.deadLetterTopic",
+		},
+		{
+			name: "boolean CloudEvents field",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+cloudevents:
+  type: true
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "cloudevents.type",
+		},
+		{
+			name: "binary source type",
+			flowYAML: `name: flow
+source:
+  type: !!binary Z3JwYw==
+  config: {}
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "source.type",
+		},
+		{
+			name: "binary sink type",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: !!binary aHR0cA==
+  config: {}
+`,
+			wantPath: "sink.type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, tt.flowYAML, "")
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected scalar coercion to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected error to name %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsInvalidTransformExpression(t *testing.T) {
+	flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+transform:
+  fields:
+    id: "data.?"
+sink:
+  type: http
+  config: {}
+`
+	fisoDir := writeExportFixture(t, flowYAML, "")
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected invalid transform to fail")
+	}
+	if !strings.Contains(err.Error(), "transform.fields") {
+		t.Fatalf("expected transform validation path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
+func TestRunExport_RejectsLossyFlowConfiguration(t *testing.T) {
+	tests := []struct {
+		name     string
+		flowName string
+		fragment string
+		wantPath string
+	}{
+		{
+			name:     "invalid Kubernetes resource name",
+			flowName: "Invalid_Name",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "name",
+		},
+		{
+			name: "HTTP source excluded by FlowDefinition CRD",
+			fragment: `source:
+  type: http
+  config:
+    listenAddr: ":8081"
+    path: /ingest
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "source.type",
+		},
+		{
+			name: "named Kafka clusters",
+			fragment: `kafka:
+  clusters:
+    main:
+      brokers: [broker:9092]
+source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "kafka",
+		},
+		{
+			name: "CloudEvents overrides",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+cloudevents:
+  type: com.example.event
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "cloudevents",
+		},
+		{
+			name: "interceptors",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+interceptors:
+  - type: wasm
+    config:
+      module: enrich.wasm
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "interceptors",
+		},
+		{
+			name: "retry backoff",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  backoff: exponential
+`,
+			wantPath: "errorHandling.backoff",
+		},
+		{
+			name: "commit policy",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  commitPolicy: sink
+`,
+			wantPath: "errorHandling.commitPolicy",
+		},
+		{
+			name: "transactional ID",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  transactionalId: tx-orders
+`,
+			wantPath: "errorHandling.transactionalId",
+		},
+		{
+			name: "explicit empty retry backoff setting",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  backoff: ""
+`,
+			wantPath: "errorHandling.backoff",
+		},
+		{
+			name: "explicit empty commit policy",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  commitPolicy: ""
+`,
+			wantPath: "errorHandling.commitPolicy",
+		},
+		{
+			name: "explicit empty transactional ID",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+errorHandling:
+  transactionalId: ""
+`,
+			wantPath: "errorHandling.transactionalId",
+		},
+		{
+			name: "list source config",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+    metadata: [one, two]
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "source.config.metadata",
+		},
+		{
+			name: "list Kafka brokers",
+			fragment: `source:
+  type: kafka
+  config:
+    brokers: [broker1:9092, broker2:9092]
+    topic: events
+    consumerGroup: fiso
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "source.config.brokers",
+		},
+		{
+			name: "nested sink config",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+    tls:
+      enabled: true
+`,
+			wantPath: "sink.config.tls",
+		},
+		{
+			name: "scalar type coercion",
+			fragment: `source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+    enabled: true
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "source.config.enabled",
+		},
+		{
+			name: "non-string source config key",
+			fragment: `source:
+  type: grpc
+  config:
+    123: abc
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`,
+			wantPath: "source.config.123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flowName := tt.flowName
+			if flowName == "" {
+				flowName = "lossy-flow"
+			}
+			fisoDir := writeExportFixture(t, "name: "+flowName+"\n"+tt.fragment, "")
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected lossy export to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected error to name %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no partial output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsExplicitEmptyLinkProtocol(t *testing.T) {
+	linkYAML := `targets:
+  - name: api
+    protocol: ""
+    host: api.example.com
+`
+	fisoDir := writeExportFixture(t, "", linkYAML)
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected explicit empty protocol to fail")
+	}
+	if !strings.Contains(err.Error(), "targets[0].protocol") {
+		t.Fatalf("expected protocol field path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
+func TestRunExport_AllowsEmptyReferenceMappings(t *testing.T) {
+	tests := []struct {
+		name     string
+		fragment string
+	}{
+		{name: "empty auth secret reference", fragment: "    auth:\n      secretRef: {}\n"},
+		{name: "empty auth vault reference", fragment: "    auth:\n      vaultRef: {}\n"},
+		{name: "empty target kafka mapping", fragment: "    kafka: {}\n"},
+		{name: "nested empty kafka headers", fragment: "    kafka:\n      headers: {}\n"},
+		{name: "nested empty kafka key", fragment: "    kafka:\n      key: {}\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			linkYAML := "targets:\n  - name: api\n    protocol: https\n    host: api.example.com\n" + tt.fragment
+			fisoDir := writeExportFixture(t, "", linkYAML)
+			var buf bytes.Buffer
+			if err := RunExport([]string{fisoDir}, &buf); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(buf.String(), "kind: LinkTarget") {
+				t.Fatalf("expected target to export, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsEmptyUnsupportedLeaves(t *testing.T) {
+	tests := []struct {
+		name     string
+		fragment string
+		wantPath string
+	}{
+		{name: "empty kafka topic leaf", fragment: "    kafka:\n      topic: \"\"\n", wantPath: "targets[0].kafka"},
+		{name: "null kafka header value", fragment: "    kafka:\n      headers:\n        x: null\n", wantPath: "targets[0].kafka"},
+		{name: "empty auth secret leaf", fragment: "    auth:\n      secretRef:\n        envVar: \"\"\n", wantPath: "targets[0].auth.secretRef"},
+		{name: "null auth secret leaf", fragment: "    auth:\n      secretRef:\n        envVar: null\n", wantPath: "targets[0].auth.secretRef"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			linkYAML := "targets:\n  - name: api\n    protocol: https\n    host: api.example.com\n" + tt.fragment
+			fisoDir := writeExportFixture(t, "", linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected empty unsupported leaf to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected path %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_AllowsNullOmittedSettings(t *testing.T) {
+	linkTests := []struct {
+		name     string
+		fragment string
+	}{
+		{name: "null listen address", fragment: "listenAddr: null\n"},
+		{name: "null metrics address", fragment: "metricsAddr: null\n"},
+		{name: "null base path", fragment: "    basePath: null\n"},
+		{name: "null port", fragment: "    port: null\n"},
+		{name: "null auth type", fragment: "    auth:\n      type: null\n"},
+		{name: "null auth secret reference", fragment: "    auth:\n      secretRef: null\n"},
+		{name: "null target kafka", fragment: "    kafka: null\n"},
+		{name: "null success threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      successThreshold: null\n"},
+		{name: "null retry timing", fragment: "    retry:\n      maxAttempts: 3\n      initialInterval: null\n"},
+		{name: "null rate limit", fragment: "    rateLimit:\n      burst: null\n"},
+		{name: "null allowed paths", fragment: "    allowedPaths: null\n"},
+	}
+	for _, tt := range linkTests {
+		t.Run("link/"+tt.name, func(t *testing.T) {
+			linkYAML := "targets:\n  - name: api\n    protocol: https\n    host: api.example.com\n" + tt.fragment
+			fisoDir := writeExportFixture(t, "", linkYAML)
+			var buf bytes.Buffer
+			if err := RunExport([]string{fisoDir}, &buf); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(buf.String(), "kind: LinkTarget") {
+				t.Fatalf("expected target to export, got %q", buf.String())
+			}
+		})
+	}
+
+	t.Run("flow/null error handling", func(t *testing.T) {
+		flowYAML := `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  maxRetries: null
+  deadLetterTopic: null
+  backoff: null
+`
+		fisoDir := writeExportFixture(t, flowYAML, "")
+		var buf bytes.Buffer
+		if err := RunExport([]string{fisoDir}, &buf); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "kind: FlowDefinition") {
+			t.Fatalf("expected flow to export, got %q", buf.String())
+		}
+	})
+
+	t.Run("link/null protocol", func(t *testing.T) {
+		linkYAML := `targets:
+  - name: api
+    protocol: null
+    host: api.example.com
+`
+		fisoDir := writeExportFixture(t, "", linkYAML)
+		var buf bytes.Buffer
+		if err := RunExport([]string{fisoDir}, &buf); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "kind: LinkTarget") {
+			t.Fatalf("expected target to export, got %q", buf.String())
+		}
+	})
+}
+
+func TestRunExport_RejectsCoercedLinkScalars(t *testing.T) {
+	tests := []struct {
+		name     string
+		linkYAML string
+		wantPath string
+	}{
+		{
+			name: "numeric name",
+			linkYAML: `targets:
+  - name: 123
+    protocol: https
+    host: api.example.com
+`,
+			wantPath: "targets[0].name",
+		},
+		{
+			name: "numeric host",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: 456
+`,
+			wantPath: "targets[0].host",
+		},
+		{
+			name: "non-string allowed path",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    allowedPaths: [1, true]
+`,
+			wantPath: "targets[0].allowedPaths[0]",
+		},
+		{
+			name: "null allowed path",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    allowedPaths: [null]
+`,
+			wantPath: "targets[0].allowedPaths[0]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, "", tt.linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected scalar coercion to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected error to name %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsUnknownFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		flowYAML string
+		linkYAML string
+		wantPath string
+	}{
+		{
+			name: "Flow field",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+errorHandling:
+  maxRetry: 5
+`,
+			wantPath: "maxRetry",
+		},
+		{
+			name: "circuit breaker field",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    circuitBreaker:
+      failThreshold: 3
+`,
+			wantPath: "targets[0].circuitBreaker.failThreshold",
+		},
+		{
+			name: "retry field",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    retry:
+      attempts: 3
+`,
+			wantPath: "targets[0].retry.attempts",
+		},
+		{
+			name: "rate limit field",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    rateLimit:
+      requests: 10
+`,
+			wantPath: "targets[0].rateLimit.requests",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, tt.flowYAML, tt.linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected unknown field to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected error to name %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsLossyLinkConfiguration(t *testing.T) {
+	tests := []struct {
+		name       string
+		targetName string
+		fragment   string
+		wantPath   string
+	}{
+		{name: "listen address", fragment: "listenAddr: :4500\n", wantPath: "listenAddr"},
+		{name: "metrics address", fragment: "metricsAddr: :9191\n", wantPath: "metricsAddr"},
+		{name: "explicit empty listen address", fragment: "listenAddr: \"\"\n", wantPath: "listenAddr"},
+		{name: "explicit empty metrics address", fragment: "metricsAddr: \"\"\n", wantPath: "metricsAddr"},
+		{name: "invalid Kubernetes resource name", targetName: "Invalid_Name", wantPath: "targets[0].name"},
+		{name: "invalid circuit breaker enabled type", fragment: "    circuitBreaker:\n      enabled: \"true\"\n", wantPath: "targets[0].circuitBreaker.enabled"},
+		{name: "invalid circuit breaker threshold type", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: \"3\"\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "fractional circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 2.9\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "integer circuit breaker reset timeout", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      resetTimeout: 30\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
+		{name: "oversized circuit breaker threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 18446744073709551615\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "explicit zero success threshold", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      successThreshold: 0\n", wantPath: "targets[0].circuitBreaker.successThreshold"},
+		{name: "explicitly disabled circuit breaker", fragment: "    circuitBreaker:\n      enabled: false\n", wantPath: "targets[0].circuitBreaker.enabled"},
+		{name: "explicitly disabled uppercase circuit breaker", fragment: "    circuitBreaker:\n      enabled: FALSE\n", wantPath: "targets[0].circuitBreaker.enabled"},
+		{name: "disabled circuit breaker with zero threshold", fragment: "    circuitBreaker:\n      enabled: false\n      failureThreshold: 0\n", wantPath: "targets[0].circuitBreaker.enabled"},
+		{name: "zero threshold without enabled", fragment: "    circuitBreaker:\n      failureThreshold: 0\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "threshold without enabled", fragment: "    circuitBreaker:\n      failureThreshold: 3\n", wantPath: "targets[0].circuitBreaker.failureThreshold"},
+		{name: "reset timeout without enabled", fragment: "    circuitBreaker:\n      resetTimeout: 30s\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
+		{name: "explicit empty reset timeout", fragment: "    circuitBreaker:\n      enabled: true\n      failureThreshold: 3\n      resetTimeout: \"\"\n", wantPath: "targets[0].circuitBreaker.resetTimeout"},
+		{name: "explicit empty retry backoff", fragment: "    retry:\n      maxAttempts: 3\n      backoff: \"\"\n", wantPath: "targets[0].retry.backoff"},
+		{name: "invalid retry attempts type", fragment: "    retry:\n      maxAttempts: \"3\"\n", wantPath: "targets[0].retry.maxAttempts"},
+		{name: "oversized retry attempts", fragment: "    retry:\n      maxAttempts: 18446744073709551615\n", wantPath: "targets[0].retry.maxAttempts"},
+		{name: "explicit zero retry attempts", fragment: "    retry:\n      maxAttempts: 0\n", wantPath: "targets[0].retry.maxAttempts"},
+		{name: "fractional retry attempts", fragment: "    retry:\n      maxAttempts: 3.7\n", wantPath: "targets[0].retry.maxAttempts"},
+		{name: "explicit zero retry jitter", fragment: "    retry:\n      maxAttempts: 3\n      jitter: 0\n", wantPath: "targets[0].retry.jitter"},
+		{name: "explicit empty retry initial interval", fragment: "    retry:\n      maxAttempts: 3\n      initialInterval: \"\"\n", wantPath: "targets[0].retry.initialInterval"},
+		{name: "explicit empty retry max interval", fragment: "    retry:\n      maxAttempts: 3\n      maxInterval: \"\"\n", wantPath: "targets[0].retry.maxInterval"},
+		{name: "invalid rate limit type", fragment: "    rateLimit:\n      requestsPerSecond: \"10\"\n", wantPath: "targets[0].rateLimit.requestsPerSecond"},
+		{name: "fractional rate limit burst", fragment: "    rateLimit:\n      burst: 0.5\n", wantPath: "targets[0].rateLimit.burst"},
+		{name: "oversized rate limit burst", fragment: "    rateLimit:\n      burst: 18446744073709551615\n", wantPath: "targets[0].rateLimit.burst"},
+		{name: "explicit zero rate", fragment: "    rateLimit:\n      requestsPerSecond: 0\n", wantPath: "targets[0].rateLimit"},
+		{name: "explicit zero burst", fragment: "    rateLimit:\n      burst: 0\n", wantPath: "targets[0].rateLimit"},
+		{name: "port", fragment: "    port: 8443\n", wantPath: "targets[0].port"},
+		{name: "explicit zero port", fragment: "    port: 0\n", wantPath: "targets[0].port"},
+		{name: "base path", fragment: "    basePath: /v2\n", wantPath: "targets[0].basePath"},
+		{name: "explicit empty base path", fragment: "    basePath: \"\"\n", wantPath: "targets[0].basePath"},
+		{name: "coerced auth type", fragment: "    auth:\n      type: !!binary bm9uZQ==\n", wantPath: "targets[0].auth.type"},
+		{name: "auth secret reference without type", fragment: "    auth:\n      secretRef:\n        envVar: API_TOKEN\n", wantPath: "targets[0].auth.secretRef"},
+		{
+			name: "local authentication reference",
+			fragment: `    auth:
+      type: bearer
+      secretRef:
+        envVar: API_TOKEN
+`,
+			wantPath: "targets[0].auth",
+		},
+		{
+			name: "circuit breaker success threshold",
+			fragment: `    circuitBreaker:
+      enabled: true
+      failureThreshold: 3
+      successThreshold: 2
+      resetTimeout: 30s
+`,
+			wantPath: "targets[0].circuitBreaker.successThreshold",
+		},
+		{
+			name: "disabled circuit breaker settings",
+			fragment: `    circuitBreaker:
+      enabled: false
+      failureThreshold: 3
+`,
+			wantPath: "targets[0].circuitBreaker.enabled",
+		},
+		{
+			name: "enabled circuit breaker without threshold",
+			fragment: `    circuitBreaker:
+      enabled: true
+`,
+			wantPath: "targets[0].circuitBreaker.failureThreshold",
+		},
+		{
+			name: "retry backoff without attempts",
+			fragment: `    retry:
+      backoff: exponential
+`,
+			wantPath: "targets[0].retry.backoff",
+		},
+		{
+			name: "retry timing",
+			fragment: `    retry:
+      maxAttempts: 3
+      backoff: exponential
+      initialInterval: 200ms
+`,
+			wantPath: "targets[0].retry.initialInterval",
+		},
+		{
+			name: "rate limit",
+			fragment: `    rateLimit:
+      requestsPerSecond: 10
+      burst: 20
+`,
+			wantPath: "targets[0].rateLimit",
+		},
+		{
+			name: "interceptors",
+			fragment: `    interceptors:
+      - type: wasm
+        config:
+          module: auth.wasm
+`,
+			wantPath: "targets[0].interceptors",
+		},
+		{
+			name: "Kafka target configuration",
+			fragment: `    kafka:
+      cluster: main
+      topic: events
+kafka:
+  clusters:
+    main:
+      brokers: [broker:9092]
+`,
+			wantPath: "targets[0].kafka",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetName := tt.targetName
+			if targetName == "" {
+				targetName = "api"
+			}
+			linkYAML := "targets:\n  - name: " + targetName + "\n    protocol: https\n    host: api.example.com\n" + tt.fragment
+			fisoDir := writeExportFixture(t, "", linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected lossy export to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected error to name %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no partial output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_ExportsAlternateLinkConfigPaths(t *testing.T) {
+	for _, name := range []string{"link-config.yaml", "links.yaml"} {
+		t.Run(name, func(t *testing.T) {
+			fisoDir := filepath.Join(t.TempDir(), "fiso")
+			if err := os.MkdirAll(fisoDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			linkYAML := `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+`
+			if err := os.WriteFile(filepath.Join(fisoDir, name), []byte(linkYAML), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			var buf bytes.Buffer
+			if err := RunExport([]string{fisoDir}, &buf); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(buf.String(), "kind: LinkTarget") {
+				t.Fatalf("expected alternate Link config to export, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsYAMLAliases(t *testing.T) {
+	linkYAML := `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+    circuitBreaker: &opts
+      failureThreshold: 0
+    retry: *opts
+`
+	fisoDir := writeExportFixture(t, "", linkYAML)
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected YAML alias to fail")
+	}
+	if !strings.Contains(err.Error(), "targets[0].retry") {
+		t.Fatalf("expected alias field path, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
+func TestRunExport_RejectsNonStringStructuralKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		flowYAML string
+		linkYAML string
+		wantPath string
+	}{
+		{
+			name: "Flow field key",
+			flowYAML: `!!binary bmFtZQ==: 123
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "name",
+		},
+		{
+			name: "Link target field key",
+			linkYAML: `targets:
+  - !!binary bmFtZQ==: 123
+    protocol: https
+    host: api.example.com
+`,
+			wantPath: "targets[0].name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, tt.flowYAML, tt.linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected non-string structural key to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected field path %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsYAMLMergeKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		flowYAML string
+		linkYAML string
+		wantPath string
+	}{
+		{
+			name: "Flow mapping",
+			flowYAML: `<<: {name: 123}
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`,
+			wantPath: "<<",
+		},
+		{
+			name: "Link target mapping",
+			linkYAML: `targets:
+  - <<: {name: 123, protocol: https, host: api.example.com}
+`,
+			wantPath: "targets[0].<<",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, tt.flowYAML, tt.linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected YAML merge key to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("expected merge-key path %q, got %v", tt.wantPath, err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsTrailingYAMLDocuments(t *testing.T) {
+	tests := []struct {
+		name     string
+		flowYAML string
+		linkYAML string
+	}{
+		{
+			name: "Flow file",
+			flowYAML: `name: flow
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+---
+name: omitted-flow
+source:
+  type: http
+  config: {}
+sink:
+  type: http
+  config: {}
+`,
+		},
+		{
+			name: "Link file",
+			linkYAML: `targets:
+  - name: api
+    protocol: https
+    host: api.example.com
+---
+targets:
+  - name: omitted-api
+    protocol: kafka
+    host: broker.example.com
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fisoDir := writeExportFixture(t, tt.flowYAML, tt.linkYAML)
+			var buf bytes.Buffer
+			err := RunExport([]string{fisoDir}, &buf)
+			if err == nil {
+				t.Fatal("expected trailing YAML document to fail")
+			}
+			if !strings.Contains(err.Error(), "multiple YAML documents") {
+				t.Fatalf("expected multiple-document error, got %v", err)
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("expected no output, got %q", buf.String())
+			}
+		})
+	}
+}
+
+func TestRunExport_RejectsDuplicateResourceNames(t *testing.T) {
+	t.Run("FlowDefinitions", func(t *testing.T) {
+		fisoDir := filepath.Join(t.TempDir(), "fiso")
+		flowsDir := filepath.Join(fisoDir, "flows")
+		if err := os.MkdirAll(flowsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		flowYAML := []byte(`name: duplicate
+source:
+  type: grpc
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+		for _, name := range []string{"first.yaml", "second.yaml"} {
+			if err := os.WriteFile(filepath.Join(flowsDir, name), flowYAML, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		var buf bytes.Buffer
+		err := RunExport([]string{fisoDir}, &buf)
+		if err == nil {
+			t.Fatal("expected duplicate FlowDefinition names to fail")
+		}
+		if !strings.Contains(err.Error(), `duplicate FlowDefinition name "duplicate"`) {
+			t.Fatalf("expected duplicate FlowDefinition error, got %v", err)
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("expected no output, got %q", buf.String())
+		}
+	})
+
+	t.Run("LinkTargets", func(t *testing.T) {
+		linkYAML := `targets:
+  - name: duplicate
+    protocol: https
+    host: first.example.com
+  - name: duplicate
+    protocol: https
+    host: second.example.com
+`
+		fisoDir := writeExportFixture(t, "", linkYAML)
+
+		var buf bytes.Buffer
+		err := RunExport([]string{fisoDir}, &buf)
+		if err == nil {
+			t.Fatal("expected duplicate LinkTarget names to fail")
+		}
+		if !strings.Contains(err.Error(), `duplicate LinkTarget name "duplicate"`) {
+			t.Fatalf("expected duplicate LinkTarget error, got %v", err)
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("expected no output, got %q", buf.String())
+		}
+	})
+}
+
+func TestRunExport_RejectsMultipleLinkConfigPaths(t *testing.T) {
+	fisoDir := filepath.Join(t.TempDir(), "fiso")
+	linkDir := filepath.Join(fisoDir, "link")
+	if err := os.MkdirAll(linkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linkYAML := []byte("targets:\n  - name: api\n    protocol: https\n    host: api.example.com\n")
+	if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), linkYAML, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fisoDir, "links.yaml"), linkYAML, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected ambiguous Link configs to fail")
+	}
+	if !strings.Contains(err.Error(), "multiple link configs") {
+		t.Fatalf("expected ambiguous Link config error, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
+func TestRunExport_LossyResourceProducesNoPartialOutput(t *testing.T) {
+	flowYAML := `name: representable-flow
+source:
+  type: grpc
+  config:
+    listenAddr: ":8081"
+sink:
+  type: http
+  config:
+    url: http://api:8080
+`
+	linkYAML := `targets:
+  - name: lossy-link
+    protocol: https
+    host: api.example.com
+    port: 8443
+`
+	fisoDir := writeExportFixture(t, flowYAML, linkYAML)
+
+	var buf bytes.Buffer
+	err := RunExport([]string{fisoDir}, &buf)
+	if err == nil {
+		t.Fatal("expected lossy link to fail the combined export")
+	}
+	if !strings.Contains(err.Error(), "targets[0].port") {
+		t.Fatalf("expected error to name targets[0].port, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected all-or-nothing output, got %q", buf.String())
+	}
+}
+
+func writeExportFixture(t *testing.T, flowYAML, linkYAML string) string {
+	t.Helper()
+
+	fisoDir := filepath.Join(t.TempDir(), "fiso")
+	if flowYAML != "" {
+		flowsDir := filepath.Join(fisoDir, "flows")
+		if err := os.MkdirAll(flowsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(flowsDir, "flow.yaml"), []byte(flowYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if linkYAML != "" {
+		linkDir := filepath.Join(fisoDir, "link")
+		if err := os.MkdirAll(linkDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(linkDir, "config.yaml"), []byte(linkYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return fisoDir
 }
