@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/lsm/fiso/internal/delivery"
@@ -62,6 +63,20 @@ func (f *FlowDefinition) Validate() error {
 				if _, ok := f.Sink.Config["signalName"].(string); !ok {
 					errs = append(errs, fmt.Errorf("sink.config.signalName is required when mode is 'signal'"))
 				}
+			}
+		}
+	}
+
+	// gRPC sink validation: the wired sink constructs from address (+ optional
+	// timeout duration and tls), so require exactly those settings to be usable.
+	if f.Sink.Type == "grpc" {
+		address, ok := f.Sink.Config["address"].(string)
+		if !ok || address == "" {
+			errs = append(errs, fmt.Errorf("sink.config.address is required for grpc sink"))
+		}
+		if timeout, ok := f.Sink.Config["timeout"].(string); ok && timeout != "" {
+			if _, err := time.ParseDuration(timeout); err != nil {
+				errs = append(errs, fmt.Errorf("sink.config.timeout %q is not a valid duration", timeout))
 			}
 		}
 	}

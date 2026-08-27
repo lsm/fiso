@@ -424,9 +424,23 @@ cloudevents:
 #### Sinks
 
 - **HTTP** — Delivers events via HTTP with exponential backoff retry. Distinguishes retryable errors (5xx, 429) from permanent failures (4xx).
-- **gRPC** — Delivers events via gRPC streaming.
+- **gRPC** — Delivers events via a raw unary gRPC call to `fiso.v1.EventService/Deliver`. The event body is the request payload; event headers travel as gRPC metadata.
 - **Temporal** — Starts Temporal workflows for long-running event processing. Supports typed parameters for cross-SDK compatibility.
 - **Kafka** — Produces events to Kafka topics with at-least-once delivery guarantees.
+
+#### gRPC Sink
+
+```yaml
+sink:
+  type: grpc
+  config:
+    address: event-service:50051  # required
+    timeout: 30s                   # optional, default 30s
+    tls: false                     # optional; true requires transport credentials
+```
+
+The sink invokes the server with a raw (non-protobuf) codec: handlers receive
+the event bytes as the request message and reply with raw bytes.
 
 #### Temporal Sink: CloudEvent Integration
 

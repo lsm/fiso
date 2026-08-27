@@ -136,7 +136,9 @@ func ValidateLinkSpec(spec *v1alpha1.LinkTargetSpec) error {
 	if spec.Protocol == "" {
 		return fmt.Errorf("protocol is required")
 	}
-	validProtocols := map[string]bool{"http": true, "https": true, "grpc": true}
+	// Only protocols the shipped Link runtime can execute; grpc is rejected
+	// until a Link gRPC transport contract exists (ADR 0003).
+	validProtocols := map[string]bool{"http": true, "https": true}
 	if !validProtocols[spec.Protocol] {
 		return fmt.Errorf("unsupported protocol: %s", spec.Protocol)
 	}

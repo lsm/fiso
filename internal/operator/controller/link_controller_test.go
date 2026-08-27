@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -158,7 +159,7 @@ func TestLinkReconciler_NotFound(t *testing.T) {
 	}
 }
 
-func TestLinkReconciler_GRPCProtocol(t *testing.T) {
+func TestLinkReconciler_GRPCProtocolRejected(t *testing.T) {
 	lt := &fisov1alpha1.LinkTargetCR{
 		ObjectMeta: metav1.ObjectMeta{Name: "grpc-svc", Namespace: "default"},
 		Spec: fisov1alpha1.LinkTargetSpec{
@@ -184,8 +185,11 @@ func TestLinkReconciler_GRPCProtocol(t *testing.T) {
 
 	var updated fisov1alpha1.LinkTargetCR
 	_ = client.Get(context.Background(), types.NamespacedName{Name: "grpc-svc", Namespace: "default"}, &updated)
-	if updated.Status.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", updated.Status.Phase)
+	if updated.Status.Phase != "Error" {
+		t.Errorf("expected phase 'Error', got %q", updated.Status.Phase)
+	}
+	if !strings.Contains(updated.Status.Message, "unsupported protocol: grpc") {
+		t.Errorf("expected unsupported protocol message, got %q", updated.Status.Message)
 	}
 }
 

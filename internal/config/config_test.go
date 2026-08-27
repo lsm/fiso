@@ -1236,10 +1236,12 @@ func TestLoad_YMLExtension(t *testing.T) {
 name: yml-flow
 source:
   type: grpc
-  config: {}
+  config:
+    listenAddr: :4500
 sink:
   type: grpc
-  config: {}
+  config:
+    address: localhost:9000
 `)
 
 	loader := NewLoader(dir, nil)

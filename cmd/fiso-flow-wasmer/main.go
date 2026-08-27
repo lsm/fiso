@@ -25,6 +25,7 @@ import (
 	"github.com/lsm/fiso/internal/interceptor/wasm"
 	"github.com/lsm/fiso/internal/observability"
 	"github.com/lsm/fiso/internal/pipeline"
+	grpcsink "github.com/lsm/fiso/internal/sink/grpc"
 	httpsink "github.com/lsm/fiso/internal/sink/http"
 	kafkasink "github.com/lsm/fiso/internal/sink/kafka"
 	temporalsink "github.com/lsm/fiso/internal/sink/temporal"
@@ -443,6 +444,29 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		}
 		kSink.SetTracer(tracer)
 		sk = kSink
+
+	case "grpc":
+		address, ok := flowDef.Sink.Config["address"].(string)
+		if !ok || address == "" {
+			return nil, fmt.Errorf("sink config: address is required for grpc sink")
+		}
+		grpcCfg := grpcsink.Config{Address: address}
+		if timeoutStr, ok := flowDef.Sink.Config["timeout"].(string); ok && timeoutStr != "" {
+			timeout, err := time.ParseDuration(timeoutStr)
+			if err != nil {
+				return nil, fmt.Errorf("sink config: timeout %q is not a valid duration", timeoutStr)
+			}
+			grpcCfg.Timeout = timeout
+		}
+		if tlsEnabled, ok := flowDef.Sink.Config["tls"].(bool); ok {
+			grpcCfg.TLS = tlsEnabled
+		}
+		gSink, err := grpcsink.NewSink(grpcCfg)
+		if err != nil {
+			return nil, fmt.Errorf("grpc sink: %w", err)
+		}
+		gSink.SetTracer(tracer)
+		sk = gSink
 
 	default:
 		return nil, fmt.Errorf("unsupported sink type: %s", flowDef.Sink.Type)
