@@ -657,7 +657,7 @@ errorHandling:
   commitPolicy: sink_or_dlq   # sink | sink_or_dlq | kafka_transaction
 ```
 
-Fiso watches the config directory and hot-reloads on changes.
+Fiso watches the config directory and reparses changed files into its in-memory definitions, but running pipelines are not rebuilt, replaced, or stopped. Restart the process to apply configuration changes.
 
 #### Multiple Flows per Instance
 
@@ -665,7 +665,7 @@ Fiso-flow supports running **multiple flows concurrently** in a single instance 
 
 **Benefits:**
 - **Reduced infrastructure:** Run `guarantee-event-ingested` and `guarantee-email-sent` in one pod instead of separate deployments
-- **Shared resources:** Single metrics server, health check, config watcher
+- **Shared resources:** Single metrics server, health check, config file watcher (change detection and reparse only)
 - **Independent lifecycles:** HTTP ingestion continues even if Kafka consumer fails
 
 **Configuration:**
@@ -1732,7 +1732,7 @@ cmd/
   fiso-operator/             K8s operator entry point
 internal/
   cli/                       CLI commands and templates
-  config/                    YAML config loading + hot-reload (fsnotify)
+  config/                    YAML config loading + file watching (fsnotify; reparse only, restart to apply)
   dlq/                       Dead Letter Queue handler
   link/
     auth/                    Auth credential providers

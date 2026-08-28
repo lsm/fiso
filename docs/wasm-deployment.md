@@ -9,7 +9,7 @@ WASM modules in Fiso enable custom data transformations loaded at runtime withou
 **Key Benefits:**
 - **No custom images needed**: The standard Fiso image loads WASM modules at runtime
 - **Language flexibility**: Write modules in Go, Rust, TinyGo, C, or any WASI-compatible language
-- **Hot-reload capable**: Update modules without rebuilding container images
+- **No image rebuild needed**: Update modules by editing the mounted ConfigMap, then roll the deployment — running pods do not pick up module changes
 - **Sandboxed execution**: WASM provides isolation and controlled resource access
 
 **How It Works:**
