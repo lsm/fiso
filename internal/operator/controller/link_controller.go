@@ -35,7 +35,7 @@ func (r *LinkTargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Validate using shared validation logic
 	if err := operator.ValidateLinkSpec(&lt.Spec); err != nil {
-		lt.Status.Phase = "Error"
+		lt.Status.Phase = fisov1alpha1.PhaseError
 		lt.Status.Message = err.Error()
 		if updateErr := r.Status().Update(ctx, &lt); updateErr != nil {
 			logger.Error("failed to update error status", "error", updateErr)
@@ -44,9 +44,9 @@ func (r *LinkTargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	// Mark as Ready
-	lt.Status.Phase = "Ready"
-	lt.Status.Message = "Link target validated and active"
+	// Report static validation success (no runtime actuation occurs)
+	lt.Status.Phase = fisov1alpha1.PhaseValidated
+	lt.Status.Message = "Link target validated"
 	if err := r.Status().Update(ctx, &lt); err != nil {
 		return ctrl.Result{}, fmt.Errorf("update status: %w", err)
 	}

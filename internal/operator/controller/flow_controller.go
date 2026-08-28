@@ -35,7 +35,7 @@ func (r *FlowDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Validate using shared validation logic
 	if err := operator.ValidateFlowSpec(&fd.Spec); err != nil {
-		fd.Status.Phase = "Error"
+		fd.Status.Phase = fisov1alpha1.PhaseError
 		fd.Status.Message = err.Error()
 		if updateErr := r.Status().Update(ctx, &fd); updateErr != nil {
 			logger.Error("failed to update error status", "error", updateErr)
@@ -44,9 +44,9 @@ func (r *FlowDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil // Don't requeue validation errors
 	}
 
-	// Mark as Ready
-	fd.Status.Phase = "Ready"
-	fd.Status.Message = "Flow definition validated and active"
+	// Report static validation success (no runtime actuation occurs)
+	fd.Status.Phase = fisov1alpha1.PhaseValidated
+	fd.Status.Message = "Flow definition validated"
 	if err := r.Status().Update(ctx, &fd); err != nil {
 		return ctrl.Result{}, fmt.Errorf("update status: %w", err)
 	}

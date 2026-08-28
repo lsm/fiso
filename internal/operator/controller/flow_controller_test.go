@@ -272,8 +272,11 @@ func TestFlowReconciler_GRPCSourceTemporalSink(t *testing.T) {
 
 	var updated fisov1alpha1.FlowDefinitionCR
 	_ = client.Get(context.Background(), types.NamespacedName{Name: "grpc-flow", Namespace: "default"}, &updated)
-	if updated.Status.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", updated.Status.Phase)
+	if updated.Status.Phase != "Validated" {
+		t.Errorf("expected phase 'Validated', got %q", updated.Status.Phase)
+	}
+	if updated.Status.Message != "Flow definition validated" {
+		t.Errorf("expected validation-only message 'Flow definition validated', got %q", updated.Status.Message)
 	}
 }
 
