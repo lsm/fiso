@@ -20,9 +20,9 @@ import (
 // entered, then blocks until the test forces a terminal return (stop) or the
 // context is cancelled. finished closes just before Run returns.
 type fakeRunner struct {
-	started chan struct{}
-	stop    chan struct{}
-	err     error
+	started  chan struct{}
+	stop     chan struct{}
+	err      error
 	finished chan struct{}
 }
 
@@ -155,4 +155,17 @@ func TestGate_ZeroRequiredRunnersIsReady(t *testing.T) {
 	gate := NewGate(health)
 	gate.SetRunning()
 	mustBe200(t, health, "zero required runners")
+}
+
+func TestGate_SetRunningAfterTerminalStaysNotReady(t *testing.T) {
+	// A runner that dies during startup (e.g. its listener cannot bind)
+	// must not be overwritten by a later SetRunning.
+	health := observability.NewHealthServer()
+	gate := NewGate(health)
+	settled := gate.Go("dead-at-startup", func(context.Context) error {
+		return errors.New("listen 127.0.0.1:19444: bind: address already in use")
+	})
+	<-settled
+	gate.SetRunning()
+	mustBe503(t, health, "after SetRunning following a terminal runner")
 }

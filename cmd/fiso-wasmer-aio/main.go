@@ -23,6 +23,7 @@ import (
 	"github.com/lsm/fiso/internal/config"
 	"github.com/lsm/fiso/internal/delivery"
 	"github.com/lsm/fiso/internal/dlq"
+	"github.com/lsm/fiso/internal/flowruntime"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/interceptor/wasm"
 	internal_kafka "github.com/lsm/fiso/internal/kafka"
@@ -183,6 +184,10 @@ func run() error {
 	// HTTP Pool for Flow sources
 	httpPool := httpsource.NewServerPool(logger)
 
+	// Required-runner gate: a terminal Flow return drops process readiness
+	// while surviving components keep running (ADR 0005).
+	gate := flowruntime.NewGate(health)
+
 	type flowRunner struct {
 		name     string
 		pipeline *pipeline.Pipeline
@@ -205,14 +210,10 @@ func run() error {
 		}()
 
 		for _, runner := range runners {
-			go func(r *flowRunner) {
-				logger.Info("flow started", "name", r.name)
-				if err := r.pipeline.Run(ctx); err != nil {
-					logger.Error("flow stopped with error", "name", r.name, "error", err)
-				}
-			}(runner)
+			gate.GoContext(ctx, runner.name, runner.pipeline.Run)
 		}
 	}
+	gate.SetRunning()
 
 	// 3. Start Link
 	var linkServer *http.Server
@@ -317,7 +318,6 @@ func run() error {
 		}
 	}
 
-	health.SetReady(true)
 	logger.Info("all components started")
 
 	<-ctx.Done()

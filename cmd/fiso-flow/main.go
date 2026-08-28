@@ -19,6 +19,7 @@ import (
 	"github.com/lsm/fiso/internal/config"
 	"github.com/lsm/fiso/internal/delivery"
 	"github.com/lsm/fiso/internal/dlq"
+	"github.com/lsm/fiso/internal/flowruntime"
 	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/interceptor/wasm"
 	"github.com/lsm/fiso/internal/observability"
@@ -155,7 +156,6 @@ func run() error {
 	}
 
 	logger.Info("starting flows", "count", len(runners))
-	health.SetReady(true)
 
 	// Start the shared HTTP pool (handles all HTTP sources)
 	go func() {
@@ -164,18 +164,13 @@ func run() error {
 		}
 	}()
 
-	// Start each flow in its own goroutine (independent execution)
+	// Start each flow as a required runner: a terminal return drops process
+	// readiness while surviving flows keep running (ADR 0005).
+	gate := flowruntime.NewGate(health)
 	for _, runner := range runners {
-		go func(r *flowRunner) {
-			logger.Info("flow started", "name", r.name)
-			if err := r.pipeline.Run(ctx); err != nil {
-				// Log error but don't stop other flows (router model)
-				logger.Error("flow stopped with error", "name", r.name, "error", err)
-			} else {
-				logger.Info("flow stopped", "name", r.name)
-			}
-		}(runner)
+		gate.GoContext(ctx, runner.name, runner.pipeline.Run)
 	}
+	gate.SetRunning()
 
 	// Wait for shutdown signal
 	<-ctx.Done()

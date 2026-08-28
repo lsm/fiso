@@ -69,6 +69,83 @@ else
 fi
 
 echo ""
+echo "=== Test 4: Readiness is 200 while all required flows serve ==="
+READY=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9091/readyz)
+echo "readyz: $READY"
+if [ "$READY" != "200" ]; then
+    echo "FAIL: expected /readyz 200 with all flows serving"
+    docker compose logs fiso-flow
+    docker compose down
+    exit 1
+fi
+echo "SUCCESS: /readyz 200 before any terminal failure"
+
+echo ""
+echo "=== Test 5: Terminal flow failure drops readiness, survivors keep serving ==="
+# flow-c and flow-d both bind a gRPC source on :9095. Exactly one bind
+# succeeds; the other pipeline dies terminally at startup (address already
+# in use), which must drop readiness without disturbing anything else.
+cat > fiso/flows/flow-c.yaml <<'YAML'
+name: flow-c
+source:
+  type: grpc
+  config:
+    listenAddr: ":9095"
+sink:
+  type: http
+  config:
+    url: http://user-service:8082/flow-c
+    method: POST
+YAML
+cat > fiso/flows/flow-d.yaml <<'YAML'
+name: flow-d
+source:
+  type: grpc
+  config:
+    listenAddr: ":9095"
+sink:
+  type: http
+  config:
+    url: http://user-service:8082/flow-d
+    method: POST
+YAML
+docker compose restart fiso-flow >/dev/null 2>&1
+
+# readiness must become 503 (terminal flow) while healthz stays 200
+READY=""; I=0
+while [ $I -lt 15 ]; do
+    sleep 1
+    READY=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9091/readyz || echo "000")
+    [ "$READY" = "503" ] && break
+    I=$((I+1))
+done
+HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9091/healthz || echo "000")
+echo "readyz: $READY  healthz: $HEALTH"
+if [ "$READY" != "503" ] || [ "$HEALTH" != "200" ]; then
+    echo "FAIL: expected /readyz 503 with /healthz 200 after terminal flow failure"
+    docker compose logs fiso-flow
+    docker compose down
+    rm -f fiso/flows/flow-c.yaml fiso/flows/flow-d.yaml
+    exit 1
+fi
+
+# surviving flows must still process events (aggregate readiness only)
+SURVIVOR=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/ingest-a \
+    -H "Content-Type: application/json" -d '{"flow": "a", "order_id": "A-002"}')
+STATS=$(curl -s http://localhost:8082/stats)
+FLOW_A_AFTER=$(echo "$STATS" | grep -o '"flow_a_count":[0-9]*' | grep -o '[0-9]*')
+echo "survivor flow-a status: $SURVIVOR (flow_a_count=$FLOW_A_AFTER)"
+if [ "$SURVIVOR" != "200" ] || [ "$FLOW_A_AFTER" -lt 2 ]; then
+    echo "FAIL: surviving flow stopped processing after another flow died"
+    docker compose logs fiso-flow
+    docker compose down
+    rm -f fiso/flows/flow-c.yaml fiso/flows/flow-d.yaml
+    exit 1
+fi
+rm -f fiso/flows/flow-c.yaml fiso/flows/flow-d.yaml
+echo "SUCCESS: /readyz 503, /healthz 200, surviving flow still serving"
+
+echo ""
 echo "Cleaning up..."
 docker compose down
 echo "Done."
