@@ -35,6 +35,7 @@ Once accepted, do not substantively rewrite an ADR. Correct trivial errors or ad
 | [0002](0002-make-export-fail-closed-on-lossy-conversion.md) | Accepted | Make export fail closed on lossy conversion |
 | [0003](0003-define-supported-integration-values-as-executable.md) | Accepted | Define supported integration values as executable |
 | [0004](0004-report-static-validation-as-validated.md) | Accepted | Report static validation as Validated |
+| [0005](0005-drop-readiness-on-required-pipeline-termination.md) | Accepted | Drop readiness on required pipeline termination |
 
 ## Template
 

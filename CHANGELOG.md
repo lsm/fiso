@@ -12,6 +12,16 @@ unreleased work and will be versioned when a release tag is cut.
 
 ### Changed
 
+- **Readiness follows required pipeline lifecycle** — all Flow-capable binaries
+  (`fiso-flow`, `fiso-flow-wasmer`, `fiso-wasmer-aio`) now drop `/readyz` to 503
+  as soon as any configured startup pipeline terminates (an error other than
+  context cancellation, or an unexpected silent stop), while `/healthz`, the
+  process, and surviving pipelines are unaffected. Previously readiness was set
+  once at startup and never revisited, so a flow whose source died (e.g. its
+  listener could not bind) left `/readyz` at 200 forever. Recovery requires a
+  process restart. See
+  [ADR 0005](docs/adr/0005-drop-readiness-on-required-pipeline-termination.md).
+
 - **Truthful operator status phases** — successful operator reconciliation now
   reports `.status.phase: Validated` with a validation-only message
   ("Flow definition validated" / "Link target validated") instead of `Ready`

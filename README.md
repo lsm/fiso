@@ -1394,7 +1394,7 @@ All components expose health endpoints on their metrics port:
 | Endpoint | Description |
 |----------|-------------|
 | `GET /healthz` | Liveness probe — always returns `200 OK` |
-| `GET /readyz` | Readiness probe — `200 OK` when ready, `503` otherwise |
+| `GET /readyz` | Readiness probe — `200 OK` when every configured startup Flow is running, `503` once any required pipeline has terminated (the process stays up; restart required to recover) |
 | `GET /metrics` | Prometheus metrics |
 
 ### Logging
