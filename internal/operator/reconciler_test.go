@@ -76,8 +76,11 @@ func TestFlowReconciler_ValidFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if mc.lastFlowStatus.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", mc.lastFlowStatus.Phase)
+	if mc.lastFlowStatus.Phase != "Validated" {
+		t.Errorf("expected phase 'Validated', got %q", mc.lastFlowStatus.Phase)
+	}
+	if mc.lastFlowStatus.Message != "Flow definition validated" {
+		t.Errorf("expected validation-only message 'Flow definition validated', got %q", mc.lastFlowStatus.Message)
 	}
 }
 
@@ -168,8 +171,11 @@ func TestFlowReconciler_GRPCSourceTemporalSink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if mc.lastFlowStatus.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", mc.lastFlowStatus.Phase)
+	if mc.lastFlowStatus.Phase != "Validated" {
+		t.Errorf("expected phase 'Validated', got %q", mc.lastFlowStatus.Phase)
+	}
+	if mc.lastFlowStatus.Message != "Flow definition validated" {
+		t.Errorf("expected validation-only message 'Flow definition validated', got %q", mc.lastFlowStatus.Message)
 	}
 }
 
@@ -249,8 +255,11 @@ func TestFlowReconciler_GRPCSinkInvalidSettings(t *testing.T) {
 				t.Fatalf("expected nil (validation errors not requeued), got %v", err)
 			}
 			if tt.wantErr == "" {
-				if mc.lastFlowStatus.Phase != "Ready" {
-					t.Fatalf("expected phase 'Ready', got %q (%s)", mc.lastFlowStatus.Phase, mc.lastFlowStatus.Message)
+				if mc.lastFlowStatus.Phase != "Validated" {
+					t.Fatalf("expected phase 'Validated', got %q (%s)", mc.lastFlowStatus.Phase, mc.lastFlowStatus.Message)
+				}
+				if mc.lastFlowStatus.Message != "Flow definition validated" {
+					t.Fatalf("expected validation-only message, got %q", mc.lastFlowStatus.Message)
 				}
 				return
 			}
@@ -279,8 +288,11 @@ func TestLinkReconciler_ValidTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if mc.lastLinkStatus.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", mc.lastLinkStatus.Phase)
+	if mc.lastLinkStatus.Phase != "Validated" {
+		t.Errorf("expected phase 'Validated', got %q", mc.lastLinkStatus.Phase)
+	}
+	if mc.lastLinkStatus.Message != "Link target validated" {
+		t.Errorf("expected validation-only message 'Link target validated', got %q", mc.lastLinkStatus.Message)
 	}
 }
 
