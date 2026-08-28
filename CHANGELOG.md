@@ -10,6 +10,18 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **Truthful operator status phases** — successful operator reconciliation now
+  reports `.status.phase: Validated` with a validation-only message
+  ("Flow definition validated" / "Link target validated") instead of `Ready`
+  and "validated and active". The operator performs static spec validation
+  only — it creates no runtime and observes none, so it no longer claims
+  readiness or activation. `Error` is unchanged. Previously stored `Ready`
+  values remain readable; scripts waiting on `phase: Ready` must wait on
+  `phase: Validated` instead. See
+  [ADR 0004](docs/adr/0004-report-static-validation-as-validated.md).
+
 ### Added
 
 - **Executable Flow gRPC sink** — all Flow-capable binaries (`fiso-flow`,

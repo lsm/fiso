@@ -52,7 +52,7 @@ func (r *FlowReconciler) Reconcile(ctx context.Context, req ReconcileRequest) er
 
 	// Validate the flow definition
 	if err := ValidateFlowSpec(&fd.Spec); err != nil {
-		fd.Status.Phase = "Error"
+		fd.Status.Phase = v1alpha1.PhaseError
 		fd.Status.Message = err.Error()
 		if updateErr := r.client.UpdateFlowDefinitionStatus(ctx, fd); updateErr != nil {
 			r.logger.Error("failed to update status", "error", updateErr)
@@ -60,7 +60,7 @@ func (r *FlowReconciler) Reconcile(ctx context.Context, req ReconcileRequest) er
 		return nil // Don't requeue validation errors
 	}
 
-	fd.Status.Phase = "Ready"
+	fd.Status.Phase = v1alpha1.PhaseValidated
 	fd.Status.Message = "Flow definition validated"
 	if err := r.client.UpdateFlowDefinitionStatus(ctx, fd); err != nil {
 		return fmt.Errorf("update flow status: %w", err)
@@ -136,7 +136,7 @@ func (r *LinkReconciler) Reconcile(ctx context.Context, req ReconcileRequest) er
 	}
 
 	if err := ValidateLinkSpec(&lt.Spec); err != nil {
-		lt.Status.Phase = "Error"
+		lt.Status.Phase = v1alpha1.PhaseError
 		lt.Status.Message = err.Error()
 		if updateErr := r.client.UpdateLinkTargetStatus(ctx, lt); updateErr != nil {
 			r.logger.Error("failed to update status", "error", updateErr)
@@ -144,7 +144,7 @@ func (r *LinkReconciler) Reconcile(ctx context.Context, req ReconcileRequest) er
 		return nil
 	}
 
-	lt.Status.Phase = "Ready"
+	lt.Status.Phase = v1alpha1.PhaseValidated
 	lt.Status.Message = "Link target validated"
 	if err := r.client.UpdateLinkTargetStatus(ctx, lt); err != nil {
 		return fmt.Errorf("update link target status: %w", err)

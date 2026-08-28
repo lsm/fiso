@@ -54,8 +54,11 @@ func TestFlowReconciler_ValidFlow(t *testing.T) {
 	if err := client.Get(context.Background(), types.NamespacedName{Name: "test-flow", Namespace: "default"}, &updated); err != nil {
 		t.Fatalf("failed to get updated resource: %v", err)
 	}
-	if updated.Status.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", updated.Status.Phase)
+	if updated.Status.Phase != "Validated" {
+		t.Errorf("expected phase 'Validated', got %q", updated.Status.Phase)
+	}
+	if updated.Status.Message != "Flow definition validated" {
+		t.Errorf("expected validation-only message 'Flow definition validated', got %q", updated.Status.Message)
 	}
 }
 
@@ -235,8 +238,11 @@ func TestFlowReconciler_HTTPSource(t *testing.T) {
 
 	var updated fisov1alpha1.FlowDefinitionCR
 	_ = client.Get(context.Background(), types.NamespacedName{Name: "http-flow", Namespace: "default"}, &updated)
-	if updated.Status.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", updated.Status.Phase)
+	if updated.Status.Phase != "Validated" {
+		t.Errorf("expected phase 'Validated', got %q", updated.Status.Phase)
+	}
+	if updated.Status.Message != "Flow definition validated" {
+		t.Errorf("expected validation-only message 'Flow definition validated', got %q", updated.Status.Message)
 	}
 }
 
@@ -266,8 +272,11 @@ func TestFlowReconciler_GRPCSourceTemporalSink(t *testing.T) {
 
 	var updated fisov1alpha1.FlowDefinitionCR
 	_ = client.Get(context.Background(), types.NamespacedName{Name: "grpc-flow", Namespace: "default"}, &updated)
-	if updated.Status.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", updated.Status.Phase)
+	if updated.Status.Phase != "Validated" {
+		t.Errorf("expected phase 'Validated', got %q", updated.Status.Phase)
+	}
+	if updated.Status.Message != "Flow definition validated" {
+		t.Errorf("expected validation-only message 'Flow definition validated', got %q", updated.Status.Message)
 	}
 }
 

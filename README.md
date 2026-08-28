@@ -600,7 +600,7 @@ Reverse proxy sidecar that routes application requests to external services thro
 
 Manages Fiso CRDs and automates sidecar injection. Built with [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime).
 
-- **CRD Reconciliation** — Reconciles `FlowDefinition` and `LinkTarget` custom resources. Validates specs and updates `.status.phase` to `Ready` or `Error`.
+- **CRD Reconciliation** — Reconciles `FlowDefinition` and `LinkTarget` custom resources. Validates specs and updates `.status.phase` to `Validated` or `Error`.
 - **Sidecar Injection** — Mutating webhook automatically injects fiso-link sidecar when Pod annotation `fiso.io/inject: "true"` is present.
 - **Modes** — `controller` (default): full controller + webhook. `webhook-only`: runs only the sidecar injection webhook (`FISO_OPERATOR_MODE=webhook-only`).
 
@@ -1478,7 +1478,7 @@ The operator's ClusterRole grants the minimum permissions required at runtime:
 | API Group | Resource | Verbs | Purpose |
 |-----------|----------|-------|---------|
 | `fiso.io` | `flowdefinitions` | get, list, watch | Informer cache (list, watch) and reconciler read (get) |
-| `fiso.io` | `flowdefinitions/status` | get, update, patch | Write reconciliation status (`phase: Ready` or `Error`) |
+| `fiso.io` | `flowdefinitions/status` | get, update, patch | Write reconciliation status (`phase: Validated` or `Error`) |
 | `fiso.io` | `linktargets` | get, list, watch | Informer cache (list, watch) and reconciler read (get) |
 | `fiso.io` | `linktargets/status` | get, update, patch | Write reconciliation status |
 
@@ -1536,7 +1536,7 @@ spec:
   host: api.salesforce.com
 ```
 
-The operator validates specs and sets `.status.phase` to `Ready` or `Error` with a descriptive `.status.message`.
+The operator validates specs and sets `.status.phase` to `Validated` or `Error` with a descriptive `.status.message`. `Validated` reports static spec validation only — the operator does not create or observe a runtime, so it never claims readiness or activation.
 
 ### Export Local Config to CRDs
 

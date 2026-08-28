@@ -213,8 +213,8 @@ TESTS=$((TESTS + 1))
 info "Test: Valid FlowDefinition (kafka→http) should become Ready..."
 kubectl apply -f "$SCRIPT_DIR/testdata/valid-flow.yaml" --context "kind-${CLUSTER_NAME}"
 
-if wait_for_phase "flowdefinition" "test-kafka-http-flow" "Ready" 30; then
-    pass "Valid FlowDefinition reconciled to Ready"
+if wait_for_phase "flowdefinition" "test-kafka-http-flow" "Validated" 30; then
+    pass "Valid FlowDefinition reconciled to Validated"
 else
     phase=$(kubectl get flowdefinition test-kafka-http-flow -n "$NAMESPACE" --context "kind-${CLUSTER_NAME}" \
         -o jsonpath='{.status.phase}' 2>/dev/null || echo "<none>")
@@ -232,7 +232,7 @@ TESTS=$((TESTS + 1))
 info "Test: Valid FlowDefinition (grpc→temporal+CEL) should become Ready..."
 kubectl apply -f "$SCRIPT_DIR/testdata/valid-flow-grpc-temporal.yaml" --context "kind-${CLUSTER_NAME}"
 
-if wait_for_phase "flowdefinition" "test-grpc-temporal-flow" "Ready" 30; then
+if wait_for_phase "flowdefinition" "test-grpc-temporal-flow" "Validated" 30; then
     pass "Valid FlowDefinition (grpc→temporal) reconciled to Ready"
 else
     phase=$(kubectl get flowdefinition test-grpc-temporal-flow -n "$NAMESPACE" --context "kind-${CLUSTER_NAME}" \
@@ -266,8 +266,8 @@ TESTS=$((TESTS + 1))
 info "Test: Valid LinkTarget (https with auth) should become Ready..."
 kubectl apply -f "$SCRIPT_DIR/testdata/valid-linktarget.yaml" --context "kind-${CLUSTER_NAME}"
 
-if wait_for_phase "linktarget" "test-external-api" "Ready" 30; then
-    pass "Valid LinkTarget reconciled to Ready"
+if wait_for_phase "linktarget" "test-external-api" "Validated" 30; then
+    pass "Valid LinkTarget reconciled to Validated"
 else
     phase=$(kubectl get linktarget test-external-api -n "$NAMESPACE" --context "kind-${CLUSTER_NAME}" \
         -o jsonpath='{.status.phase}' 2>/dev/null || echo "<none>")

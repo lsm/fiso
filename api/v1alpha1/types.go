@@ -6,6 +6,19 @@ const (
 	Version = "v1alpha1"
 )
 
+// Status phases emitted by the operator for FlowDefinition and LinkTarget
+// resources. The operator performs static spec validation only; it never
+// creates or observes a runtime, so it must not claim runtime readiness.
+// See docs/adr/0004-report-static-validation-as-validated.md.
+const (
+	// PhaseValidated means static spec validation succeeded. It says nothing
+	// about any runtime: no actuation or health observation occurred.
+	PhaseValidated = "Validated"
+	// PhaseError means static spec validation failed; Message carries the
+	// reason.
+	PhaseError = "Error"
+)
+
 // FlowDefinition represents a Fiso inbound event pipeline as a Kubernetes CRD.
 type FlowDefinition struct {
 	TypeMeta   `json:",inline"`

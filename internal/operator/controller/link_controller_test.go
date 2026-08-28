@@ -45,8 +45,11 @@ func TestLinkReconciler_ValidTarget(t *testing.T) {
 
 	var updated fisov1alpha1.LinkTargetCR
 	_ = client.Get(context.Background(), types.NamespacedName{Name: "crm", Namespace: "default"}, &updated)
-	if updated.Status.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", updated.Status.Phase)
+	if updated.Status.Phase != "Validated" {
+		t.Errorf("expected phase 'Validated', got %q", updated.Status.Phase)
+	}
+	if updated.Status.Message != "Link target validated" {
+		t.Errorf("expected validation-only message 'Link target validated', got %q", updated.Status.Message)
 	}
 }
 
@@ -219,8 +222,11 @@ func TestLinkReconciler_HTTPProtocol(t *testing.T) {
 
 	var updated fisov1alpha1.LinkTargetCR
 	_ = client.Get(context.Background(), types.NamespacedName{Name: "http-svc", Namespace: "default"}, &updated)
-	if updated.Status.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", updated.Status.Phase)
+	if updated.Status.Phase != "Validated" {
+		t.Errorf("expected phase 'Validated', got %q", updated.Status.Phase)
+	}
+	if updated.Status.Message != "Link target validated" {
+		t.Errorf("expected validation-only message 'Link target validated', got %q", updated.Status.Message)
 	}
 }
 
