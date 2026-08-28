@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/lsm/fiso/api/v1alpha1"
 )
@@ -84,6 +85,30 @@ func ValidateFlowSpec(spec *v1alpha1.FlowDefinitionSpec) error {
 	if !validSinkTypes[spec.Sink.Type] {
 		return fmt.Errorf("unsupported sink type: %s", spec.Sink.Type)
 	}
+	if spec.Sink.Type == "grpc" {
+		// CRD config values are strings; enforce the same executable contract as
+		// local validation and the Flow builders (ADR 0003).
+		if spec.Sink.Config["address"] == "" {
+			return fmt.Errorf("sink config: address is required for grpc sink")
+		}
+		// Presence is checked separately from value: an explicitly empty timeout
+		// or tls must be rejected, not treated as omitted.
+		if timeout, present := spec.Sink.Config["timeout"]; present {
+			d, err := time.ParseDuration(timeout)
+			if err != nil {
+				return fmt.Errorf("sink config: timeout %q is not a valid duration", timeout)
+			}
+			if d < 0 {
+				return fmt.Errorf("sink config: timeout %q must not be negative", timeout)
+			}
+			if d == 0 {
+				return fmt.Errorf("sink config: timeout %q must be positive", timeout)
+			}
+		}
+		if tlsVal, present := spec.Sink.Config["tls"]; present && tlsVal != "false" {
+			return fmt.Errorf("sink config: tls is not supported until gRPC TLS credentials are configurable")
+		}
+	}
 	return nil
 }
 
@@ -136,7 +161,9 @@ func ValidateLinkSpec(spec *v1alpha1.LinkTargetSpec) error {
 	if spec.Protocol == "" {
 		return fmt.Errorf("protocol is required")
 	}
-	validProtocols := map[string]bool{"http": true, "https": true, "grpc": true}
+	// Only protocols the shipped Link runtime can execute; grpc is rejected
+	// until a Link gRPC transport contract exists (ADR 0003).
+	validProtocols := map[string]bool{"http": true, "https": true}
 	if !validProtocols[spec.Protocol] {
 		return fmt.Errorf("unsupported protocol: %s", spec.Protocol)
 	}

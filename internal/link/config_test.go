@@ -176,6 +176,11 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: "protocol \"ftp\" is not valid",
 		},
 		{
+			name:    "grpc protocol rejected",
+			cfg:     Config{Targets: []LinkTarget{{Name: "svc", Host: "grpc.example.com", Protocol: "grpc"}}},
+			wantErr: "protocol \"grpc\" is not valid",
+		},
+		{
 			name: "invalid reset timeout",
 			cfg: Config{Targets: []LinkTarget{{
 				Name: "svc", Host: "api.example.com",

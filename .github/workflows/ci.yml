@@ -24,6 +24,13 @@ jobs:
           go test -race -coverprofile=coverage.out -covermode=atomic \
             $(go list ./... | grep -v /cmd/ | grep -v /test/e2e/)
 
+      - name: Run builder conformance tests
+        # cmd/ is excluded from coverage above; ADR 0003 requires the builder
+        # construction evidence to run in CI, including the Wasmer-tagged bins.
+        run: |
+          go test -count=1 ./cmd/fiso-flow/...
+          go test -tags wasmer -count=1 ./cmd/fiso-flow-wasmer/... ./cmd/fiso-wasmer-aio/...
+
       - name: Check coverage
         run: |
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')

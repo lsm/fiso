@@ -12,12 +12,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var validProtocols = map[string]bool{"http": true, "https": true, "grpc": true, "kafka": true}
+// validProtocols lists the protocols the shipped Link runtime can actually
+// execute. grpc is absent until a Link gRPC transport contract exists (ADR 0003).
+var validProtocols = map[string]bool{"http": true, "https": true, "kafka": true}
 
 // LinkTarget defines an outbound target endpoint.
 type LinkTarget struct {
 	Name           string               `yaml:"name"`
-	Protocol       string               `yaml:"protocol"` // http, https, grpc, kafka
+	Protocol       string               `yaml:"protocol"` // http, https, kafka
 	Host           string               `yaml:"host"`
 	Port           int                  `yaml:"port,omitempty"`
 	BasePath       string               `yaml:"basePath,omitempty"`
@@ -312,7 +314,7 @@ func (c *Config) Validate() error {
 		}
 
 		if t.Protocol != "" && !validProtocols[t.Protocol] {
-			errs = append(errs, fmt.Errorf("%s: protocol %q is not valid (must be one of: http, https, grpc, kafka)", prefix, t.Protocol))
+			errs = append(errs, fmt.Errorf("%s: protocol %q is not valid (must be one of: http, https, kafka)", prefix, t.Protocol))
 		}
 
 		// Kafka-specific validation

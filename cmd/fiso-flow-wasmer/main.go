@@ -25,6 +25,7 @@ import (
 	"github.com/lsm/fiso/internal/interceptor/wasm"
 	"github.com/lsm/fiso/internal/observability"
 	"github.com/lsm/fiso/internal/pipeline"
+	grpcsink "github.com/lsm/fiso/internal/sink/grpc"
 	httpsink "github.com/lsm/fiso/internal/sink/http"
 	kafkasink "github.com/lsm/fiso/internal/sink/kafka"
 	temporalsink "github.com/lsm/fiso/internal/sink/temporal"
@@ -443,6 +444,44 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 		}
 		kSink.SetTracer(tracer)
 		sk = kSink
+
+	case "grpc":
+		address, ok := flowDef.Sink.Config["address"].(string)
+		if !ok || address == "" {
+			return nil, fmt.Errorf("sink config: address is required for grpc sink")
+		}
+		grpcCfg := grpcsink.Config{Address: address}
+		if timeoutRaw, present := flowDef.Sink.Config["timeout"]; present {
+			timeoutStr, isStr := timeoutRaw.(string)
+			if !isStr {
+				return nil, fmt.Errorf("sink config: timeout must be a duration string")
+			}
+			timeout, err := time.ParseDuration(timeoutStr)
+			if err != nil {
+				return nil, fmt.Errorf("sink config: timeout %q is not a valid duration", timeoutStr)
+			}
+			if timeout < 0 {
+				return nil, fmt.Errorf("sink config: timeout %q must not be negative", timeoutStr)
+			}
+			if timeout == 0 {
+				return nil, fmt.Errorf("sink config: timeout %q must be positive", timeoutStr)
+			}
+			grpcCfg.Timeout = timeout
+		}
+		// The gRPC sink has no credentials configuration yet, so TLS cannot be
+		// enabled; reject every value except an explicit false — including null,
+		// which would otherwise silently select plaintext.
+		if tlsRaw, present := flowDef.Sink.Config["tls"]; present {
+			if enabled, isBool := tlsRaw.(bool); !isBool || enabled {
+				return nil, fmt.Errorf("sink config: tls is not supported until gRPC TLS credentials are configurable")
+			}
+		}
+		gSink, err := grpcsink.NewSink(grpcCfg)
+		if err != nil {
+			return nil, fmt.Errorf("grpc sink: %w", err)
+		}
+		gSink.SetTracer(tracer)
+		sk = gSink
 
 	default:
 		return nil, fmt.Errorf("unsupported sink type: %s", flowDef.Sink.Type)

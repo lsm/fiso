@@ -173,6 +173,97 @@ func TestFlowReconciler_GRPCSourceTemporalSink(t *testing.T) {
 	}
 }
 
+func TestFlowReconciler_GRPCSinkMissingAddress(t *testing.T) {
+	mc := newMockClient()
+	mc.flows["default/grpc-noaddr"] = &v1alpha1.FlowDefinition{
+		ObjectMeta: v1alpha1.ObjectMeta{Name: "grpc-noaddr", Namespace: "default"},
+		Spec: v1alpha1.FlowDefinitionSpec{
+			Source: v1alpha1.SourceSpec{Type: "grpc"},
+			Sink:   v1alpha1.SinkSpec{Type: "grpc"},
+		},
+	}
+
+	r := NewFlowReconciler(mc, nil)
+	err := r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "grpc-noaddr"})
+	if err != nil {
+		t.Fatalf("expected nil (validation errors not requeued), got %v", err)
+	}
+	if mc.lastFlowStatus.Phase != "Error" {
+		t.Errorf("expected phase 'Error', got %q", mc.lastFlowStatus.Phase)
+	}
+	if !strings.Contains(mc.lastFlowStatus.Message, "address is required for grpc sink") {
+		t.Errorf("expected grpc address requirement, got %q", mc.lastFlowStatus.Message)
+	}
+}
+
+func TestFlowReconciler_GRPCSinkInvalidSettings(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  map[string]string
+		wantErr string
+	}{
+		{
+			name:    "invalid timeout",
+			config:  map[string]string{"address": "grpc.example.com:50051", "timeout": "not-a-duration"},
+			wantErr: `sink config: timeout "not-a-duration" is not a valid duration`,
+		},
+		{
+			name:    "negative timeout",
+			config:  map[string]string{"address": "grpc.example.com:50051", "timeout": "-1s"},
+			wantErr: `sink config: timeout "-1s" must not be negative`,
+		},
+		{
+			name:    "tls enabled",
+			config:  map[string]string{"address": "grpc.example.com:50051", "tls": "true"},
+			wantErr: "sink config: tls is not supported until gRPC TLS credentials are configurable",
+		},
+		{
+			name:    "empty timeout",
+			config:  map[string]string{"address": "grpc.example.com:50051", "timeout": ""},
+			wantErr: `sink config: timeout "" is not a valid duration`,
+		},
+		{
+			name:    "empty tls",
+			config:  map[string]string{"address": "grpc.example.com:50051", "tls": ""},
+			wantErr: "sink config: tls is not supported until gRPC TLS credentials are configurable",
+		},
+		{
+			name:   "valid settings",
+			config: map[string]string{"address": "grpc.example.com:50051", "timeout": "5s", "tls": "false"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mc := newMockClient()
+			mc.flows["default/grpc-sink"] = &v1alpha1.FlowDefinition{
+				ObjectMeta: v1alpha1.ObjectMeta{Name: "grpc-sink", Namespace: "default"},
+				Spec: v1alpha1.FlowDefinitionSpec{
+					Source: v1alpha1.SourceSpec{Type: "grpc"},
+					Sink:   v1alpha1.SinkSpec{Type: "grpc", Config: tt.config},
+				},
+			}
+
+			r := NewFlowReconciler(mc, nil)
+			if err := r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "grpc-sink"}); err != nil {
+				t.Fatalf("expected nil (validation errors not requeued), got %v", err)
+			}
+			if tt.wantErr == "" {
+				if mc.lastFlowStatus.Phase != "Ready" {
+					t.Fatalf("expected phase 'Ready', got %q (%s)", mc.lastFlowStatus.Phase, mc.lastFlowStatus.Message)
+				}
+				return
+			}
+			if mc.lastFlowStatus.Phase != "Error" {
+				t.Fatalf("expected phase 'Error', got %q", mc.lastFlowStatus.Phase)
+			}
+			if !strings.Contains(mc.lastFlowStatus.Message, tt.wantErr) {
+				t.Fatalf("expected error to contain %q, got %q", tt.wantErr, mc.lastFlowStatus.Message)
+			}
+		})
+	}
+}
+
 func TestLinkReconciler_ValidTarget(t *testing.T) {
 	mc := newMockClient()
 	mc.links["default/crm"] = &v1alpha1.LinkTarget{
@@ -351,7 +442,7 @@ func TestLinkReconciler_ValidationUpdateError(t *testing.T) {
 	}
 }
 
-func TestLinkReconciler_GRPCProtocol(t *testing.T) {
+func TestLinkReconciler_GRPCProtocolRejected(t *testing.T) {
 	mc := newMockClient()
 	mc.links["default/grpc-svc"] = &v1alpha1.LinkTarget{
 		ObjectMeta: v1alpha1.ObjectMeta{Name: "grpc-svc", Namespace: "default"},
@@ -364,9 +455,12 @@ func TestLinkReconciler_GRPCProtocol(t *testing.T) {
 	r := NewLinkReconciler(mc, nil)
 	err := r.Reconcile(context.Background(), ReconcileRequest{Namespace: "default", Name: "grpc-svc"})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("expected nil (validation errors not requeued), got %v", err)
 	}
-	if mc.lastLinkStatus.Phase != "Ready" {
-		t.Errorf("expected phase 'Ready', got %q", mc.lastLinkStatus.Phase)
+	if mc.lastLinkStatus.Phase != "Error" {
+		t.Errorf("expected phase 'Error', got %q", mc.lastLinkStatus.Phase)
+	}
+	if !strings.Contains(mc.lastLinkStatus.Message, "unsupported protocol: grpc") {
+		t.Errorf("expected unsupported protocol message, got %q", mc.lastLinkStatus.Message)
 	}
 }

@@ -1236,10 +1236,12 @@ func TestLoad_YMLExtension(t *testing.T) {
 name: yml-flow
 source:
   type: grpc
-  config: {}
+  config:
+    listenAddr: :4500
 sink:
   type: grpc
-  config: {}
+  config:
+    address: localhost:9000
 `)
 
 	loader := NewLoader(dir, nil)
@@ -1354,6 +1356,106 @@ func TestFlowDefinition_ValidateGRPCSink(t *testing.T) {
 	}
 	if err := flow.Validate(); err != nil {
 		t.Errorf("unexpected error for valid grpc sink: %v", err)
+	}
+}
+
+func TestFlowDefinition_ValidateGRPCSinkConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  map[string]interface{}
+		wantErr string
+	}{
+		{
+			name:    "missing address",
+			config:  map[string]interface{}{},
+			wantErr: "sink.config.address is required for grpc sink",
+		},
+		{
+			name:    "nil config",
+			config:  nil,
+			wantErr: "sink.config.address is required for grpc sink",
+		},
+		{
+			name:    "non-string address",
+			config:  map[string]interface{}{"address": 9000},
+			wantErr: "sink.config.address is required for grpc sink",
+		},
+		{
+			name:    "invalid timeout duration",
+			config:  map[string]interface{}{"address": "localhost:9000", "timeout": "not-a-duration"},
+			wantErr: `sink.config.timeout "not-a-duration" is not a valid duration`,
+		},
+		{
+			name:   "valid timeout",
+			config: map[string]interface{}{"address": "localhost:9000", "timeout": "5s"},
+		},
+		{
+			name:    "non-string timeout",
+			config:  map[string]interface{}{"address": "localhost:9000", "timeout": 30},
+			wantErr: "sink.config.timeout must be a duration string",
+		},
+		{
+			name:    "negative timeout",
+			config:  map[string]interface{}{"address": "localhost:9000", "timeout": "-1s"},
+			wantErr: `sink.config.timeout "-1s" must not be negative`,
+		},
+		{
+			name:    "zero timeout",
+			config:  map[string]interface{}{"address": "localhost:9000", "timeout": "0s"},
+			wantErr: `sink.config.timeout "0s" must be positive`,
+		},
+		{
+			name:    "null timeout",
+			config:  map[string]interface{}{"address": "localhost:9000", "timeout": nil},
+			wantErr: "sink.config.timeout must be a duration string",
+		},
+		{
+			name:    "empty timeout",
+			config:  map[string]interface{}{"address": "localhost:9000", "timeout": ""},
+			wantErr: `sink.config.timeout "" is not a valid duration`,
+		},
+		{
+			name:    "tls enabled",
+			config:  map[string]interface{}{"address": "localhost:9000", "tls": true},
+			wantErr: "sink.config.tls is not supported until gRPC TLS credentials are configurable",
+		},
+		{
+			name:    "tls string value",
+			config:  map[string]interface{}{"address": "localhost:9000", "tls": "true"},
+			wantErr: "sink.config.tls is not supported until gRPC TLS credentials are configurable",
+		},
+		{
+			name:   "tls disabled",
+			config: map[string]interface{}{"address": "localhost:9000", "tls": false},
+		},
+		{
+			name:    "null tls",
+			config:  map[string]interface{}{"address": "localhost:9000", "tls": nil},
+			wantErr: "sink.config.tls is not supported until gRPC TLS credentials are configurable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := FlowDefinition{
+				Name:   "grpc-sink",
+				Source: SourceConfig{Type: "kafka"},
+				Sink:   SinkConfig{Type: "grpc", Config: tt.config},
+			}
+			err := flow.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error to contain %q, got %v", tt.wantErr, err)
+			}
+		})
 	}
 }
 

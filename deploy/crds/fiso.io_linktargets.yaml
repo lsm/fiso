@@ -48,7 +48,6 @@ spec:
                   enum:
                     - http
                     - https
-                    - grpc
                 host:
                   type: string
                 auth:

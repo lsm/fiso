@@ -10,6 +10,26 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Executable Flow gRPC sink** — all Flow-capable binaries (`fiso-flow`,
+  `fiso-flow-wasmer`, `fiso-wasmer-aio`) now construct `sink.type: grpc` with
+  the shipped raw-unary gRPC sink (`config.address` required; optional
+  non-negative `config.timeout` duration), matching what validation already
+  accepted. Flow and operator validation now reject grpc sinks without a usable
+  `address`, with a non-string, negative, or zero `timeout` (the sink treats
+  zero as its default), or with any `tls` setting other than an explicit false —
+  TLS is rejected until the sink supports credentials, instead of silently
+  downgrading to an insecure connection.
+
+### Removed
+
+- **Advertised-but-unexecutable Link gRPC** — Link `protocol: grpc` never had a
+  transport; the shared proxy treats non-Kafka protocols as HTTP URL schemes.
+  Local validation, operator validation, and the LinkTarget CRD now reject it.
+  Reintroduction requires a Link gRPC routing contract with executable evidence
+  (ADR 0003).
+
 ### Fixed
 
 - **Fail-closed Kubernetes export** — `fiso export` now rejects local Flow or

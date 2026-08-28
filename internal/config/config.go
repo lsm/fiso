@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/lsm/fiso/internal/delivery"
@@ -62,6 +63,39 @@ func (f *FlowDefinition) Validate() error {
 				if _, ok := f.Sink.Config["signalName"].(string); !ok {
 					errs = append(errs, fmt.Errorf("sink.config.signalName is required when mode is 'signal'"))
 				}
+			}
+		}
+	}
+
+	// gRPC sink validation: the wired sink constructs from address (+ optional
+	// timeout duration), so require exactly those settings to be usable.
+	if f.Sink.Type == "grpc" {
+		address, ok := f.Sink.Config["address"].(string)
+		if !ok || address == "" {
+			errs = append(errs, fmt.Errorf("sink.config.address is required for grpc sink"))
+		}
+		// A present timeout must be a positive duration string; null and empty
+		// values do not fall back to the default silently.
+		if timeout, present := f.Sink.Config["timeout"]; present {
+			timeoutStr, isStr := timeout.(string)
+			if !isStr {
+				errs = append(errs, fmt.Errorf("sink.config.timeout must be a duration string"))
+			} else if d, err := time.ParseDuration(timeoutStr); err != nil {
+				errs = append(errs, fmt.Errorf("sink.config.timeout %q is not a valid duration", timeoutStr))
+			} else if d < 0 {
+				errs = append(errs, fmt.Errorf("sink.config.timeout %q must not be negative", timeoutStr))
+			} else if d == 0 {
+				// The sink treats a zero timeout as unset (30s default), so an
+				// explicit zero would not be honored.
+				errs = append(errs, fmt.Errorf("sink.config.timeout %q must be positive", timeoutStr))
+			}
+		}
+		// The gRPC sink has no credentials configuration yet, so TLS cannot be
+		// enabled; reject every value except an explicit false — including null,
+		// which would otherwise silently select plaintext.
+		if tlsVal, present := f.Sink.Config["tls"]; present {
+			if enabled, isBool := tlsVal.(bool); !isBool || enabled {
+				errs = append(errs, fmt.Errorf("sink.config.tls is not supported until gRPC TLS credentials are configurable"))
 			}
 		}
 	}
