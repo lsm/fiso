@@ -6,41 +6,85 @@ package contracts
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
 
-// authoritativeDocs lists current-authoritative documents (docs/README.md
-// authority table) that may not overclaim Flow configuration reload. The
-// historical HLD is deliberately excluded: it is explicitly non-authoritative
-// and editing it is out of scope.
-var authoritativeDocs = []string{
-	"../../README.md",
-	"../../docs/wasm-deployment.md",
+// historicalDocs are explicitly non-authoritative (docs/README.md lists them
+// under Historical Documents); editing them is out of scope for current
+// contracts.
+var historicalDocs = map[string]bool{
+	"hld-specification.md": true,
 }
 
-var hotReloadPhrase = regexp.MustCompile(`(?i)hot-?\s?reload`)
+// nonFisoMentions lists wording that mentions reload but refers to something
+// other than Fiso's own behavior (the user's host service during fiso dev).
+// Each entry must stay narrowly scoped to its sentence.
+var nonFisoMentions = []string{
+	"your service runs on the host for fast iteration with live reload",
+}
 
-// TestAuthoritativeDocsDoNotClaimHotReload rejects the "hot reload" claim in
-// current authoritative documentation. The Loader watches the config
-// directory and reparses changed files into its in-memory definitions, but no
-// Flow-capable binary registers an OnChange callback or rebuilds, replaces,
-// or stops running pipelines. Until live reload ships with its own contract,
-// the phrase must stay out of authoritative docs.
-func TestAuthoritativeDocsDoNotClaimHotReload(t *testing.T) {
-	for _, path := range authoritativeDocs {
+// reloadPhrase matches hot-reload and live-reload wording in either word
+// order split across a hyphen or space.
+var reloadPhrase = regexp.MustCompile(`(?i)(hot|live)[-?\s]?reload`)
+
+// authoritativeDocPaths returns the README and every current guide under
+// docs/, excluding explicitly historical documents.
+func authoritativeDocPaths(t *testing.T) []string {
+	t.Helper()
+	paths := []string{"../../README.md"}
+	entries, err := os.ReadDir("../../docs")
+	if err != nil {
+		t.Fatalf("read docs dir: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") || historicalDocs[e.Name()] {
+			continue
+		}
+		paths = append(paths, filepath.Join("../../docs", e.Name()))
+	}
+	sort.Strings(paths[1:])
+	return paths
+}
+
+// TestAuthoritativeDocsDoNotClaimConfigReload rejects hot-reload and
+// live-reload claims about Fiso configuration in current authoritative
+// documentation. The Loader watches the config directory and reparses changed
+// files into its in-memory definitions, but no Flow-capable binary registers
+// an OnChange callback or rebuilds, replaces, or stops running pipelines.
+// Until live reload ships with its own contract, such claims must stay out of
+// authoritative docs.
+func TestAuthoritativeDocsDoNotClaimConfigReload(t *testing.T) {
+	for _, path := range authoritativeDocPaths(t) {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
 		for i, line := range strings.Split(string(data), "\n") {
-			if loc := hotReloadPhrase.FindStringIndex(line); loc != nil {
-				t.Errorf("%s:%d: authoritative doc claims hot reload (%q) — running pipelines are not rebuilt; restart is required to apply config changes",
+			if mentionsNonFisoReload(line) {
+				continue
+			}
+			if loc := reloadPhrase.FindStringIndex(line); loc != nil {
+				t.Errorf("%s:%d: authoritative doc claims config reload (%q) — running pipelines are not rebuilt; restart is required to apply config changes",
 					path, i+1, strings.TrimSpace(line[loc[0]:loc[1]]))
 			}
 		}
 	}
+}
+
+// mentionsNonFisoReload reports whether the line's reload wording refers to
+// something other than Fiso (see nonFisoMentions).
+func mentionsNonFisoReload(line string) bool {
+	lower := strings.ToLower(line)
+	for _, mention := range nonFisoMentions {
+		if strings.Contains(lower, mention) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestReadmeStatesRestartRequirement requires README's Flow configuration
@@ -54,7 +98,7 @@ func TestReadmeStatesRestartRequirement(t *testing.T) {
 	}
 	section := readmeSection(t, string(data), "Flow Definition")
 	if section == "" {
-		t.Fatal("README Flow Definitions section not found")
+		t.Fatal("README Flow Definition section not found")
 	}
 
 	if !strings.Contains(section, "Restart the process") {
@@ -66,14 +110,20 @@ func TestReadmeStatesRestartRequirement(t *testing.T) {
 }
 
 // readmeSection returns the text of the heading section whose title contains
-// the given string. Any heading (## or deeper) ends the section.
+// the given string. Only Markdown headings outside fenced code blocks bound a
+// section — column-zero `#` comments inside YAML or shell examples are not
+// headings.
 func readmeSection(t *testing.T, doc, title string) string {
 	t.Helper()
-	lines := strings.Split(doc, "\n")
 	var out []string
 	in := false
-	for _, line := range lines {
-		if strings.HasPrefix(line, "#") {
+	inFence := false
+	for _, line := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(line, "```") {
+			inFence = !inFence
+			continue
+		}
+		if !inFence && strings.HasPrefix(line, "#") {
 			if in {
 				break
 			}
