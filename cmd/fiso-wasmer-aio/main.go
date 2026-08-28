@@ -213,7 +213,6 @@ func run() error {
 			gate.GoContext(ctx, runner.name, runner.pipeline.Run)
 		}
 	}
-	gate.SetRunning()
 
 	// 3. Start Link
 	var linkServer *http.Server
@@ -318,6 +317,10 @@ func run() error {
 		}
 	}
 
+	// Ready only after every component (Flows and, when configured, Link)
+	// has completed startup — readiness before the Link listener exists
+	// would route Link traffic to nothing.
+	gate.SetRunning()
 	logger.Info("all components started")
 
 	<-ctx.Done()

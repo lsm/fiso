@@ -169,3 +169,18 @@ func TestGate_SetRunningAfterTerminalStaysNotReady(t *testing.T) {
 	gate.SetRunning()
 	mustBe503(t, health, "after SetRunning following a terminal runner")
 }
+
+func TestGate_TimeoutErrorWithLiveContextIsTerminal(t *testing.T) {
+	// A per-delivery timeout inside a pipeline (e.g. an HTTP sink client
+	// timeout under a strict commit policy) propagates as
+	// context.DeadlineExceeded while the process context is still alive.
+	// That is a dead required runner, not graceful shutdown.
+	health := observability.NewHealthServer()
+	gate := NewGate(health)
+	settled := gate.Go("timed-out-flow", func(context.Context) error {
+		return context.DeadlineExceeded
+	})
+	gate.SetRunning()
+	<-settled
+	mustBe503(t, health, "after DeadlineExceeded with live context")
+}

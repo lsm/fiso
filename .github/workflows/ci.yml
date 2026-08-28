@@ -269,6 +269,12 @@ jobs:
         env:
           E2E_BUILD_FLAG: " "
 
+      - name: Run multi-flow readiness E2E tests
+        working-directory: test/e2e/multi-flow
+        run: bash test.sh
+        env:
+          E2E_BUILD_FLAG: " "
+
   e2e-kafka:
     runs-on: ubuntu-latest
     needs: [build]

@@ -47,7 +47,11 @@ func (g *Gate) GoContext(ctx context.Context, name string, run func(ctx context.
 		defer close(settled)
 		slog.Info("flow started", "name", name)
 		err := run(ctx)
-		if isExpectedCancellation(err) {
+		// A cancellation error is expected shutdown only when the runner's
+		// own context has ended. With a live context, a cancellation error
+		// (e.g. a per-delivery timeout propagated by a strict commit policy)
+		// means the runner died of an internal deadline — terminal.
+		if isExpectedCancellation(err) && ctx.Err() != nil {
 			slog.Info("flow stopped (shutdown)", "name", name)
 			return
 		}
