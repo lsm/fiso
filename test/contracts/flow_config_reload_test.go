@@ -13,16 +13,10 @@ import (
 	"testing"
 )
 
-// historicalDocs are explicitly non-authoritative (docs/README.md lists them
-// under Historical Documents); editing them is out of scope for current
-// contracts.
-var historicalDocs = map[string]bool{
-	"hld-specification.md": true,
-}
-
 // nonFisoMentions lists wording that mentions reload but refers to something
 // other than Fiso's own behavior (the user's host service during fiso dev).
-// Each entry must stay narrowly scoped to its sentence.
+// Only the phrase itself is masked before matching, so a Fiso claim sharing
+// the same line is still caught.
 var nonFisoMentions = []string{
 	"your service runs on the host for fast iteration with live reload",
 }
@@ -31,23 +25,36 @@ var nonFisoMentions = []string{
 // order split across a hyphen or space.
 var reloadPhrase = regexp.MustCompile(`(?i)(hot|live)[-?\s]?reload`)
 
-// authoritativeDocPaths returns the README and every current guide under
-// docs/, excluding explicitly historical documents.
+var mentionRegex = func() *regexp.Regexp {
+	parts := make([]string, len(nonFisoMentions))
+	for i, m := range nonFisoMentions {
+		parts[i] = regexp.QuoteMeta(m)
+	}
+	return regexp.MustCompile(`(?i)` + strings.Join(parts, "|"))
+}()
+
+// authoritativeDocPaths returns the README and exactly the guides the
+// documentation index (docs/README.md "Current Guides") classifies as current.
+// Directional documents (product vision, roadmap) may legitimately name
+// reload as proposed work, so they are not scanned; the contract governs
+// current-behavior claims only.
 func authoritativeDocPaths(t *testing.T) []string {
 	t.Helper()
-	paths := []string{"../../README.md"}
-	entries, err := os.ReadDir("../../docs")
+	index, err := os.ReadFile("../../docs/README.md")
 	if err != nil {
-		t.Fatalf("read docs dir: %v", err)
+		t.Fatalf("read docs index: %v", err)
 	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") || historicalDocs[e.Name()] {
-			continue
-		}
-		paths = append(paths, filepath.Join("../../docs", e.Name()))
+	section := headingSection(string(index), "Current Guides")
+	link := regexp.MustCompile(`\]\(([^)]+\.md)\)`)
+	var guides []string
+	for _, m := range link.FindAllStringSubmatch(section, -1) {
+		guides = append(guides, filepath.Join("../../docs", m[1]))
 	}
-	sort.Strings(paths[1:])
-	return paths
+	if len(guides) == 0 {
+		t.Fatal("docs index lists no current guides — update the contract if the index moved")
+	}
+	sort.Strings(guides)
+	return append([]string{"../../README.md"}, guides...)
 }
 
 // TestAuthoritativeDocsDoNotClaimConfigReload rejects hot-reload and
@@ -63,28 +70,47 @@ func TestAuthoritativeDocsDoNotClaimConfigReload(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		for i, line := range strings.Split(string(data), "\n") {
-			if mentionsNonFisoReload(line) {
-				continue
-			}
-			if loc := reloadPhrase.FindStringIndex(line); loc != nil {
-				t.Errorf("%s:%d: authoritative doc claims config reload (%q) — running pipelines are not rebuilt; restart is required to apply config changes",
-					path, i+1, strings.TrimSpace(line[loc[0]:loc[1]]))
-			}
+		for _, loc := range findReloadClaims(string(data)) {
+			t.Errorf("%s:%d: authoritative doc claims config reload (%q) — running pipelines are not rebuilt; restart is required to apply config changes",
+				path, loc.line, loc.match)
 		}
 	}
 }
 
-// mentionsNonFisoReload reports whether the line's reload wording refers to
-// something other than Fiso (see nonFisoMentions).
-func mentionsNonFisoReload(line string) bool {
-	lower := strings.ToLower(line)
-	for _, mention := range nonFisoMentions {
-		if strings.Contains(lower, mention) {
-			return true
-		}
+// claimLoc reports a matched reload claim and the source line it starts on.
+type claimLoc struct {
+	line  int
+	match string
+}
+
+// findReloadClaims masks the known non-Fiso mentions, then matches reload
+// claims against newline-normalized text so a claim wrapped across Markdown
+// lines is still caught; the original line number is reported.
+func findReloadClaims(doc string) []claimLoc {
+	type lineSpan struct {
+		start int // offset in normalized text
+		line  int
 	}
-	return false
+	var spans []lineSpan
+	var norm strings.Builder
+	for i, line := range strings.Split(doc, "\n") {
+		spans = append(spans, lineSpan{start: norm.Len(), line: i + 1})
+		masked := mentionRegex.ReplaceAllString(line, strings.Repeat(" ", 40))
+		norm.WriteString(masked)
+		norm.WriteString(" ")
+	}
+	var claims []claimLoc
+	text := norm.String()
+	for _, m := range reloadPhrase.FindAllStringIndex(text, -1) {
+		line := 1
+		for _, s := range spans {
+			if s.start <= m[0] {
+				line = s.line
+			}
+		}
+		claims = append(claims, claimLoc{line: line, match: strings.TrimSpace(text[m[0]:m[1]])})
+	}
+	return claims
 }
 
 // TestReadmeStatesRestartRequirement requires README's Flow configuration
@@ -110,20 +136,58 @@ func TestReadmeStatesRestartRequirement(t *testing.T) {
 }
 
 // readmeSection returns the text of the heading section whose title contains
-// the given string. Only Markdown headings outside fenced code blocks bound a
-// section — column-zero `#` comments inside YAML or shell examples are not
-// headings.
+// the given string, including nested child subsections: the section ends only
+// at a heading of the same or higher level. Only Markdown headings outside
+// fenced code blocks bound a section — column-zero `#` comments inside YAML
+// or shell examples are not headings.
 func readmeSection(t *testing.T, doc, title string) string {
 	t.Helper()
+	lines := strings.Split(doc, "\n")
 	var out []string
 	in := false
 	inFence := false
-	for _, line := range strings.Split(doc, "\n") {
+	level := 0
+	for _, line := range lines {
 		if strings.HasPrefix(line, "```") {
 			inFence = !inFence
 			continue
 		}
 		if !inFence && strings.HasPrefix(line, "#") {
+			lvl := headingLevel(line)
+			if in {
+				if lvl <= level {
+					break
+				}
+			} else if strings.Contains(line, title) {
+				in = true
+				level = lvl
+			}
+			continue
+		}
+		if in {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// headingLevel counts the leading '#' of a Markdown heading.
+func headingLevel(line string) int {
+	n := 0
+	for n < len(line) && line[n] == '#' {
+		n++
+	}
+	return n
+}
+
+// headingSection extracts a "## " section from the docs index (headings of
+// the same level end it).
+func headingSection(doc, title string) string {
+	lines := strings.Split(doc, "\n")
+	var out []string
+	in := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## ") {
 			if in {
 				break
 			}
