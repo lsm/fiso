@@ -12,6 +12,15 @@ unreleased work and will be versioned when a release tag is cut.
 
 ### Changed
 
+- **Corrected the Flow configuration reload contract** — authoritative
+  documentation no longer claims Flow configuration "hot-reloads on changes".
+  File watching detects and reparses changed files into the Loader's in-memory
+  definitions only; running pipelines are not rebuilt, replaced, or stopped.
+  Restart the process to apply configuration changes. A documentation-contract
+  test under `test/contracts` now rejects hot-reload claims in authoritative
+  docs and requires the restart limitation to stay explicit. Live reload
+  remains future work with its own contract.
+
 - **Readiness follows required pipeline lifecycle** — all Flow-capable binaries
   (`fiso-flow`, `fiso-flow-wasmer`, `fiso-wasmer-aio`) now drop `/readyz` to 503
   as soon as any configured startup pipeline terminates (an error other than
