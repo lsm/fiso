@@ -21,10 +21,12 @@ var nonFisoMentions = []string{
 	"your service runs on the host for fast iteration with live reload",
 }
 
-// reloadPhrase matches hot-reload and live-reload wording (hyphenated,
-// spaced, or wrapped), unqualified reload-on-change claims, and automatic
-// reload claims — all promise the same unsupported runtime behavior.
-var reloadPhrase = regexp.MustCompile(`(?i)((hot|live)[-?\s]?reload|reloads?[^.]{0,60}?on changes|automatic(ally)?[-?\s]?reload)`)
+// reloadPhrase matches hot-, live-, auto-, and automatic-reload wording
+// (hyphenated, spaced, or wrapped) and unqualified reload-on-change claims —
+// all promise the same unsupported runtime behavior. Negated statements
+// ("does not reload") are a conscious limitation: none exist in authoritative
+// docs today, and the guard errs toward flagging.
+var reloadPhrase = regexp.MustCompile(`(?i)((hot|live|auto|automatic(ally)?)[-?\s]?reloads?|reloads?[^.]{0,60}?on changes)`)
 
 var mentionRegex = func() *regexp.Regexp {
 	parts := make([]string, len(nonFisoMentions))
@@ -46,7 +48,7 @@ func authoritativeDocPaths(t *testing.T) []string {
 		t.Fatalf("read docs index: %v", err)
 	}
 	section := headingSection(string(index), "Current Guides")
-	link := regexp.MustCompile(`\]\(([^)]+)\)`)
+	link := regexp.MustCompile(`\]\(([^)\s]+)(?:\s+"[^"]*")?\)`)
 	var guides []string
 	for _, m := range link.FindAllStringSubmatch(section, -1) {
 		target := m[1]
@@ -138,11 +140,15 @@ func TestReadmeStatesRestartRequirement(t *testing.T) {
 		t.Fatal("README Flow Definition section not found")
 	}
 
-	if !strings.Contains(section, "Restart the process") {
-		t.Error("README Flow section must state that a process restart is required to apply configuration changes")
-	}
-	if !strings.Contains(section, "not rebuilt") {
+	// Both assertions pin the connected contract, not scattergun substrings:
+	// the restart must be tied to applying configuration changes, and the
+	// no-rebuild statement must be about running pipelines. Unrelated
+	// sentences elsewhere in the section must not satisfy either check.
+	if !strings.Contains(section, "running pipelines are not rebuilt") {
 		t.Error("README Flow section must state that running pipelines are not rebuilt on config changes")
+	}
+	if !strings.Contains(strings.ToLower(section), "restart the process to apply configuration changes") {
+		t.Error("README Flow section must tie a process restart to applying configuration changes")
 	}
 }
 
