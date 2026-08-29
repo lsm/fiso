@@ -10,6 +10,23 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Kafka targets honor retry configuration and request cancellation** — the
+  Fiso-Link Kafka publish path now retries through the shared retry engine.
+  Previously the between-attempts backoff wait never executed (the per-attempt
+  context was cancelled before the wait, so retries ran back-to-back),
+  `initialInterval`/`maxInterval`/`jitter` were ignored (only `maxAttempts`
+  was read), and cancelling the request did not stop the remaining attempts.
+  Retries now follow the documented exponential schedule with jitter, wait on
+  the request context so cancellation aborts the sequence promptly, and keep
+  a fresh 30-second publish timeout per attempt; `maxAttempts` remains total
+  attempts. Operators should expect previously instant retries to actually
+  pause between attempts (bounded by `maxAttempts × maxInterval`).
+  Documentation now states that only exponential backoff is implemented — the
+  `backoff` field is accepted but has no runtime effect — and the Kafka
+  optional-fields table documents the `retry.*` settings and their defaults.
+
 ### Changed
 
 - **Corrected the Flow configuration reload contract** — authoritative

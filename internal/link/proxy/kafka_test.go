@@ -21,6 +21,7 @@ import (
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link/ratelimit"
+	"github.com/lsm/fiso/internal/link/retry"
 )
 
 // mockPublisher is a mock dlq.Publisher for testing.
@@ -1024,10 +1025,11 @@ func TestKafkaHandler_CancellationStopsRetries(t *testing.T) {
 }
 
 // TestKafkaHandler_RetryHonorsInitialInterval pins that configured retry
-// timing is forwarded to the publish loop: with InitialInterval 40ms (no
-// jitter), the gap between the first two attempts must be at least 40ms.
-// Sleeps only overshoot, so the lower bound is deterministic in the safe
-// direction. Today the backoff wait never fires and the gap is microseconds.
+// timing is forwarded to the publish loop: with InitialInterval 40ms, the gap
+// between the first two attempts must be at least the jitter-safe minimum
+// 32ms (40ms x 0.8 default jitter). Sleeps only overshoot, so the lower bound
+// is deterministic in the safe direction. Today the backoff wait never fires
+// and the gap is microseconds.
 func TestKafkaHandler_RetryHonorsInitialInterval(t *testing.T) {
 	target := link.LinkTarget{
 		Name:     "interval-test",
@@ -1050,15 +1052,16 @@ func TestKafkaHandler_RetryHonorsInitialInterval(t *testing.T) {
 	if got := attempts.Load(); got != 3 {
 		t.Fatalf("expected 3 attempts, got %d", got)
 	}
-	if gap := (*times)[1].Sub((*times)[0]); gap < 40*time.Millisecond {
-		t.Errorf("configured initialInterval not honored: gap between attempts 1 and 2 was %v, want >= 40ms", gap)
+	if gap := (*times)[1].Sub((*times)[0]); gap < 32*time.Millisecond {
+		t.Errorf("configured initialInterval not honored: gap between attempts 1 and 2 was %v, want >= 32ms", gap)
 	}
 }
 
 // TestKafkaHandler_BackoffGrowsExponentially pins exponential growth by lower
-// bounds: with InitialInterval 25ms and no jitter, attempt gaps must be at
-// least 25ms and then 50ms. Today both gaps are ~0 because the wait is dead
-// code.
+// bounds: with InitialInterval 25ms, attempt gaps grow 25ms then 50ms. The
+// adapter keeps the engine's default 20% jitter when Jitter is unset (and
+// cannot zero it), so the bounds use the jitter-safe minimums 20ms and 40ms
+// (schedule x 0.8). Today both gaps are ~0 because the wait is dead code.
 func TestKafkaHandler_BackoffGrowsExponentially(t *testing.T) {
 	target := link.LinkTarget{
 		Name:     "growth-test",
@@ -1081,10 +1084,40 @@ func TestKafkaHandler_BackoffGrowsExponentially(t *testing.T) {
 	if got := attempts.Load(); got != 3 {
 		t.Fatalf("expected 3 attempts, got %d", got)
 	}
-	if gap1 := (*times)[1].Sub((*times)[0]); gap1 < 25*time.Millisecond {
-		t.Errorf("first backoff was %v, want >= 25ms", gap1)
+	if gap1 := (*times)[1].Sub((*times)[0]); gap1 < 20*time.Millisecond {
+		t.Errorf("first backoff was %v, want >= 20ms", gap1)
 	}
-	if gap2 := (*times)[2].Sub((*times)[1]); gap2 < 50*time.Millisecond {
-		t.Errorf("second backoff was %v, want >= 50ms (exponential growth)", gap2)
+	if gap2 := (*times)[2].Sub((*times)[1]); gap2 < 40*time.Millisecond {
+		t.Errorf("second backoff was %v, want >= 40ms (exponential growth)", gap2)
+	}
+}
+
+// TestBuildRetryConfig_ForwardsAllFields pins the shared target-to-retry
+// conversion used by both the HTTP and Kafka paths: every timing field is
+// forwarded, unset fields keep the engine defaults, and the Backoff string is
+// ignored (exponential is the only implemented strategy).
+func TestBuildRetryConfig_ForwardsAllFields(t *testing.T) {
+	custom := buildRetryConfig(&link.LinkTarget{
+		Retry: link.RetryConfig{
+			MaxAttempts:     5,
+			InitialInterval: "7ms",
+			MaxInterval:     "11ms",
+			Jitter:          0.4,
+		},
+	})
+	if custom.MaxAttempts != 5 || custom.InitialInterval != 7*time.Millisecond ||
+		custom.MaxInterval != 11*time.Millisecond || custom.Jitter != 0.4 {
+		t.Errorf("retry config not fully forwarded: %+v", custom)
+	}
+
+	def := buildRetryConfig(&link.LinkTarget{})
+	want := retry.DefaultConfig()
+	if def != want {
+		t.Errorf("zero-value retry config must keep engine defaults: got %+v, want %+v", def, want)
+	}
+
+	ignored := buildRetryConfig(&link.LinkTarget{Retry: link.RetryConfig{Backoff: "constant"}})
+	if ignored != retry.DefaultConfig() {
+		t.Errorf("Backoff string must be ignored (exponential only): %+v", ignored)
 	}
 }
