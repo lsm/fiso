@@ -3,11 +3,14 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -951,5 +954,137 @@ func TestKafkaHandler_GetPublisherError(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "get publisher") {
 		t.Errorf("expected get publisher error message, got: %s", w.Body.String())
+	}
+}
+
+// newKafkaRetryHandler builds a handler with a single failing/succeeding
+// publisher and an atomic attempt counter with per-attempt timestamps.
+func newKafkaRetryHandler(t *testing.T, target link.LinkTarget, publish func(attempt int) error) (*KafkaHandler, *atomic.Int32, *[]time.Time) {
+	t.Helper()
+	var attempts atomic.Int32
+	times := make([]time.Time, 0, 8)
+	var mu sync.Mutex
+	publisher := &mockPublisher{
+		publishFunc: func(ctx context.Context, topic string, key, value []byte, headers map[string]string) error {
+			n := int(attempts.Add(1))
+			mu.Lock()
+			times = append(times, time.Now())
+			mu.Unlock()
+			return publish(n)
+		},
+	}
+	store := link.NewTargetStore([]link.LinkTarget{target})
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	return handler, &attempts, &times
+}
+
+// TestKafkaHandler_CancellationStopsRetries pins that cancelling the request
+// after the first failed publish prevents every later publish. Today the
+// between-attempts wait selects on the already-cancelled per-attempt context
+// and the loop's break exits only the select, so all attempts run regardless.
+func TestKafkaHandler_CancellationStopsRetries(t *testing.T) {
+	target := link.LinkTarget{
+		Name:     "cancel-test",
+		Protocol: "kafka",
+		Kafka:    &link.KafkaConfig{Topic: "cancel-topic"},
+		Retry: link.RetryConfig{
+			MaxAttempts:     5,
+			InitialInterval: "10s",
+			MaxInterval:     "10s",
+		},
+	}
+
+	firstFailure := make(chan struct{}, 1)
+	handler, attempts, _ := newKafkaRetryHandler(t, target, func(attempt int) error {
+		if attempt == 1 {
+			firstFailure <- struct{}{}
+		}
+		return errors.New("broker down")
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	w := httptest.NewRecorder()
+	go func() {
+		handler.ServeHTTP(w, httptest.NewRequest("POST", "/link/cancel-test", bytes.NewReader([]byte(`{}`))).WithContext(ctx))
+		close(done)
+	}()
+
+	<-firstFailure
+	cancel()
+	<-done
+
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("cancelled request must not be retried: expected 1 publish attempt, got %d", got)
+	}
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502 after cancellation, got %d", w.Code)
+	}
+}
+
+// TestKafkaHandler_RetryHonorsInitialInterval pins that configured retry
+// timing is forwarded to the publish loop: with InitialInterval 40ms (no
+// jitter), the gap between the first two attempts must be at least 40ms.
+// Sleeps only overshoot, so the lower bound is deterministic in the safe
+// direction. Today the backoff wait never fires and the gap is microseconds.
+func TestKafkaHandler_RetryHonorsInitialInterval(t *testing.T) {
+	target := link.LinkTarget{
+		Name:     "interval-test",
+		Protocol: "kafka",
+		Kafka:    &link.KafkaConfig{Topic: "interval-topic"},
+		Retry: link.RetryConfig{
+			MaxAttempts:     3,
+			InitialInterval: "40ms",
+			MaxInterval:     "120ms",
+		},
+	}
+
+	handler, attempts, times := newKafkaRetryHandler(t, target, func(int) error {
+		return errors.New("broker down")
+	})
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest("POST", "/link/interval-test", bytes.NewReader([]byte(`{}`))))
+
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts, got %d", got)
+	}
+	if gap := (*times)[1].Sub((*times)[0]); gap < 40*time.Millisecond {
+		t.Errorf("configured initialInterval not honored: gap between attempts 1 and 2 was %v, want >= 40ms", gap)
+	}
+}
+
+// TestKafkaHandler_BackoffGrowsExponentially pins exponential growth by lower
+// bounds: with InitialInterval 25ms and no jitter, attempt gaps must be at
+// least 25ms and then 50ms. Today both gaps are ~0 because the wait is dead
+// code.
+func TestKafkaHandler_BackoffGrowsExponentially(t *testing.T) {
+	target := link.LinkTarget{
+		Name:     "growth-test",
+		Protocol: "kafka",
+		Kafka:    &link.KafkaConfig{Topic: "growth-topic"},
+		Retry: link.RetryConfig{
+			MaxAttempts:     3,
+			InitialInterval: "25ms",
+			MaxInterval:     "1s",
+		},
+	}
+
+	handler, attempts, times := newKafkaRetryHandler(t, target, func(int) error {
+		return errors.New("broker down")
+	})
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest("POST", "/link/growth-test", bytes.NewReader([]byte(`{}`))))
+
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts, got %d", got)
+	}
+	if gap1 := (*times)[1].Sub((*times)[0]); gap1 < 25*time.Millisecond {
+		t.Errorf("first backoff was %v, want >= 25ms", gap1)
+	}
+	if gap2 := (*times)[2].Sub((*times)[1]); gap2 < 50*time.Millisecond {
+		t.Errorf("second backoff was %v, want >= 50ms (exponential growth)", gap2)
 	}
 }
