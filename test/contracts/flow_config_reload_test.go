@@ -21,9 +21,10 @@ var nonFisoMentions = []string{
 	"your service runs on the host for fast iteration with live reload",
 }
 
-// reloadPhrase matches hot-reload and live-reload wording in either word
-// order split across a hyphen or space.
-var reloadPhrase = regexp.MustCompile(`(?i)(hot|live)[-?\s]?reload`)
+// reloadPhrase matches hot-reload and live-reload wording (hyphenated,
+// spaced, or wrapped), unqualified reload-on-change claims, and automatic
+// reload claims — all promise the same unsupported runtime behavior.
+var reloadPhrase = regexp.MustCompile(`(?i)((hot|live)[-?\s]?reload|reloads?[^.]{0,60}?on changes|automatic(ally)?[-?\s]?reload)`)
 
 var mentionRegex = func() *regexp.Regexp {
 	parts := make([]string, len(nonFisoMentions))
@@ -45,10 +46,17 @@ func authoritativeDocPaths(t *testing.T) []string {
 		t.Fatalf("read docs index: %v", err)
 	}
 	section := headingSection(string(index), "Current Guides")
-	link := regexp.MustCompile(`\]\(([^)]+\.md)\)`)
+	link := regexp.MustCompile(`\]\(([^)]+)\)`)
 	var guides []string
 	for _, m := range link.FindAllStringSubmatch(section, -1) {
-		guides = append(guides, filepath.Join("../../docs", m[1]))
+		target := m[1]
+		if i := strings.Index(target, "#"); i >= 0 {
+			target = target[:i] // strip any section fragment
+		}
+		if !strings.HasSuffix(target, ".md") {
+			continue
+		}
+		guides = append(guides, filepath.Join("../../docs", target))
 	}
 	if len(guides) == 0 {
 		t.Fatal("docs index lists no current guides — update the contract if the index moved")
@@ -83,9 +91,11 @@ type claimLoc struct {
 	match string
 }
 
-// findReloadClaims masks the known non-Fiso mentions, then matches reload
-// claims against newline-normalized text so a claim wrapped across Markdown
-// lines is still caught; the original line number is reported.
+// findReloadClaims normalizes the document onto one text stream (so a claim
+// or an allowed mention wrapped across Markdown lines behaves as its single
+// rendered sentence), masks the known non-Fiso mentions with equal-length
+// spaces (preserving offsets for line reporting), and reports each match at
+// its starting source line.
 func findReloadClaims(doc string) []claimLoc {
 	type lineSpan struct {
 		start int // offset in normalized text
@@ -95,12 +105,13 @@ func findReloadClaims(doc string) []claimLoc {
 	var norm strings.Builder
 	for i, line := range strings.Split(doc, "\n") {
 		spans = append(spans, lineSpan{start: norm.Len(), line: i + 1})
-		masked := mentionRegex.ReplaceAllString(line, strings.Repeat(" ", 40))
-		norm.WriteString(masked)
+		norm.WriteString(line)
 		norm.WriteString(" ")
 	}
+	text := mentionRegex.ReplaceAllStringFunc(norm.String(), func(m string) string {
+		return strings.Repeat(" ", len(m))
+	})
 	var claims []claimLoc
-	text := norm.String()
 	for _, m := range reloadPhrase.FindAllStringIndex(text, -1) {
 		line := 1
 		for _, s := range spans {
