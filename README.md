@@ -592,7 +592,7 @@ Reverse proxy sidecar that routes application requests to external services thro
 - **Routing** — Path-based routing via `/link/{target}/{path}` with configurable allowed paths per target.
 - **Authentication** — Automatic credential injection (Bearer, API Key, Basic). Sources: K8s Secrets (file/env), Vault.
 - **Circuit Breaker** — Per-target circuit breaker with configurable failure threshold, success threshold, and reset timeout.
-- **Retry** — Configurable retry with exponential/constant/linear backoff, jitter, and max interval.
+- **Retry** — Configurable retry with exponential backoff, jitter, and max interval (`constant`/`linear` are not implemented; the `backoff` field is accepted but has no runtime effect).
 - **Discovery** — DNS-based target resolution.
 - **Async Mode** — Publish to Kafka for async delivery via configured brokers.
 
@@ -900,6 +900,10 @@ targets:
 | `kafka.key` | KeyStrategy | Message key generation strategy (see below) |
 | `kafka.headers` | map[string]string | Static headers added to all messages |
 | `kafka.requiredAcks` | string | Acknowledgment level: `all` or `1` (default) |
+| `retry.maxAttempts` | int | Total publish attempts per request (default 3) |
+| `retry.initialInterval` | duration | First backoff before a retry (default `200ms`) |
+| `retry.maxInterval` | duration | Base backoff ceiling per wait before jitter (default `30s`; with the default 0.2 jitter a single wait can reach `maxInterval × 1.2`) |
+| `retry.jitter` | float | Fraction jitter applied around each wait after the max cap (default `0.2`; waits fall in `wait × (1 - jitter)` to `wait × (1 + jitter)`) |
 
 **Important:** Kafka targets require a cluster to be defined in `kafka.clusters` at the top level of your `link/config.yaml`. Kafka targets reference clusters by name via the `cluster` field:
 
@@ -1117,7 +1121,7 @@ Kafka targets inherit all Fiso-Link resilience features:
 
 **Retry:**
 - Automatic retries on publish failures
-- Exponential, constant, or linear backoff
+- Exponential backoff with configurable initial/max intervals and jitter (`constant`/`linear` are not implemented; the `backoff` field is accepted but has no runtime effect)
 - Configurable max attempts and intervals
 - Jitter support to prevent thundering herd
 
@@ -1135,7 +1139,7 @@ All Kafka targets emit Prometheus metrics:
 | `fiso_link_requests_total` | Counter | `target`, `method`, `status`, `mode` | Total requests (mode=`kafka`) |
 | `fiso_link_request_duration_seconds` | Histogram | `target`, `method` | Request duration |
 | `fiso_link_circuit_state` | Gauge | `target` | Circuit breaker state (0=closed, 1=half-open, 2=open) |
-| `fiso_link_retries_total` | Counter | `target`, `attempt` | Total retries per target |
+| `fiso_link_retries_total` | Counter | `target`, `attempt` | Total retries per target (reserved: declared but not yet emitted) |
 | `fiso_link_rate_limited_total` | Counter | `target` | Rate limit rejections |
 
 #### Headers
@@ -1384,7 +1388,7 @@ See the [Wasmer Integration Guide](./docs/wasmer-integration.md) for full docume
 | `fiso_link_requests_total` | Counter | `target`, `method`, `status`, `mode` | Total requests proxied |
 | `fiso_link_request_duration_seconds` | Histogram | `target`, `method` | Request duration |
 | `fiso_link_circuit_state` | Gauge | `target` | Circuit breaker state (0=closed, 1=half-open, 2=open) |
-| `fiso_link_retries_total` | Counter | `target`, `attempt` | Total retries per target |
+| `fiso_link_retries_total` | Counter | `target`, `attempt` | Total retries per target (reserved: declared but not yet emitted) |
 | `fiso_link_auth_refresh_total` | Counter | `target`, `status` | Auth credential refreshes |
 
 ### Health Endpoints

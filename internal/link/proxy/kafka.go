@@ -18,6 +18,7 @@ import (
 	"github.com/lsm/fiso/internal/link/circuitbreaker"
 	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/lsm/fiso/internal/link/ratelimit"
+	"github.com/lsm/fiso/internal/link/retry"
 )
 
 // KafkaHandler handles Kafka target publishing.
@@ -223,13 +224,6 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Publish to Kafka with retry
-	var publishErr error
-	maxRetries := 3
-	if target.Retry.MaxAttempts > 0 {
-		maxRetries = target.Retry.MaxAttempts
-	}
-
 	// Get topic
 	topic := "default-topic"
 	if target.Kafka != nil {
@@ -246,44 +240,35 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Use request context with timeout for safety
+	// Publish through the shared retry engine: waits between attempts happen
+	// on the request context (cancellation aborts the sequence), and each
+	// attempt gets a fresh 30-second publish context cancelled before the
+	// wait. MaxAttempts is total attempts, matching the HTTP path.
+	publishErr := retry.Do(r.Context(), buildRetryConfig(target), func() error {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		publishErr = publisher.Publish(ctx, topic, key, body, kafkaHeaders)
-		cancel()
-		if publishErr == nil {
-			// Success
-			if breaker, ok := h.breakers[target.Name]; ok {
-				breaker.RecordSuccess()
-			}
-			if h.metrics != nil {
-				h.metrics.RequestsTotal.WithLabelValues(target.Name, "POST", "200", "kafka").Inc()
-			}
-			// Log successful Kafka publish
-			h.logger.Info("kafka publish completed",
-				"correlation_id", corrID.Value,
-				"target", targetName,
-				"topic", topic,
-				"latency_ms", time.Since(start).Milliseconds(),
-			)
-			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprintf(w, `{"status":"published","topic":"%s"}`, topic)
-			return
+		defer cancel()
+		return publisher.Publish(ctx, topic, key, body, kafkaHeaders)
+	})
+	if publishErr == nil {
+		if breaker, ok := h.breakers[target.Name]; ok {
+			breaker.RecordSuccess()
 		}
-
-		// Retry on error
-		if attempt < maxRetries-1 {
-			backoff := time.Duration(attempt+1) * 100 * time.Millisecond
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				publishErr = ctx.Err()
-				break
-			}
+		if h.metrics != nil {
+			h.metrics.RequestsTotal.WithLabelValues(target.Name, "POST", "200", "kafka").Inc()
 		}
+		// Log successful Kafka publish
+		h.logger.Info("kafka publish completed",
+			"correlation_id", corrID.Value,
+			"target", targetName,
+			"topic", topic,
+			"latency_ms", time.Since(start).Milliseconds(),
+		)
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"status":"published","topic":"%s"}`, topic)
+		return
 	}
 
-	// All retries failed
+	// All retries failed (or the request was cancelled)
 	if breaker, ok := h.breakers[target.Name]; ok {
 		breaker.RecordFailure()
 	}

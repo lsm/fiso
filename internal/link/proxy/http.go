@@ -287,7 +287,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Execute with retry
 	var resp *http.Response
-	retryCfg := h.buildRetryConfig(target)
+	retryCfg := buildRetryConfig(target)
 
 	retryErr := retry.Do(ctx, retryCfg, func() error {
 		req, reqErr := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(requestBody))
@@ -473,7 +473,9 @@ func (h *Handler) isPathAllowed(target *link.LinkTarget, reqPath string) bool {
 	return false
 }
 
-func (h *Handler) buildRetryConfig(target *link.LinkTarget) retry.Config {
+// buildRetryConfig converts target retry settings to the shared retry
+// engine configuration. Package-level so the Kafka path shares it exactly.
+func buildRetryConfig(target *link.LinkTarget) retry.Config {
 	cfg := retry.DefaultConfig()
 	if target.Retry.MaxAttempts > 0 {
 		cfg.MaxAttempts = target.Retry.MaxAttempts
