@@ -10,23 +10,19 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
-### Fixed
+## [0.20.0] — 2026-08-31
 
-- **Kafka targets honor retry configuration and request cancellation** — the
-  Fiso-Link Kafka publish path now retries through the shared retry engine.
-  Previously the between-attempts backoff wait never executed (the per-attempt
-  context was cancelled before the wait, so retries ran back-to-back),
-  `initialInterval`/`maxInterval`/`jitter` were ignored (only `maxAttempts`
-  was read), and cancelling the request did not stop the remaining attempts.
-  Retries now follow the documented exponential schedule with jitter, wait on
-  the request context so cancellation aborts the sequence promptly, and keep
-  a fresh 30-second publish timeout per attempt; `maxAttempts` remains total
-  attempts. Operators should expect previously instant retries to actually
-  pause between attempts (bounded by `maxAttempts × maxInterval × (1 + jitter)`
-— jitter applies after the max cap).
-  Documentation now states that only exponential backoff is implemented — the
-  `backoff` field is accepted but has no runtime effect — and the Kafka
-  optional-fields table documents the `retry.*` settings and their defaults.
+### Added
+
+- **Executable Flow gRPC sink** — all Flow-capable binaries (`fiso-flow`,
+  `fiso-flow-wasmer`, `fiso-wasmer-aio`) now construct `sink.type: grpc` with
+  the shipped raw-unary gRPC sink (`config.address` required; optional
+  non-negative `config.timeout` duration), matching what validation already
+  accepted. Flow and operator validation now reject grpc sinks without a usable
+  `address`, with a non-string, negative, or zero `timeout` (the sink treats
+  zero as its default), or with any `tls` setting other than an explicit false —
+  TLS is rejected until the sink supports credentials, instead of silently
+  downgrading to an insecure connection.
 
 ### Changed
 
@@ -59,18 +55,6 @@ unreleased work and will be versioned when a release tag is cut.
   `phase: Validated` instead. See
   [ADR 0004](docs/adr/0004-report-static-validation-as-validated.md).
 
-### Added
-
-- **Executable Flow gRPC sink** — all Flow-capable binaries (`fiso-flow`,
-  `fiso-flow-wasmer`, `fiso-wasmer-aio`) now construct `sink.type: grpc` with
-  the shipped raw-unary gRPC sink (`config.address` required; optional
-  non-negative `config.timeout` duration), matching what validation already
-  accepted. Flow and operator validation now reject grpc sinks without a usable
-  `address`, with a non-string, negative, or zero `timeout` (the sink treats
-  zero as its default), or with any `tls` setting other than an explicit false —
-  TLS is rejected until the sink supports credentials, instead of silently
-  downgrading to an insecure connection.
-
 ### Removed
 
 - **Advertised-but-unexecutable Link gRPC** — Link `protocol: grpc` never had a
@@ -80,6 +64,22 @@ unreleased work and will be versioned when a release tag is cut.
   (ADR 0003).
 
 ### Fixed
+
+- **Kafka targets honor retry configuration and request cancellation** — the
+  Fiso-Link Kafka publish path now retries through the shared retry engine.
+  Previously the between-attempts backoff wait never executed (the per-attempt
+  context was cancelled before the wait, so retries ran back-to-back),
+  `initialInterval`/`maxInterval`/`jitter` were ignored (only `maxAttempts`
+  was read), and cancelling the request did not stop the remaining attempts.
+  Retries now follow the documented exponential schedule with jitter, wait on
+  the request context so cancellation aborts the sequence promptly, and keep
+  a fresh 30-second publish timeout per attempt; `maxAttempts` remains total
+  attempts. Operators should expect previously instant retries to actually
+  pause between attempts (bounded by `maxAttempts × maxInterval × (1 + jitter)`
+— jitter applies after the max cap).
+  Documentation now states that only exponential backoff is implemented — the
+  `backoff` field is accepted but has no runtime effect — and the Kafka
+  optional-fields table documents the `retry.*` settings and their defaults.
 
 - **Fail-closed Kubernetes export** — `fiso export` now rejects local Flow or
   Link configuration that cannot be represented losslessly by the checked-in
