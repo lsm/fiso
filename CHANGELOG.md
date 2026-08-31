@@ -22,7 +22,8 @@ unreleased work and will be versioned when a release tag is cut.
   the request context so cancellation aborts the sequence promptly, and keep
   a fresh 30-second publish timeout per attempt; `maxAttempts` remains total
   attempts. Operators should expect previously instant retries to actually
-  pause between attempts (bounded by `maxAttempts × maxInterval`).
+  pause between attempts (bounded by `maxAttempts × maxInterval × (1 + jitter)`
+— jitter applies after the max cap).
   Documentation now states that only exponential backoff is implemented — the
   `backoff` field is accepted but has no runtime effect — and the Kafka
   optional-fields table documents the `retry.*` settings and their defaults.

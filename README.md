@@ -592,7 +592,7 @@ Reverse proxy sidecar that routes application requests to external services thro
 - **Routing** — Path-based routing via `/link/{target}/{path}` with configurable allowed paths per target.
 - **Authentication** — Automatic credential injection (Bearer, API Key, Basic). Sources: K8s Secrets (file/env), Vault.
 - **Circuit Breaker** — Per-target circuit breaker with configurable failure threshold, success threshold, and reset timeout.
-- **Retry** — Configurable retry with exponential/constant/linear backoff, jitter, and max interval.
+- **Retry** — Configurable retry with exponential backoff, jitter, and max interval (`constant`/`linear` are not implemented; the `backoff` field is accepted but has no runtime effect).
 - **Discovery** — DNS-based target resolution.
 - **Async Mode** — Publish to Kafka for async delivery via configured brokers.
 
@@ -902,8 +902,8 @@ targets:
 | `kafka.requiredAcks` | string | Acknowledgment level: `all` or `1` (default) |
 | `retry.maxAttempts` | int | Total publish attempts per request (default 3) |
 | `retry.initialInterval` | duration | First backoff before a retry (default `200ms`) |
-| `retry.maxInterval` | duration | Backoff ceiling per wait (default `30s`) |
-| `retry.jitter` | float | Fraction jitter applied to each wait (default `0.2`; a positive value overrides) |
+| `retry.maxInterval` | duration | Base backoff ceiling per wait before jitter (default `30s`; with the default 0.2 jitter a single wait can reach `maxInterval × 1.2`) |
+| `retry.jitter` | float | Fraction jitter applied around each wait after the max cap (default `0.2`; waits fall in `wait × (1 - jitter)` to `wait × (1 + jitter)`) |
 
 **Important:** Kafka targets require a cluster to be defined in `kafka.clusters` at the top level of your `link/config.yaml`. Kafka targets reference clusters by name via the `cluster` field:
 
