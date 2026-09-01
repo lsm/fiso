@@ -169,8 +169,12 @@ func run() error {
 	}
 	loader := config.NewLoader(cfg.Flow.ConfigDir, logger)
 	flows := map[string]*config.FlowDefinition{}
-	if _, statErr := os.Stat(cfg.Flow.ConfigDir); statErr != nil {
+	if _, statErr := os.Stat(cfg.Flow.ConfigDir); os.IsNotExist(statErr) {
 		logger.Warn("flow config dir not present, continuing without flow", "dir", cfg.Flow.ConfigDir)
+	} else if statErr != nil {
+		// A present-but-inaccessible flow directory is a configuration
+		// error, not a missing component.
+		return fmt.Errorf("stat flow config dir: %w", statErr)
 	} else if flows, err = loader.LoadStrict(); err != nil {
 		// Invalid flow definitions fail startup: silently skipping a file
 		// would drop a configured pipeline without notice.

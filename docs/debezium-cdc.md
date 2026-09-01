@@ -1207,11 +1207,22 @@ type Event struct {
 	Data        map[string]interface{} `json:"data"`
 }
 
+// envelope is the interceptor ABI: the pipeline sends
+// {payload, headers, direction} and expects {payload, headers} back.
+type envelope struct {
+	Payload   json.RawMessage `json:"payload"`
+	Headers   map[string]string `json:"headers"`
+	Direction string          `json:"direction"`
+}
+
 func main() {
 	input, _ := io.ReadAll(os.Stdin)
 
+	var env envelope
+	json.Unmarshal(input, &env)
+
 	var event Event
-	json.Unmarshal(input, &event)
+	json.Unmarshal(env.Payload, &event)
 
 	// Derive enrichment from the event payload itself. To combine this
 	// event with data from customer-service, deliver the event to your
@@ -1221,8 +1232,9 @@ func main() {
 		event.Data["customer_ref"] = fmt.Sprintf("customer:%v", customerID)
 	}
 
-	output, _ := json.Marshal(event)
-	fmt.Println(string(output))
+	payload, _ := json.Marshal(event)
+	out, _ := json.Marshal(envelope{Payload: payload, Headers: env.Headers})
+	fmt.Println(string(out))
 }
 ```
 

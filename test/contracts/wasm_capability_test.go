@@ -105,7 +105,9 @@ func findWasmClaims(doc string) []claimLine {
 	}
 	// clauseOf narrows a sentence to the contrast clause containing the
 	// match, so "wazero does not support sockets, but Wasmer supports
-	// sockets" only exempts the first clause.
+	// sockets" only exempts the first clause. Clause boundaries come from
+	// separator offsets in the sentence, not from Split lengths, which
+	// drop the separators and would misplace later matches.
 	clauseOf := func(start, end int) string {
 		sentence := sentenceOf(start, end)
 		sentStart := strings.LastIndex(unmasked[:start], ".")
@@ -113,15 +115,14 @@ func findWasmClaims(doc string) []claimLine {
 			sentStart = 0
 		}
 		offsetInSentence := start - sentStart
-		pos := 0
-		for _, c := range clauseSplit.Split(sentence, -1) {
-			next := pos + len(c)
-			if offsetInSentence <= next {
-				return c
+		clauseStart := 0
+		for _, sep := range clauseSplit.FindAllStringIndex(sentence, -1) {
+			if offsetInSentence <= sep[0] {
+				break
 			}
-			pos = next
+			clauseStart = sep[1]
 		}
-		return sentence
+		return sentence[clauseStart:]
 	}
 	var claims []claimLine
 	for _, m := range affirmativeCapabilityClaim.FindAllStringIndex(text, -1) {
