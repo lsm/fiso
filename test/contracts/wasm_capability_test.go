@@ -116,13 +116,15 @@ func findWasmClaims(doc string) []claimLine {
 		}
 		offsetInSentence := start - sentStart
 		clauseStart := 0
+		clauseEnd := len(sentence)
 		for _, sep := range clauseSplit.FindAllStringIndex(sentence, -1) {
 			if offsetInSentence <= sep[0] {
+				clauseEnd = sep[0]
 				break
 			}
 			clauseStart = sep[1]
 		}
-		return sentence[clauseStart:]
+		return sentence[clauseStart:clauseEnd]
 	}
 	var claims []claimLine
 	for _, m := range affirmativeCapabilityClaim.FindAllStringIndex(text, -1) {
@@ -139,7 +141,7 @@ func findWasmClaims(doc string) []claimLine {
 		if !wasmSubjects(clause) {
 			continue
 		}
-		claims = append(claims, claimLine{line: lineOf(m[0]), match: strings.TrimSpace(text[m[0]:m[1]])})
+		claims = append(claims, claimLine{line: lineOf(m[0]), match: strings.TrimSpace(unmasked[m[0]:m[1]])})
 	}
 	// Ecosystem tokens: flag only when the surrounding clause carries no
 	// negation and the sentence is about WASM.

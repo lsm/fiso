@@ -171,9 +171,9 @@ considered healthy immediately at startup, before the first check completes.
 event payload: the pipeline sends a JSON envelope and expects one back.
 
 ```json
-// input the module receives
+// input the module receives; direction is "inbound" or "outbound"
 { "payload": { ...event data... }, "headers": { ... },
-  "direction": "request" }
+  "direction": "inbound" }
 
 // output the module returns
 { "payload": { ...transformed data... }, "headers": { ... } }
