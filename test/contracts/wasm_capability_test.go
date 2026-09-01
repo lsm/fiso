@@ -18,7 +18,7 @@ import (
 // affirmativeCapabilityClaim matches capability verbs joined to guest-level
 // networking/threading/application capabilities, e.g. "supports sockets and
 // threading", "enables database connectivity", "apps with network access".
-var affirmativeCapabilityClaim = regexp.MustCompile(`(?i)\b(support(?:s|ed|ing)?|enable(?:s|d)?|provid(?:e|es|ing)|offer(?:s|ing)?|requir(?:e|es|ing)|with|can|may|able to|have|has|open|opens|spawn|spawns|make|makes|call|calls)\b[^.]{0,100}\b(sockets?|threads?|threading|multithreading|pthreads|database connect\w+|network access|persistent (?:in-memory )?state|full[-\s]?fledged applications?|full applications?)\b`)
+var affirmativeCapabilityClaim = regexp.MustCompile(`(?i)\b(support(?:s|ed|ing)?|enable(?:s|d)?|provid(?:e|es|ing)|offer(?:s|ing)?|requir(?:e|es|ing)|with|can|may|able to|have|has|open|opens|spawn|spawns|make|makes|call|calls|run|runs)\b[^.]{0,100}\b(sockets?|threads?|threading|multithreading|pthreads|database connect\w+|network access|persistent (?:in-memory )?state|full[-\s]?fledged applications?|full applications?)\b`)
 
 // ecosystemTokens name the unsupported ecosystem explicitly; they may appear
 // only in negated context ("WASIX is not supported", "no Django").
@@ -44,10 +44,14 @@ var qualifiedGeneric = regexp.MustCompile(`(?i)\b(?:wasm|wasmer|wazero)[\w-]*\s+
 // engine named as the topic of contrast does not qualify the clause.
 var contrastPrefix = regexp.MustCompile(`(?i)^[.\s]*(?:unlike|compared to|like|as with)\s+[^,]+,\s*`)
 
+// contrastSuffix strips trailing comparisons (", unlike Wasmer") for the
+// same reason.
+var contrastSuffix = regexp.MustCompile(`(?i),\s*(?:unlike|compared to|like)\s+[^.]*$`)
+
 // wasmSubjects reports whether a clause attributes its capability to WASM:
 // either an unambiguous engine/runtime mention or a qualified generic.
 func wasmSubjects(clause string) bool {
-	c := contrastPrefix.ReplaceAllString(clause, "")
+	c := contrastSuffix.ReplaceAllString(contrastPrefix.ReplaceAllString(clause, ""), "")
 	return strongSubject.MatchString(c) || qualifiedGeneric.MatchString(c)
 }
 
@@ -57,6 +61,9 @@ var negatedMentions = regexp.MustCompile(`(?i)((no|without|lacks?|excludes?) (ne
 
 // bulletItem matches a Markdown list item line.
 var bulletItem = regexp.MustCompile(`^\s*[-*+] `)
+
+// headingLine matches a Markdown heading line.
+var headingLine = regexp.MustCompile(`^#{1,6} `)
 
 // claimLine maps a match offset in normalized text back to its source line.
 type claimLine struct {
@@ -76,12 +83,21 @@ func findWasmClaims(doc string) []claimLine {
 	}
 	var spans []lineSpan
 	var norm strings.Builder
-	for i, line := range strings.Split(doc, "\n") {
+	lines := strings.Split(doc, "\n")
+	for i, line := range lines {
 		// A Markdown list item begins a new sentence: bullets without
 		// trailing punctuation must not merge into one clause.
 		sep := " "
-		if bulletItem.MatchString(line) {
-			sep = ". "
+		if i > 0 {
+			prev := lines[i-1]
+			// List items, headings, and paragraph breaks both end the
+			// preceding sentence and begin a new one — either side makes
+			// the join a sentence boundary.
+			if bulletItem.MatchString(line) || headingLine.MatchString(line) ||
+				bulletItem.MatchString(prev) || headingLine.MatchString(prev) ||
+				strings.TrimSpace(line) == "" || strings.TrimSpace(prev) == "" {
+				sep = ". "
+			}
 		}
 		if norm.Len() > 0 {
 			norm.WriteString(sep)
@@ -194,7 +210,7 @@ func TestAuthoritativeDocsDoNotClaimWasmNetworkingOrThreads(t *testing.T) {
 
 // timeoutKey matches the YAML timeout key in its common spellings,
 // quoted or with space before the colon.
-var timeoutKey = regexp.MustCompile(`"?timeout"?\s*:`)
+var timeoutKey = regexp.MustCompile(`(?i)^\s*"?(?:timeout)"?\s*:`)
 
 // TestWasmInterceptorExamplesDoNotSetIgnoredTimeout rejects `timeout:` keys
 // inside `type: wasm` interceptor config blocks in authoritative docs: no
