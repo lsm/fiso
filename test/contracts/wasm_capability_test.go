@@ -32,9 +32,19 @@ var negatedSentence = regexp.MustCompile(`(?i)((?:do(?:es)? not|don't|doesn't|ca
 // clauseSplit separates contrast clauses within a sentence.
 var clauseSplit = regexp.MustCompile(`(?i),?\s*(?:but|yet|however|whereas|while|though)\s+|;`)
 
-// wasmContext identifies sentences about WASM subjects; capability claims
-// attributed to anything else are out of this contract's scope.
-var wasmContext = regexp.MustCompile(`(?i)\b(wasm|wasmer|wazero|modules?|guests?|interceptors?|apps?)\b`)
+// strongSubject unambiguously attributes a clause to WASM.
+var strongSubject = regexp.MustCompile(`(?i)\b(wasm|wasmer|wazero)\b`)
+
+// qualifiedGeneric matches a generic subject (module/app/interceptor/guest)
+// only when a WASM qualifier precedes it ("WASM modules", "Wasmer guests").
+// A bare generic ("The native apps support...") is out of scope.
+var qualifiedGeneric = regexp.MustCompile(`(?i)\b(?:wasm|wasmer|wazero)[\w-]*\s+(?:\w+\s+){0,2}(modules?|guests?|interceptors?|apps?)\b`)
+
+// wasmSubjects reports whether a clause attributes its capability to WASM:
+// either an unambiguous engine/runtime mention or a qualified generic.
+func wasmSubjects(clause string) bool {
+	return strongSubject.MatchString(clause) || qualifiedGeneric.MatchString(clause)
+}
 
 // negatedMentions are phrase-level limitation markers masked before
 // affirmative matching.
@@ -125,7 +135,7 @@ func findWasmClaims(doc string) []claimLine {
 		// subject count; capability statements about other components are
 		// not this contract's concern even when WASM is mentioned elsewhere
 		// in the sentence.
-		if !wasmContext.MatchString(clause) {
+		if !wasmSubjects(clause) {
 			continue
 		}
 		claims = append(claims, claimLine{line: lineOf(m[0]), match: strings.TrimSpace(text[m[0]:m[1]])})
@@ -137,7 +147,7 @@ func findWasmClaims(doc string) []claimLine {
 		if negatedSentence.MatchString(clause) {
 			continue
 		}
-		if !wasmContext.MatchString(clause) {
+		if !wasmSubjects(clause) {
 			continue
 		}
 		claims = append(claims, claimLine{line: lineOf(m[0]), match: strings.TrimSpace(unmasked[m[0]:m[1]])})
