@@ -613,53 +613,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 			},
 		},
 		{
-			name: "wasmer-app interceptor valid",
-			flow: FlowDefinition{
-				Name:   "t",
-				Source: SourceConfig{Type: "http"},
-				Sink:   SinkConfig{Type: "http"},
-				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
-					"module": "/path/to/app.wasm",
-				}}},
-			},
-		},
-		{
-			name: "wasmer-app interceptor missing module",
-			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
-				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{}}},
-			},
-			wantErr: "interceptors[0].config.module is required for wasmer-app interceptor",
-		},
-		{
-			name: "wasmer-app interceptor invalid execution mode",
-			flow: FlowDefinition{
-				Name:   "t",
-				Source: SourceConfig{Type: "http"},
-				Sink:   SinkConfig{Type: "http"},
-				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
-					"module":    "/path/to/app.wasm",
-					"execution": "invalid-mode",
-				}}},
-			},
-			wantErr: "interceptors[0].config.execution must be 'perRequest', 'longRunning', or 'pooled'",
-		},
-		{
-			name: "wasmer-app interceptor valid perRequest execution",
-			flow: FlowDefinition{
-				Name:   "t",
-				Source: SourceConfig{Type: "http"},
-				Sink:   SinkConfig{Type: "http"},
-				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
-					"module":    "/path/to/app.wasm",
-					"execution": "perRequest",
-				}}},
-			},
-		},
-		{
-			name: "wasmer-app interceptor valid longRunning execution",
+			// wasmer-app was accepted historically but implemented by no
+			// binary; rejected until one executes it (issue #34, ADR 0003).
+			name: "wasmer-app interceptor rejected",
 			flow: FlowDefinition{
 				Name:   "t",
 				Source: SourceConfig{Type: "http"},
@@ -669,18 +625,7 @@ func TestFlowDefinition_Validate(t *testing.T) {
 					"execution": "longRunning",
 				}}},
 			},
-		},
-		{
-			name: "wasmer-app interceptor valid pooled execution",
-			flow: FlowDefinition{
-				Name:   "t",
-				Source: SourceConfig{Type: "http"},
-				Sink:   SinkConfig{Type: "http"},
-				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
-					"module":    "/path/to/app.wasm",
-					"execution": "pooled",
-				}}},
-			},
+			wantErr: `interceptors[0].type "wasmer-app" is not valid`,
 		},
 		{
 			name: "grpc interceptor valid",

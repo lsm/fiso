@@ -573,6 +573,8 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 				}
 
 				interceptors = append(interceptors, wasm.New(rt, modulePath))
+			default:
+				return nil, fmt.Errorf("unsupported interceptor type: %s", ic.Type)
 			}
 		}
 		chain = interceptor.NewChain(interceptors...)

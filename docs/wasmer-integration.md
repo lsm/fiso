@@ -1,6 +1,27 @@
 # Wasmer Integration Guide
 
-This guide covers the Wasmer runtime integration in Fiso, which enables full-featured WASM applications with network access, database connectivity, and threading support.
+This guide covers the Wasmer runtime integration in Fiso: an alternative
+engine for invoking WASM modules per request.
+
+## The executable contract
+
+**WASM modules in Fiso are per-request functions.** Whether the engine is
+wazero or wasmer, a module receives one request's payload and returns the
+transformed payload. Specifically:
+
+- **No network access.** WASM guests cannot open sockets, make DNS lookups,
+  or call HTTP APIs from inside the module. There is no guest networking of
+  any kind.
+- **No threads.** Guests run single-threaded; there is no pthread support.
+- **No persistent state.** Every invocation runs a fresh instance, so module
+  globals, counters, and connection-like state reset on each request.
+- **HTTP serving is host-side, not in-guest.** A "Wasmer app" is a Go HTTP
+  server in the Fiso process that invokes the module per request and
+  translates between HTTP and the module's stdin/stdout JSON ABI. The module
+  never accepts a connection itself.
+
+This is the same shape the standardized `wasi:http` interface later
+formalized: host-mediated request/response, not a resident in-guest server.
 
 ## Overview
 
@@ -8,35 +29,20 @@ Fiso supports two WASM runtimes:
 
 | Runtime | Type | Use Case | CGO Required |
 |---------|------|----------|--------------|
-| **wazero** | Pure Go | Simple transforms (JSON-in/JSON-out) | No |
-| **wasmer** | CGO | Full WASIX apps with network, threading, DB | Yes |
+| **wazero** | Pure Go | WASM interceptors (JSON-in/JSON-out) — the default | No |
+| **wasmer** | CGO | Same per-request model via the wasmer engine | Yes |
 
-Wasmer provides WASIX support, enabling:
-- Network access (sockets, HTTP, DNS)
-- Database connectivity via sockets
-- Threading (pthreads)
-- Full filesystem access
-- Running Python (Django, FastAPI), PHP, JavaScript (Next.js)
-
-## When to Use Wasmer
-
-**Use wazero (default) when:**
-- You need simple JSON transformations
-- You want pure Go builds (no CGO)
-- You need fast startup and low memory
-
-**Use wasmer when:**
-- Your WASM app needs network access
-- You need threading support
-- You're running full applications (Python, PHP, JS)
-- You need database connectivity
+**Use wazero unless you have a specific reason not to.** It is the default,
+needs no C toolchain, and covers the same executable contract. The wasmer
+engine exists for cases where a module behaves better under wasmer's
+compiler.
 
 ## Deployment Modes
 
-Fiso provides four deployment modes for Wasmer:
+Fiso provides four binaries built with wasmer support:
 
 ### 1. fiso-wasmer (Standalone)
-Runs a single Wasmer app with HTTP server.
+Runs a single Wasmer app behind a host-side HTTP server.
 
 ```bash
 # Build
@@ -47,35 +53,31 @@ CGO_ENABLED=1 go build -tags wasmer -o tmp/fiso-wasmer ./cmd/fiso-wasmer
 ```
 
 ### 2. fiso-flow-wasmer (Flow + Wasmer)
-Fiso-flow with Wasmer runtime support for WASM interceptors.
+Fiso-flow that can also select the wasmer engine for `wasm` interceptors
+via `runtime: wasmer`.
 
 ```bash
-# Build
 CGO_ENABLED=1 go build -tags wasmer -o tmp/fiso-flow-wasmer ./cmd/fiso-flow-wasmer
-
-# Run
-./tmp/fiso-flow-wasmer -config-dir /etc/fiso/flows
+FISO_CONFIG_DIR=/etc/fiso/flows ./tmp/fiso-flow-wasmer
 ```
 
+Note: the plain `fiso-flow` binary has no wasmer support; a flow configured
+with `runtime: wasmer` fails to build there with an explicit error instead
+of silently running under wazero.
+
 ### 3. fiso-wasmer-link (Link + Wasmer)
-Fiso-link with embedded Wasmer apps for interceptors.
+Fiso-link with embedded Wasmer apps.
 
 ```bash
-# Build
 CGO_ENABLED=1 go build -tags wasmer -o tmp/fiso-wasmer-link ./cmd/fiso-wasmer-link
-
-# Run
-./tmp/fiso-wasmer-link -config /etc/fiso/link/config.yaml
+FISO_WASMER_CONFIG=/etc/fiso/wasmer/apps.yaml ./tmp/fiso-wasmer-link -config /etc/fiso/link/config.yaml
 ```
 
 ### 4. fiso-wasmer-aio (All-in-One)
-Combined Flow + Link + Wasmer in a single binary.
+Flow + Link + Wasmer apps in a single binary.
 
 ```bash
-# Build
 CGO_ENABLED=1 go build -tags wasmer -o tmp/fiso-wasmer-aio ./cmd/fiso-wasmer-aio
-
-# Run
 ./tmp/fiso-wasmer-aio -config /etc/fiso/aio/config.yaml
 ```
 
@@ -83,7 +85,7 @@ CGO_ENABLED=1 go build -tags wasmer -o tmp/fiso-wasmer-aio ./cmd/fiso-wasmer-aio
 
 ### Runtime Configuration
 
-Specify the runtime in your flow configuration:
+Select the engine for a `wasm` interceptor (wasmer-tagged binaries only):
 
 ```yaml
 name: transform-flow
@@ -95,95 +97,56 @@ interceptors:
   - type: wasm
     config:
       module: /etc/fiso/modules/transform.wasm
-      runtime: wasmer    # Use wasmer instead of default wazero
-      timeout: 30s
-      memoryLimit: 268435456  # 256MB
-      env:
-        LOG_LEVEL: debug
-      preopens:
-        /data: /var/lib/fiso/data
+      runtime: wasmer    # optional; wazero is the default
 sink:
   type: http
   config:
     url: http://backend:8080
 ```
 
+Only `module` and `runtime` are honored for interceptors today. Other keys
+present in older documentation (`timeout`, `memoryLimit`, `env`, `preopens`)
+are not applied by the Flow binaries and should not be relied on.
+
 ### App Configuration
 
-For long-running Wasmer apps:
+A Wasmer app exposes a module over HTTP through the host-side server:
 
 ```yaml
 # apps.yaml
 apps:
-  - name: python-api
-    module: /etc/fiso/wasm/api.wasm
-    execution: longRunning
+  - name: processor
+    module: /etc/fiso/wasm/processor.wasm
     port: 8090
-    memoryMB: 512
-    timeout: 60s
     healthCheck: /health
     healthCheckInterval: 10s
-    env:
-      DATABASE_URL: postgres://user:pass@db:5432/mydb
-      REDIS_URL: redis://redis:6379
-    preopens:
-      /app/data: /var/lib/fiso/data
 ```
 
-## Execution Modes
-
-### perRequest (Default)
-Creates a new WASM instance for each request. Best for:
-- Simple transforms
-- Short-lived operations
-- Memory isolation between requests
-
-```yaml
-execution: perRequest
-```
-
-### longRunning
-Runs a single WASM instance with an HTTP server. Best for:
-- Applications with state
-- Database connection pooling
-- Reduced startup overhead
-
-```yaml
-execution: longRunning
-port: 8090
-healthCheck: /health
-```
-
-### pooled
-Maintains a pool of pre-initialized instances. Best for:
-- High throughput scenarios
-- Balancing isolation and performance
-
-```yaml
-execution: pooled
-poolSize: 10
-```
+Fields with **no current runtime effect** (accepted for compatibility,
+documented here so nobody relies on them): `execution` and `memoryMB`.
+There is one execution behavior — per-request invocation — regardless of the
+`execution` value.
 
 ## Health Checking
 
-For long-running apps, enable health checking:
+For apps, enable health checking:
 
 ```yaml
 apps:
   - name: my-app
     module: /etc/fiso/wasm/app.wasm
-    execution: longRunning
     port: 8090
     healthCheck: /health        # HTTP endpoint to check
     healthCheckInterval: 10s    # Check every 10 seconds
 ```
 
-The manager will:
-1. Send GET requests to `http://127.0.0.1:8090/health`
-2. Mark the app as healthy if status is 2xx
-3. Mark as unhealthy on connection failure or non-2xx response
+The manager sends GET requests to `http://127.0.0.1:8090/health` and marks
+the app healthy on 2xx responses, unhealthy otherwise. Note that an app is
+considered healthy immediately at startup, before the first check completes.
 
 ## Building WASM Modules
+
+The module contract is stdin-to-stdout JSON (the same ABI for both engines):
 
 ### Go (wasip1)
 
@@ -197,19 +160,16 @@ GOOS=wasip1 GOARCH=wasm go build -o app.wasm .
 tinygo build -target=wasi -o app.wasm .
 ```
 
-### Python (py2wasm)
-
-```bash
-pip install py2wasm
-py2wasm app.py -o app.wasm
-```
-
 ### Rust
 
 ```bash
 rustup target add wasm32-wasi
 cargo build --target wasm32-wasi --release
 ```
+
+Because guests have no network access and no persistent state, modules that
+need to call external services should do so through Fiso's own outbound path
+(Fiso-Link) rather than inside the module.
 
 ## Building Fiso with Wasmer
 
@@ -229,7 +189,6 @@ make build-wasmer-all
 ### Docker Builds
 
 ```bash
-# Build Wasmer Docker images
 make docker-wasmer
 make docker-flow-wasmer
 make docker-wasmer-link
@@ -238,16 +197,11 @@ make docker-wasmer-aio
 
 ## E2E Tests
 
-Run the Wasmer E2E tests:
-
 ```bash
-# Run specific test
 make e2e-wasmer-standalone
 make e2e-flow-wasmer
 make e2e-wasmer-link
 make e2e-wasmer-aio
-
-# Run all Wasmer E2E tests
 make e2e-all
 ```
 
@@ -285,57 +239,15 @@ ls -la /path/to/app.wasm
 file /path/to/app.wasm  # Should show "WebAssembly binary"
 ```
 
-### Health Check Failures
-
-**Error:** App marked as unhealthy
-
-**Solution:** Check:
-1. App is listening on the configured port
-2. Health check endpoint returns 2xx status
-3. No firewall blocking localhost connections
-
-```bash
-# Test health endpoint manually
-curl http://127.0.0.1:8090/health
-```
-
-### Timeout Errors
-
-**Error:** `wasm execution timeout after 30s`
-
-**Solution:** Increase timeout in configuration:
-```yaml
-timeout: 60s
-```
-
-Or optimize your WASM module for faster execution.
-
-## Migration from Wazero
-
-To migrate from wazero to wasmer:
-
-1. Add `runtime: wasmer` to your WASM interceptor config
-2. Rebuild with the wasmer build tag
-3. Ensure CGO is available in your build environment
-
-```yaml
-# Before (wazero, default)
-interceptors:
-  - type: wasm
-    config:
-      module: /etc/fiso/modules/transform.wasm
-
-# After (wasmer)
-interceptors:
-  - type: wasm
-    config:
-      module: /etc/fiso/modules/transform.wasm
-      runtime: wasmer
-```
-
 ## Limitations
 
-1. **CGO Required:** Wasmer builds require a C compiler
-2. **Cross-compilation:** More complex than pure Go
-3. **Binary Size:** Larger than wazero builds
-4. **Startup Time:** Slightly slower than wazero for transforms
+1. **CGO Required:** Wasmer builds require a C compiler and produce larger
+   binaries.
+2. **Per-request model:** every invocation runs a fresh instance; no state
+   carries between requests.
+3. **No guest networking or threading:** modules cannot open sockets, spawn
+   threads, or keep resident processes.
+4. **Host-side serving:** app HTTP endpoints are served by the Fiso process,
+   not by the module.
+5. **Experimental:** the wasmer binaries are not part of GitHub releases;
+   build them from source with the instructions above.

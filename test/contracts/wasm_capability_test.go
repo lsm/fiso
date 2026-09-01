@@ -21,12 +21,49 @@ var wasmCapabilityClaims = regexp.MustCompile(`(?i)(WASIX|Django|FastAPI|Next\.j
 
 // networkAccessClaim matches "network access" used affirmatively; negated
 // statements ("no network access", "without network access") are the required
-// limitation wording and must not be rejected.
+// limitation wording and are masked before matching.
 var networkAccessClaim = regexp.MustCompile(`(?i)network access`)
 
-func isNegatedNetworkAccess(line string) bool {
-	lower := strings.ToLower(line)
-	return strings.Contains(lower, "no network access") || strings.Contains(lower, "without network access")
+var negatedNetworkAccess = regexp.MustCompile(`(?i)(no|without) network access`)
+
+// claimLine maps a match offset in normalized text back to its source line.
+type claimLine struct {
+	line  int
+	match string
+}
+
+// findWasmClaims normalizes the document onto one text stream (so phrases
+// wrapped across Markdown lines still match), masks the negated limitation
+// wording with equal-length spaces, and reports remaining capability claims
+// at their starting source line.
+func findWasmClaims(doc string) []claimLine {
+	type lineSpan struct {
+		start int
+		line  int
+	}
+	var spans []lineSpan
+	var norm strings.Builder
+	for i, line := range strings.Split(doc, "\n") {
+		spans = append(spans, lineSpan{start: norm.Len(), line: i + 1})
+		norm.WriteString(line)
+		norm.WriteString(" ")
+	}
+	text := negatedNetworkAccess.ReplaceAllStringFunc(norm.String(), func(m string) string {
+		return strings.Repeat(" ", len(m))
+	})
+	var claims []claimLine
+	for _, re := range []*regexp.Regexp{wasmCapabilityClaims, networkAccessClaim} {
+		for _, m := range re.FindAllStringIndex(text, -1) {
+			line := 1
+			for _, s := range spans {
+				if s.start <= m[0] {
+					line = s.line
+				}
+			}
+			claims = append(claims, claimLine{line: line, match: strings.TrimSpace(text[m[0]:m[1]])})
+		}
+	}
+	return claims
 }
 
 // TestAuthoritativeDocsDoNotClaimWasmNetworkingOrThreads rejects
@@ -38,22 +75,16 @@ func TestAuthoritativeDocsDoNotClaimWasmNetworkingOrThreads(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		for i, line := range strings.Split(string(data), "\n") {
-			if loc := wasmCapabilityClaims.FindStringIndex(line); loc != nil {
-				t.Errorf("%s:%d: authoritative doc claims unsupported WASM capability (%q) — WASM guests have no sockets, threads, or persistent state",
-					path, i+1, strings.TrimSpace(line[loc[0]:loc[1]]))
-			}
-			if networkAccessClaim.MatchString(line) && !isNegatedNetworkAccess(line) {
-				t.Errorf("%s:%d: authoritative doc claims WASM network access — guests cannot open sockets; negate the claim (\"no network access\") if describing the limitation",
-					path, i+1)
-			}
+		for _, c := range findWasmClaims(string(data)) {
+			t.Errorf("%s:%d: authoritative doc claims unsupported WASM capability (%q) — WASM guests have no sockets, threads, or persistent state",
+				path, c.line, c.match)
 		}
 	}
 }
 
 // TestWasmerGuideStatesExecutableContract requires the Wasmer guide to
 // describe the executable contract explicitly: per-request invocation with no
-// network access.
+// network access, served host-side.
 func TestWasmerGuideStatesExecutableContract(t *testing.T) {
 	data, err := os.ReadFile("../../docs/wasmer-integration.md")
 	if err != nil {

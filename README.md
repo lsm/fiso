@@ -1313,9 +1313,12 @@ Expected output:
 {"data":{"key":"VALUE"}}
 ```
 
-### Wasmer Runtime for Full Applications
+### Wasmer Runtime (experimental)
 
-For WASM applications that require network access, threading, or database connectivity, Fiso supports the Wasmer runtime with WASIX support.
+The Wasmer engine runs the same per-request WASM model as wazero — modules
+are invoked per request over a host-side HTTP facade. WASM modules have no
+network access, no threads, and no persistent state between invocations;
+only the engine differs.
 
 **Deployment Modes:**
 - **fiso-wasmer**: Standalone Wasmer app runner
@@ -1330,15 +1333,20 @@ interceptors:
     config:
       module: /etc/fiso/modules/app.wasm
       runtime: wasmer    # Use wasmer instead of default wazero
-      timeout: 30s
 ```
+
+Only `module` and `runtime` are honored; the plain `fiso-flow` binary
+rejects `runtime: wasmer` instead of silently downgrading to wazero.
 
 **Building:**
 ```bash
 CGO_ENABLED=1 go build -tags wasmer -o fiso-wasmer ./cmd/fiso-wasmer
 ```
 
-See the [Wasmer Integration Guide](./docs/wasmer-integration.md) for full documentation.
+The wasmer binaries are experimental and are not part of GitHub releases;
+build them from source. See the
+[Wasmer Integration Guide](./docs/wasmer-integration.md) for the full,
+executable contract.
 
 ### Environment Variables
 
