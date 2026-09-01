@@ -129,6 +129,22 @@ func (f *FlowDefinition) Validate() error {
 			if _, ok := ic.Config["module"].(string); !ok {
 				errs = append(errs, fmt.Errorf("interceptors[%d].config.module is required for wasm interceptor", i))
 			}
+			// Host HTTP capability (ADR 0006): opt-in, deny-by-default.
+			if httpVal, present := ic.Config["http"]; present && httpVal != nil {
+				if enabled, isBool := httpVal.(bool); !isBool || !enabled {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.http must be exactly true to enable host HTTP calls", i))
+				} else {
+					targets, _ := ic.Config["httpTargets"].([]interface{})
+					if len(targets) == 0 {
+						errs = append(errs, fmt.Errorf("interceptors[%d].config.httpTargets is required when http is enabled (deny-by-default allowlist)", i))
+					}
+					for j, tv := range targets {
+						if _, isStr := tv.(string); !isStr {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.httpTargets[%d] must be a target name string", i, j))
+						}
+					}
+				}
+			}
 			// Validate runtime if specified. A present, non-nil value must be
 			// a known runtime string; null is treated as omitted.
 			if runtime, present := ic.Config["runtime"]; present && runtime != nil {

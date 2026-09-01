@@ -1291,6 +1291,33 @@ sink:
     method: POST
 ```
 
+### Calling HTTP APIs from a WASM Interceptor
+
+WASM modules have no network access — but a module that opts in can make HTTP
+calls through a **host function** that routes via Fiso-Link, so every call
+inherits Link's auth injection, retries, circuit breaker, rate limiting, and
+metrics, and only the declared targets are reachable (deny-by-default; see
+[ADR 0006](docs/adr/0006-wasm-http-via-host-function.md)).
+
+```yaml
+interceptors:
+  - type: wasm
+    config:
+      module: /etc/fiso/wasm/enrich.wasm
+      http: true                          # opt in; default false
+      httpTargets: ["fraud-api"]          # deny-by-default allowlist
+      linkAddr: http://fiso-link:3500     # optional; default http://127.0.0.1:3500
+```
+
+The module imports and calls `fiso.http_call(req_ptr, req_len, resp_ptr,
+resp_cap) -> i32`. The request is JSON `{target, method, path, headers,
+body}`; the host writes `{status, headers, body}` into the response buffer
+and returns its length, or a negative error code (`-1` invalid request, `-2`
+target denied, `-3` response buffer too small, `-4` upstream failure). A
+module that imports the function without `http: true` fails to instantiate —
+the capability is absent, not merely unchecked. Currently supported on the
+wazero runtime.
+
 ### gRPC Interceptors
 
 A `grpc` interceptor delegates processing to an external sidecar service over

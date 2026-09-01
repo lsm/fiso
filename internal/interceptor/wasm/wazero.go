@@ -19,10 +19,36 @@ type WazeroRuntime struct {
 // NewWazeroRuntime compiles a WASM module from raw bytes.
 // The module must be a WASI binary (wasip1) that reads JSON from stdin and writes JSON to stdout.
 func NewWazeroRuntime(ctx context.Context, wasmBytes []byte) (*WazeroRuntime, error) {
+	return newWazeroRuntime(ctx, wasmBytes, HostHTTPConfig{}, false)
+}
+
+// NewWazeroRuntimeWithHTTP compiles a WASM module and instantiates the
+// fiso.http_call host function with the supplied allowlist (ADR 0006).
+// Without WithHTTP the module has no such import: a module importing it
+// fails to instantiate, so the capability is absent rather than unchecked.
+func NewWazeroRuntimeWithHTTP(ctx context.Context, wasmBytes []byte, cfg HostHTTPConfig) (*WazeroRuntime, error) {
+	return newWazeroRuntime(ctx, wasmBytes, cfg, true)
+}
+
+func newWazeroRuntime(ctx context.Context, wasmBytes []byte, httpCfg HostHTTPConfig, withHTTP bool) (*WazeroRuntime, error) {
 	rt := wazero.NewRuntime(ctx)
 
 	// Instantiate WASI so the module can use stdin/stdout.
 	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
+
+	if withHTTP {
+		client, err := newHostHTTPClient(httpCfg)
+		if err != nil {
+			_ = rt.Close(ctx)
+			return nil, err
+		}
+		builder := rt.NewHostModuleBuilder("fiso")
+		hostHTTPExport(builder, client)
+		if _, err := builder.Instantiate(ctx); err != nil {
+			_ = rt.Close(ctx)
+			return nil, fmt.Errorf("instantiate fiso host module: %w", err)
+		}
+	}
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {

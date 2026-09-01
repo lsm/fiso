@@ -1471,6 +1471,58 @@ func TestFlowDefinition_ValidateWasmRuntimeValueType(t *testing.T) {
 	}
 }
 
+func TestFlowDefinition_ValidateWasmHostHTTPConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  map[string]interface{}
+		wantErr string
+	}{
+		{
+			name:    "http must be exactly true",
+			config:  map[string]interface{}{"module": "m.wasm", "http": false},
+			wantErr: "interceptors[0].config.http must be exactly true",
+		},
+		{
+			name:    "http true requires targets",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true},
+			wantErr: "interceptors[0].config.httpTargets is required",
+		},
+		{
+			name:    "targets must be strings",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{42}},
+			wantErr: "interceptors[0].config.httpTargets[0] must be a target name string",
+		},
+		{
+			name:   "valid opt-in",
+			config: map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"fraud-api"}},
+		},
+		{
+			name:   "no opt-in is fine",
+			config: map[string]interface{}{"module": "m.wasm"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: tt.config}},
+			}
+			err := flow.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestFlowDefinition_ValidateGRPCInterceptorConfig(t *testing.T) {
 	tests := []struct {
 		name    string
