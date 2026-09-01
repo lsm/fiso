@@ -18,7 +18,7 @@ import (
 // affirmativeCapabilityClaim matches capability verbs joined to guest-level
 // networking/threading/application capabilities, e.g. "supports sockets and
 // threading", "enables database connectivity", "apps with network access".
-var affirmativeCapabilityClaim = regexp.MustCompile(`(?i)\b(support(?:s|ed|ing)?|enable(?:s|d)?|provid(?:e|es|ing)|offer(?:s|ing)?|requir(?:e|es|ing)|with|can|may|able to|open|opens|spawn|spawns|make|makes|call|calls)\b[^.]{0,100}\b(sockets?|threads?|threading|multithreading|pthreads|database connect\w+|network access|persistent (?:in-memory )?state|full[-\s]?fledged applications?|full applications?)\b`)
+var affirmativeCapabilityClaim = regexp.MustCompile(`(?i)\b(support(?:s|ed|ing)?|enable(?:s|d)?|provid(?:e|es|ing)|offer(?:s|ing)?|requir(?:e|es|ing)|with|can|may|able to|have|has|open|opens|spawn|spawns|make|makes|call|calls)\b[^.]{0,100}\b(sockets?|threads?|threading|multithreading|pthreads|database connect\w+|network access|persistent (?:in-memory )?state|full[-\s]?fledged applications?|full applications?)\b`)
 
 // ecosystemTokens name the unsupported ecosystem explicitly; they may appear
 // only in negated context ("WASIX is not supported", "no Django").
@@ -40,15 +40,23 @@ var strongSubject = regexp.MustCompile(`(?i)\b(wasm|wasmer|wazero)\b`)
 // A bare generic ("The native apps support...") is out of scope.
 var qualifiedGeneric = regexp.MustCompile(`(?i)\b(?:wasm|wasmer|wazero)[\w-]*\s+(?:\w+\s+){0,2}(modules?|guests?|interceptors?|apps?)\b`)
 
+// contrastPrefix strips comparative lead-ins ("Unlike Wasmer, ...") so an
+// engine named as the topic of contrast does not qualify the clause.
+var contrastPrefix = regexp.MustCompile(`(?i)^[.\s]*(?:unlike|compared to|like|as with)\s+[^,]+,\s*`)
+
 // wasmSubjects reports whether a clause attributes its capability to WASM:
 // either an unambiguous engine/runtime mention or a qualified generic.
 func wasmSubjects(clause string) bool {
-	return strongSubject.MatchString(clause) || qualifiedGeneric.MatchString(clause)
+	c := contrastPrefix.ReplaceAllString(clause, "")
+	return strongSubject.MatchString(c) || qualifiedGeneric.MatchString(c)
 }
 
 // negatedMentions are phrase-level limitation markers masked before
 // affirmative matching.
 var negatedMentions = regexp.MustCompile(`(?i)((no|without|lacks?|excludes?) (network access|sockets?|threading|multithreading|pthreads|persistent (?:in-memory )?state|database connectivity)|(?:(?:do(?:es)? not|don't|doesn't) (?:support|provide|enable|have|use|work))|no longer \w+|not (?:currently )?(?:supported|implemented|applied|available)|unsupported|cannot |does not |doesn't |never )`)
+
+// bulletItem matches a Markdown list item line.
+var bulletItem = regexp.MustCompile(`^\s*[-*+] `)
 
 // claimLine maps a match offset in normalized text back to its source line.
 type claimLine struct {
@@ -69,6 +77,15 @@ func findWasmClaims(doc string) []claimLine {
 	var spans []lineSpan
 	var norm strings.Builder
 	for i, line := range strings.Split(doc, "\n") {
+		// A Markdown list item begins a new sentence: bullets without
+		// trailing punctuation must not merge into one clause.
+		sep := " "
+		if bulletItem.MatchString(line) {
+			sep = ". "
+		}
+		if norm.Len() > 0 {
+			norm.WriteString(sep)
+		}
 		spans = append(spans, lineSpan{start: norm.Len(), line: i + 1})
 		norm.WriteString(line)
 		norm.WriteString(" ")
@@ -175,6 +192,10 @@ func TestAuthoritativeDocsDoNotClaimWasmNetworkingOrThreads(t *testing.T) {
 	}
 }
 
+// timeoutKey matches the YAML timeout key in its common spellings,
+// quoted or with space before the colon.
+var timeoutKey = regexp.MustCompile(`"?timeout"?\s*:`)
+
 // TestWasmInterceptorExamplesDoNotSetIgnoredTimeout rejects `timeout:` keys
 // inside `type: wasm` interceptor config blocks in authoritative docs: no
 // Flow builder reads the key, so examples configuring it would advertise an
@@ -211,7 +232,7 @@ func TestWasmInterceptorExamplesDoNotSetIgnoredTimeout(t *testing.T) {
 				if indentOf(lines[j]) <= blockIndent {
 					break // left the interceptor block
 				}
-				if strings.Contains(lines[j], "timeout:") {
+				if timeoutKey.MatchString(lines[j]) {
 					t.Errorf("%s:%d: wasm interceptor example sets timeout:, which no Flow builder applies", path, j+1)
 				}
 			}
