@@ -600,7 +600,6 @@ interceptors:
   - type: wasm
     config:
       module: /etc/fiso/wasm/pii-mask.wasm
-      timeout: "2s"
 
 cloudevents:
   id: '"customer-" + data.customer_id + "-" + string(data.created_at)'
@@ -1176,7 +1175,6 @@ interceptors:
   - type: wasm
     config:
       module: /etc/fiso/wasm/enrich-customer.wasm
-      timeout: "5s"
 
 sink:
   type: http

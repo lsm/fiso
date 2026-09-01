@@ -1284,7 +1284,6 @@ interceptors:
   - type: wasm
     config:
       module: /etc/fiso/wasm/transform.wasm
-      timeout: "5s"
 sink:
   type: http
   config:
@@ -1317,8 +1316,8 @@ Expected output:
 
 The Wasmer engine runs the same per-request WASM model as wazero — modules
 are invoked per request over a host-side HTTP facade. WASM modules have no
-network access, no threads, and no persistent state between invocations;
-only the engine differs.
+network access, no threads, and no in-memory state between invocations
+(files under a configured preopen do persist); only the engine differs.
 
 **Deployment Modes:**
 - **fiso-wasmer**: Standalone Wasmer app runner

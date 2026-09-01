@@ -1435,6 +1435,42 @@ sink:
 	}
 }
 
+func TestFlowDefinition_ValidateWasmRuntimeValueType(t *testing.T) {
+	tests := []struct {
+		name    string
+		runtime interface{}
+		wantErr string
+	}{
+		{name: "boolean runtime", runtime: true, wantErr: "must be 'wazero' or 'wasmer', got non-string value"},
+		{name: "numeric runtime", runtime: 42, wantErr: "must be 'wazero' or 'wasmer', got non-string value"},
+		{name: "null runtime treated as omitted", runtime: nil},
+		{name: "wazero", runtime: "wazero"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module":  "/path/to/module.wasm",
+					"runtime": tt.runtime,
+				}}},
+			}
+			err := flow.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestFlowDefinition_ValidateRejectsUnimplementedInterceptorTypes(t *testing.T) {
 	// wasmer-app is validated today but implemented by no binary; until one
 	// does, validation must reject it (ADR 0003).

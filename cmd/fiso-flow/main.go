@@ -534,9 +534,14 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 			case "wasm":
 				modulePath := getString(ic.Config, "module")
 				// This binary has no wasmer support; fail closed instead of
-				// silently running the module under wazero.
-				if runtimeType := getString(ic.Config, "runtime"); runtimeType != "" && runtimeType != "wazero" {
-					return nil, fmt.Errorf("wasm interceptor %s: runtime %q requires %s built with -tags wasmer", modulePath, runtimeType, "fiso-flow-wasmer")
+				// silently running the module under wazero. A present,
+				// non-nil runtime value must be a usable string (null is
+				// treated as omitted, matching Flow validation).
+				if rt, present := ic.Config["runtime"]; present && rt != nil {
+					runtimeType, isStr := rt.(string)
+					if !isStr || (runtimeType != "" && runtimeType != "wazero") {
+						return nil, fmt.Errorf("wasm interceptor %s: runtime %v requires fiso-flow-wasmer built with -tags wasmer", modulePath, rt)
+					}
 				}
 				wasmBytes, err := os.ReadFile(modulePath)
 				if err != nil {

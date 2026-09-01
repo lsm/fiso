@@ -111,11 +111,15 @@ func (f *FlowDefinition) Validate() error {
 			if _, ok := ic.Config["module"].(string); !ok {
 				errs = append(errs, fmt.Errorf("interceptors[%d].config.module is required for wasm interceptor", i))
 			}
-			// Validate runtime if specified
-			if runtime, ok := ic.Config["runtime"].(string); ok {
+			// Validate runtime if specified. A present, non-nil value must be
+			// a known runtime string; null is treated as omitted.
+			if runtime, present := ic.Config["runtime"]; present && runtime != nil {
+				runtimeStr, isStr := runtime.(string)
 				validRuntimes := map[string]bool{"wazero": true, "wasmer": true}
-				if !validRuntimes[runtime] {
-					errs = append(errs, fmt.Errorf("interceptors[%d].config.runtime must be 'wazero' or 'wasmer', got %q", i, runtime))
+				if !isStr {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.runtime must be 'wazero' or 'wasmer', got non-string value", i))
+				} else if !validRuntimes[runtimeStr] {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.runtime must be 'wazero' or 'wasmer', got %q", i, runtimeStr))
 				}
 			}
 		}

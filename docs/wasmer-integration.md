@@ -13,11 +13,14 @@ transformed payload. Specifically:
   or call HTTP APIs from inside the module. There is no guest networking of
   any kind.
 - **No threads.** Guests run single-threaded; there is no pthread support.
-- **No persistent state.** Every invocation runs a fresh instance, so module
-  globals, counters, and connection-like state reset on each request.
+- **No in-memory persistent state.** Every invocation runs a fresh instance,
+  so module globals, counters, and connection-like state reset on each
+  request. Files written through a configured `preopens` directory do
+  persist across invocations — only memory resets.
 - **HTTP serving is host-side, not in-guest.** A "Wasmer app" is a Go HTTP
   server in the Fiso process that invokes the module per request and
-  translates between HTTP and the module's stdin/stdout JSON ABI. The module
+  translates between HTTP and the module's input/output JSON ABI (see
+  Building WASM Modules for the per-engine input mechanism). The module
   never accepts a connection itself.
 
 This is the same shape the standardized `wasi:http` interface later
@@ -146,7 +149,16 @@ considered healthy immediately at startup, before the first check completes.
 
 ## Building WASM Modules
 
-The module contract is stdin-to-stdout JSON (the same ABI for both engines):
+The two engines deliver input differently — a module written for one will
+not read input under the other:
+
+- **wazero**: the JSON payload is piped to the module's **stdin**; the
+  transformed payload is read from **stdout**.
+- **wasmer**: input is written to a temporary file mapped into the guest,
+  and the module receives `--stdin-file <path>` as a **command-line
+  argument** — it must parse that argument and read the file. Output is
+  still stdout. A stdin-reading module run under wasmer receives no input
+  and will fail or produce empty output.
 
 ### Go (wasip1)
 
@@ -167,9 +179,9 @@ rustup target add wasm32-wasi
 cargo build --target wasm32-wasi --release
 ```
 
-Because guests have no network access and no persistent state, modules that
-need to call external services should do so through Fiso's own outbound path
-(Fiso-Link) rather than inside the module.
+Because guests have no network access and no in-memory persistent state,
+modules that need to call external services should do so through Fiso's own
+outbound path (Fiso-Link) rather than inside the module.
 
 ## Building Fiso with Wasmer
 
@@ -243,8 +255,8 @@ file /path/to/app.wasm  # Should show "WebAssembly binary"
 
 1. **CGO Required:** Wasmer builds require a C compiler and produce larger
    binaries.
-2. **Per-request model:** every invocation runs a fresh instance; no state
-   carries between requests.
+2. **Per-request model:** every invocation runs a fresh instance; in-memory
+   state does not carry between requests (files under a preopen do).
 3. **No guest networking or threading:** modules cannot open sockets, spawn
    threads, or keep resident processes.
 4. **Host-side serving:** app HTTP endpoints are served by the Fiso process,
