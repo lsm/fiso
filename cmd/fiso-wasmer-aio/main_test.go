@@ -124,3 +124,24 @@ func TestBuildPipeline_UnimplementedInterceptorErrors(t *testing.T) {
 		t.Fatalf("expected error to name wasmer-app, got %v", err)
 	}
 }
+
+// TestBuildPipeline_GRPCInterceptor pins that a grpc interceptor — accepted
+// by the shared validator — is constructible by this builder (ADR 0003).
+func TestBuildPipeline_GRPCInterceptor(t *testing.T) {
+	flowDef := &config.FlowDefinition{
+		Name:   "grpc-interceptor-flow",
+		Source: config.SourceConfig{Type: "grpc", Config: map[string]interface{}{"listenAddr": "127.0.0.1:0"}},
+		Sink:   config.SinkConfig{Type: "http", Config: map[string]interface{}{"url": "http://127.0.0.1:19090"}},
+		Interceptors: []config.InterceptorConfig{{
+			Type:   "grpc",
+			Config: map[string]interface{}{"address": "127.0.0.1:19091"},
+		}},
+	}
+	p, err := buildPipeline(flowDef, slog.Default(), httpsource.NewServerPool(slog.Default()), noop.NewTracerProvider().Tracer("test"))
+	if err != nil {
+		t.Fatalf("grpc interceptor must be constructible: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected a pipeline")
+	}
+}

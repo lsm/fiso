@@ -107,6 +107,24 @@ func (f *FlowDefinition) Validate() error {
 		} else if !validInterceptorTypes[ic.Type] {
 			errs = append(errs, fmt.Errorf("interceptors[%d].type %q is not valid (must be one of: wasm, grpc)", i, ic.Type))
 		}
+		if ic.Type == "grpc" {
+			// The wired interceptor dials a sidecar; it must have a usable
+			// address and, when supplied, a positive timeout duration.
+			address, ok := ic.Config["address"].(string)
+			if !ok || address == "" {
+				errs = append(errs, fmt.Errorf("interceptors[%d].config.address is required for grpc interceptor", i))
+			}
+			if timeout, present := ic.Config["timeout"]; present && timeout != nil {
+				timeoutStr, isStr := timeout.(string)
+				if !isStr {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.timeout must be a duration string", i))
+				} else if d, err := time.ParseDuration(timeoutStr); err != nil {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.timeout %q is not a valid duration", i, timeoutStr))
+				} else if d <= 0 {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.timeout %q must be positive", i, timeoutStr))
+				}
+			}
+		}
 		if ic.Type == "wasm" {
 			if _, ok := ic.Config["module"].(string); !ok {
 				errs = append(errs, fmt.Errorf("interceptors[%d].config.module is required for wasm interceptor", i))

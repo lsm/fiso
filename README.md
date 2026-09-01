@@ -1291,6 +1291,21 @@ sink:
     method: POST
 ```
 
+### gRPC Interceptors
+
+A `grpc` interceptor delegates processing to an external sidecar service over
+a raw-unary gRPC call to `/fiso.v1.InterceptorService/Process` — the same
+`{payload, headers, direction}` envelope as the WASM ABI, as raw JSON bytes
+with no protobuf. Any language with a gRPC server can implement the sidecar.
+
+```yaml
+interceptors:
+  - type: grpc
+    config:
+      address: interceptor-sidecar:50051  # required
+      timeout: 5s                          # optional, default 5s, must be positive
+```
+
 ### Supported Languages
 
 - **Go** — Native support via `GOOS=wasip1 GOARCH=wasm`
