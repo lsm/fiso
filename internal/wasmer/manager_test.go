@@ -9,9 +9,6 @@ import (
 
 func TestNewPortPool(t *testing.T) {
 	pool := NewPortPool(9000, 9999)
-	if pool == nil {
-		t.Fatal("NewPortPool returned nil")
-	}
 	if pool.minPort != 9000 {
 		t.Errorf("minPort = %d, want 9000", pool.minPort)
 	}
@@ -152,9 +149,6 @@ func TestPortPool_ConcurrentAllocation(t *testing.T) {
 
 func TestNewManager(t *testing.T) {
 	manager := NewManager()
-	if manager == nil {
-		t.Fatal("NewManager returned nil")
-	}
 	if manager.apps == nil {
 		t.Error("apps map is nil")
 	}
