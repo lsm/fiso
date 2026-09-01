@@ -93,7 +93,7 @@ func run() error {
 
 	// Initialize Wasmer app manager
 	appManager := wasmer.NewManager()
-	defer appManager.StopAll(context.Background())
+	defer func() { _ = appManager.StopAll(context.Background()) }()
 
 	// Load Wasmer apps if config has wasmer section
 	wasmerConfigPath := os.Getenv("FISO_WASMER_CONFIG")
@@ -114,7 +114,7 @@ func run() error {
 		for _, appCfg := range wasmerCfg.Apps {
 			if err := appManager.StartApp(ctx, appCfg); err != nil {
 				logger.Error("failed to start wasmer app", "name", appCfg.Name, "error", err)
-				appManager.StopAll(ctx)
+				_ = appManager.StopAll(ctx) // best-effort cleanup on the start-failure path
 				return fmt.Errorf("start wasmer app %s: %w", appCfg.Name, err)
 			}
 			app, _ := appManager.GetApp(appCfg.Name)

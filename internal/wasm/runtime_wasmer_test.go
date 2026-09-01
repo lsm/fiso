@@ -27,7 +27,7 @@ func TestWasmerRuntime_NewWasmerRuntime_ValidModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWasmerRuntime failed: %v", err)
 	}
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	if rt.Type() != RuntimeWasmer {
 		t.Errorf("Type() = %q, want %q", rt.Type(), RuntimeWasmer)
@@ -65,7 +65,7 @@ func TestWasmerRuntime_Call_ValidInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWasmerRuntime failed: %v", err)
 	}
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	input := []byte(`{"payload":{"test":"data"},"headers":{},"direction":"inbound"}`)
 	output, err := rt.Call(ctx, input)
@@ -95,7 +95,7 @@ func TestWasmerRuntime_Call_CancelledContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWasmerRuntime failed: %v", err)
 	}
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	// Create already-cancelled context
 	ctx, cancel := context.WithCancel(ctx)
@@ -126,7 +126,7 @@ func TestWasmerRuntime_Call_WithTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWasmerRuntime failed: %v", err)
 	}
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	input := []byte(`{"payload":{"test":"data"},"headers":{},"direction":"inbound"}`)
 	output, err := rt.Call(ctx, input)
@@ -193,7 +193,7 @@ func TestWasmerRuntime_Call_AfterClose(t *testing.T) {
 		t.Fatalf("NewWasmerRuntime failed: %v", err)
 	}
 
-	rt.Close()
+	_ = rt.Close()
 
 	input := []byte(`{"payload":{}}`)
 	_, err = rt.Call(ctx, input)

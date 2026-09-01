@@ -29,7 +29,10 @@ jobs:
         # construction evidence to run in CI, including the Wasmer-tagged bins.
         run: |
           go test -count=1 ./cmd/fiso-flow/...
-          go test -tags wasmer -count=1 ./cmd/fiso-flow-wasmer/... ./cmd/fiso-wasmer-aio/...
+          go test -tags wasmer -count=1 \
+            ./cmd/fiso-flow-wasmer/... ./cmd/fiso-wasmer-aio/... \
+            ./cmd/fiso-wasmer/... ./cmd/fiso-wasmer-link/... \
+            ./internal/wasmer/... ./internal/wasm/...
 
       - name: Check coverage
         run: |
@@ -89,6 +92,14 @@ jobs:
         with:
           version: v2.8.0
 
+      - name: golangci-lint (wasmer-tagged code)
+        # Default tags hide every //go:build wasmer file from lint; run a
+        # second pass so that surface is linted too.
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.8.0
+          args: --build-tags=wasmer ./cmd/... ./internal/wasmer/... ./internal/wasm/...
+
   checks:
     runs-on: ubuntu-latest
     steps:
@@ -122,6 +133,7 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+          CGO_ENABLED=1 govulncheck -tags wasmer ./cmd/... ./internal/wasmer/... ./internal/wasm/...
 
   build:
     runs-on: ubuntu-latest

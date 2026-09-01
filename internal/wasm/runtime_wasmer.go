@@ -101,7 +101,7 @@ func (w *WasmerRuntime) Call(ctx context.Context, input []byte) ([]byte, error) 
 	if err := os.WriteFile(stdinFile, input, 0600); err != nil {
 		return nil, fmt.Errorf("write stdin file: %w", err)
 	}
-	defer os.Remove(stdinFile)
+	defer func() { _ = os.Remove(stdinFile) }()
 
 	// Build WASI environment
 	builder := wasmer.NewWasiStateBuilder(w.config.ModulePath)
