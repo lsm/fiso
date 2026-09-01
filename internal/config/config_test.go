@@ -1490,6 +1490,27 @@ sink:
 	}
 }
 
+func TestFlowDefinition_ValidateRejectsUnimplementedInterceptorTypes(t *testing.T) {
+	// wasmer-app is validated today but implemented by no binary; until one
+	// does, validation must reject it (ADR 0003).
+	flow := FlowDefinition{
+		Name:   "wasmer-app-flow",
+		Source: SourceConfig{Type: "http"},
+		Sink:   SinkConfig{Type: "http"},
+		Interceptors: []InterceptorConfig{{
+			Type:   "wasmer-app",
+			Config: map[string]interface{}{"module": "app.wasm", "execution": "longRunning"},
+		}},
+	}
+	err := flow.Validate()
+	if err == nil {
+		t.Fatal("expected wasmer-app interceptor type to be rejected")
+	}
+	if !strings.Contains(err.Error(), "wasmer-app") {
+		t.Fatalf("expected error to name wasmer-app, got %v", err)
+	}
+}
+
 func TestFlowDefinition_ValidateZeroMaxRetries(t *testing.T) {
 	// Zero maxRetries should be valid
 	flow := FlowDefinition{
