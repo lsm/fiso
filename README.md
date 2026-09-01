@@ -1337,9 +1337,11 @@ interceptors:
 Only `module` and `runtime` are honored; the plain `fiso-flow` binary
 rejects `runtime: wasmer` instead of silently downgrading to wazero.
 
-**Building:**
+**Building** (the flow example above needs the flow binary, run with
+`FISO_CONFIG_DIR` pointing at the flow definitions):
 ```bash
-CGO_ENABLED=1 go build -tags wasmer -o fiso-wasmer ./cmd/fiso-wasmer
+CGO_ENABLED=1 go build -tags wasmer -o fiso-flow-wasmer ./cmd/fiso-flow-wasmer
+FISO_CONFIG_DIR=/etc/fiso/flows ./fiso-flow-wasmer
 ```
 
 The wasmer binaries are experimental and are not part of GitHub releases;
