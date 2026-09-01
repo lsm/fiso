@@ -18,7 +18,7 @@ import (
 var (
 	validSourceTypes      = map[string]bool{"kafka": true, "grpc": true, "http": true}
 	validSinkTypes        = map[string]bool{"http": true, "grpc": true, "temporal": true, "kafka": true}
-	validInterceptorTypes = map[string]bool{"wasm": true, "grpc": true, "wasmer-app": true}
+	validInterceptorTypes = map[string]bool{"wasm": true, "grpc": true}
 )
 
 // Validate checks the FlowDefinition for configuration errors.
@@ -111,23 +111,15 @@ func (f *FlowDefinition) Validate() error {
 			if _, ok := ic.Config["module"].(string); !ok {
 				errs = append(errs, fmt.Errorf("interceptors[%d].config.module is required for wasm interceptor", i))
 			}
-			// Validate runtime if specified
-			if runtime, ok := ic.Config["runtime"].(string); ok {
+			// Validate runtime if specified. A present, non-nil value must be
+			// a known runtime string; null is treated as omitted.
+			if runtime, present := ic.Config["runtime"]; present && runtime != nil {
+				runtimeStr, isStr := runtime.(string)
 				validRuntimes := map[string]bool{"wazero": true, "wasmer": true}
-				if !validRuntimes[runtime] {
-					errs = append(errs, fmt.Errorf("interceptors[%d].config.runtime must be 'wazero' or 'wasmer', got %q", i, runtime))
-				}
-			}
-		}
-		if ic.Type == "wasmer-app" {
-			if _, ok := ic.Config["module"].(string); !ok {
-				errs = append(errs, fmt.Errorf("interceptors[%d].config.module is required for wasmer-app interceptor", i))
-			}
-			// Validate execution mode if specified
-			if exec, ok := ic.Config["execution"].(string); ok {
-				validModes := map[string]bool{"perRequest": true, "longRunning": true, "pooled": true}
-				if !validModes[exec] {
-					errs = append(errs, fmt.Errorf("interceptors[%d].config.execution must be 'perRequest', 'longRunning', or 'pooled', got %q", i, exec))
+				if !isStr {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.runtime must be 'wazero' or 'wasmer', got non-string value", i))
+				} else if !validRuntimes[runtimeStr] {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.runtime must be 'wazero' or 'wasmer', got %q", i, runtimeStr))
 				}
 			}
 		}
@@ -260,14 +252,35 @@ func (l *Loader) OnChange(fn func(map[string]*FlowDefinition)) {
 	l.onChange = fn
 }
 
-// Load reads all YAML files from the configured directory.
+// Load reads all YAML files from the configured directory. Files that fail
+// to parse or validate are logged and skipped.
 func (l *Loader) Load() (map[string]*FlowDefinition, error) {
+	flows, _, err := l.loadEntries(false)
+	return flows, err
+}
+
+// LoadStrict reads all YAML files like Load but returns an error joining
+// every parse or validation failure instead of logging and skipping the
+// file. Binaries that must fail closed on invalid configuration use this.
+func (l *Loader) LoadStrict() (map[string]*FlowDefinition, error) {
+	flows, errs, err := l.loadEntries(true)
+	if err != nil {
+		return nil, err
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return flows, nil
+}
+
+func (l *Loader) loadEntries(strict bool) (map[string]*FlowDefinition, []error, error) {
 	entries, err := os.ReadDir(l.dir)
 	if err != nil {
-		return nil, fmt.Errorf("read config dir %s: %w", l.dir, err)
+		return nil, nil, fmt.Errorf("read config dir %s: %w", l.dir, err)
 	}
 
 	flows := make(map[string]*FlowDefinition)
+	var errs []error
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -280,7 +293,11 @@ func (l *Loader) Load() (map[string]*FlowDefinition, error) {
 		path := filepath.Join(l.dir, entry.Name())
 		flow, err := l.loadFile(path)
 		if err != nil {
-			l.logger.Error("failed to load config file", "path", path, "error", err)
+			if strict {
+				errs = append(errs, err)
+			} else {
+				l.logger.Error("failed to load config file", "path", path, "error", err)
+			}
 			continue
 		}
 		flows[flow.Name] = flow
@@ -290,7 +307,7 @@ func (l *Loader) Load() (map[string]*FlowDefinition, error) {
 	l.flows = flows
 	l.mu.Unlock()
 
-	return flows, nil
+	return flows, errs, nil
 }
 
 // Watch starts watching the config directory for changes. Blocks until ctx.Done.
@@ -352,12 +369,12 @@ func (l *Loader) GetFlows() map[string]*FlowDefinition {
 func (l *Loader) loadFile(path string) (*FlowDefinition, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
 	var flow FlowDefinition
 	if err := yaml.Unmarshal(data, &flow); err != nil {
-		return nil, fmt.Errorf("parse yaml: %w", err)
+		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 
 	if err := flow.Validate(); err != nil {

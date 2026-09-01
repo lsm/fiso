@@ -61,7 +61,7 @@ func run() error {
 	slog.SetDefault(logger)
 
 	slog.Info("starting fiso-flow-wasmer", "log_level", level.String())
-	slog.Info("this binary includes Wasmer runtime support for wasmer-app interceptors")
+	slog.Info("this binary can select the wasmer engine for wasm interceptors via runtime: wasmer")
 
 	// Initialize tracing
 	tracerCfg := tracing.GetConfig("fiso-flow-wasmer")
@@ -87,7 +87,9 @@ func run() error {
 
 	// Load configuration
 	loader := config.NewLoader(configDir, logger)
-	flows, err := loader.Load()
+	// Strict: an invalid flow file fails startup instead of being logged
+	// and silently skipped.
+	flows, err := loader.LoadStrict()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

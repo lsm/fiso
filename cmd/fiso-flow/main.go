@@ -83,7 +83,9 @@ func run() error {
 
 	// Load configuration
 	loader := config.NewLoader(configDir, logger)
-	flows, err := loader.Load()
+	// Strict: an invalid flow file fails startup instead of being logged
+	// and silently skipped.
+	flows, err := loader.LoadStrict()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -533,6 +535,16 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 			switch ic.Type {
 			case "wasm":
 				modulePath := getString(ic.Config, "module")
+				// This binary has no wasmer support; fail closed instead of
+				// silently running the module under wazero. A present,
+				// non-nil runtime value must be a usable string (null is
+				// treated as omitted, matching Flow validation).
+				if rt, present := ic.Config["runtime"]; present && rt != nil {
+					runtimeType, isStr := rt.(string)
+					if !isStr || (runtimeType != "" && runtimeType != "wazero") {
+						return nil, fmt.Errorf("wasm interceptor %s: runtime %v requires fiso-flow-wasmer built with -tags wasmer", modulePath, rt)
+					}
+				}
 				wasmBytes, err := os.ReadFile(modulePath)
 				if err != nil {
 					return nil, fmt.Errorf("read wasm module %s: %w", modulePath, err)

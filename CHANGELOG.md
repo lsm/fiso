@@ -10,6 +10,35 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **Corrected the WASM/Wasmer capability contract** — authoritative
+  documentation no longer claims WASIX sockets, threading, database
+  connectivity, or full in-guest applications (Django/FastAPI/Next.js) for
+  the Wasmer runtime. The executable contract is now stated explicitly:
+  WASM modules are invoked per request over a host-side HTTP facade, with no
+  network access, no threads, and no persistent in-memory state between
+  invocations (files written through a configured preopen do persist). The
+  wasmer engine delivers input via a mapped `--stdin-file` argument rather
+  than stdin — a stdin-based module does not work unchanged under wasmer.
+  Configuration knobs with no runtime effect (`execution`, `memoryMB` on
+  apps; `timeout`/`memoryLimit`/`env`/`preopens` on interceptors) are
+  documented as such. A documentation-contract test under `test/contracts`
+  now rejects unsupported capability claims in authoritative docs.
+
+### Removed
+
+- **Advertised-but-unimplemented `wasmer-app` interceptor type** — accepted by
+  Flow validation but implemented by no binary. It is now rejected with an
+  actionable error until a binary executes it (ADR 0003).
+
+### Fixed
+
+- **No more silent WASM downgrades** — the plain `fiso-flow` binary now
+  rejects `runtime: wasmer` with an explicit error instead of silently
+  running the module under wazero, and `fiso-wasmer-aio` fails construction
+  on unsupported interceptor types instead of silently skipping them.
+
 ## [0.20.0] — 2026-08-31
 
 ### Added

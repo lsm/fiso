@@ -600,7 +600,6 @@ interceptors:
   - type: wasm
     config:
       module: /etc/fiso/wasm/pii-mask.wasm
-      timeout: "2s"
 
 cloudevents:
   id: '"customer-" + data.customer_id + "-" + string(data.created_at)'
@@ -1176,7 +1175,6 @@ interceptors:
   - type: wasm
     config:
       module: /etc/fiso/wasm/enrich-customer.wasm
-      timeout: "5s"
 
 sink:
   type: http
@@ -1187,6 +1185,11 @@ sink:
 
 **`enrich-customer.wasm` (Go):**
 
+WASM modules cannot make network calls — there is no guest networking in
+either runtime. A module transforms only the data it is given; enrichment
+that needs an external service happens through Fiso's own outbound path
+(Fiso-Link), not inside the module.
+
 ```go
 package main
 
@@ -1194,9 +1197,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
-	"time"
 )
 
 type Event struct {
@@ -1206,27 +1207,34 @@ type Event struct {
 	Data        map[string]interface{} `json:"data"`
 }
 
+// envelope is the interceptor ABI: the pipeline sends
+// {payload, headers, direction} and expects {payload, headers} back.
+type envelope struct {
+	Payload   json.RawMessage `json:"payload"`
+	Headers   map[string]string `json:"headers"`
+	Direction string          `json:"direction"`
+}
+
 func main() {
 	input, _ := io.ReadAll(os.Stdin)
 
-	var event Event
-	json.Unmarshal(input, &event)
+	var env envelope
+	json.Unmarshal(input, &env)
 
+	var event Event
+	json.Unmarshal(env.Payload, &event)
+
+	// Derive enrichment from the event payload itself. To combine this
+	// event with data from customer-service, deliver the event to your
+	// application (or a flow whose sink is the customer service) and let
+	// Fiso-Link mediate the outbound call — the module cannot call out.
 	if customerID, ok := event.Data["customer_id"]; ok {
-		// Fetch customer data from customer service
-		client := &http.Client{Timeout: 3 * time.Second}
-		resp, err := client.Get(fmt.Sprintf("http://customer-service:8080/customers/%v", customerID))
-		if err == nil {
-			defer resp.Body.Close()
-			var customer map[string]interface{}
-			if json.NewDecoder(resp.Body).Decode(&customer) == nil {
-				event.Data["customer"] = customer
-			}
-		}
+		event.Data["customer_ref"] = fmt.Sprintf("customer:%v", customerID)
 	}
 
-	output, _ := json.Marshal(event)
-	fmt.Println(string(output))
+	payload, _ := json.Marshal(event)
+	out, _ := json.Marshal(envelope{Payload: payload, Headers: env.Headers})
+	fmt.Println(string(out))
 }
 ```
 

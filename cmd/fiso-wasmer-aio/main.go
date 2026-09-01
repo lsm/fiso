@@ -168,9 +168,17 @@ func run() error {
 		cfg.Flow.ConfigDir = "/etc/fiso/flows"
 	}
 	loader := config.NewLoader(cfg.Flow.ConfigDir, logger)
-	flows, err := loader.Load()
-	if err != nil {
-		logger.Warn("failed to load flows, continuing without flow", "error", err)
+	flows := map[string]*config.FlowDefinition{}
+	if _, statErr := os.Stat(cfg.Flow.ConfigDir); os.IsNotExist(statErr) {
+		logger.Warn("flow config dir not present, continuing without flow", "dir", cfg.Flow.ConfigDir)
+	} else if statErr != nil {
+		// A present-but-inaccessible flow directory is a configuration
+		// error, not a missing component.
+		return fmt.Errorf("stat flow config dir: %w", statErr)
+	} else if flows, err = loader.LoadStrict(); err != nil {
+		// Invalid flow definitions fail startup: silently skipping a file
+		// would drop a configured pipeline without notice.
+		return fmt.Errorf("load flows: %w", err)
 	}
 
 	// Start config watcher
@@ -573,6 +581,8 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 				}
 
 				interceptors = append(interceptors, wasm.New(rt, modulePath))
+			default:
+				return nil, fmt.Errorf("unsupported interceptor type: %s", ic.Type)
 			}
 		}
 		chain = interceptor.NewChain(interceptors...)

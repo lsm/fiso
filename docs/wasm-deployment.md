@@ -439,7 +439,6 @@ data:
       - type: wasm
         config:
           module: /etc/fiso/modules/enrich.wasm
-          timeout: "5s"
     sink:
       type: http
       config:
@@ -573,7 +572,6 @@ interceptors:
   - type: wasm
     config:
       module: /etc/fiso/modules/enrich.wasm  # Path inside container
-      timeout: "5s"  # Optional: execution timeout (default: 5s)
 sink:
   type: http
   config:
@@ -599,17 +597,14 @@ interceptors:
   - type: wasm
     config:
       module: /etc/fiso/modules/validate.wasm
-      timeout: "2s"
   # Second: enrich with external data
   - type: wasm
     config:
       module: /etc/fiso/modules/enrich.wasm
-      timeout: "5s"
   # Third: transform to target format
   - type: wasm
     config:
       module: /etc/fiso/modules/transform.wasm
-      timeout: "3s"
 sink:
   type: http
   config:
@@ -661,7 +656,9 @@ resources:
 **Considerations:**
 - Each WASM execution uses memory from the container's allocation
 - Complex modules or large payloads need more memory
-- Set timeout to prevent long-running modules from blocking the pipeline
+- Note: the `timeout` interceptor key is documented in older examples but
+  is not currently applied by the Flow builders; do not rely on it to bound
+  module execution
 
 ### Health Checks
 
@@ -875,7 +872,7 @@ ERROR wasm module execution failed error="wasm: exit code 1"
 | Error | Cause | Solution |
 |-------|-------|----------|
 | `exit code 1` | Module panic or error | Check module error handling |
-| `timeout` | Execution took too long | Optimize module or increase timeout |
+| Module appears to hang | No execution bound is applied to Flow interceptor invocations today (the `timeout` key is not read) | A long-running invocation continues until the request context is cancelled; keep modules short-running |
 | `invalid JSON` | Malformed input/output | Validate JSON parsing in module |
 | `out of memory` | Memory limit exceeded | Increase container memory limit |
 

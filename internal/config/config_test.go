@@ -613,53 +613,9 @@ func TestFlowDefinition_Validate(t *testing.T) {
 			},
 		},
 		{
-			name: "wasmer-app interceptor valid",
-			flow: FlowDefinition{
-				Name:   "t",
-				Source: SourceConfig{Type: "http"},
-				Sink:   SinkConfig{Type: "http"},
-				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
-					"module": "/path/to/app.wasm",
-				}}},
-			},
-		},
-		{
-			name: "wasmer-app interceptor missing module",
-			flow: FlowDefinition{
-				Name:         "t",
-				Source:       SourceConfig{Type: "http"},
-				Sink:         SinkConfig{Type: "http"},
-				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{}}},
-			},
-			wantErr: "interceptors[0].config.module is required for wasmer-app interceptor",
-		},
-		{
-			name: "wasmer-app interceptor invalid execution mode",
-			flow: FlowDefinition{
-				Name:   "t",
-				Source: SourceConfig{Type: "http"},
-				Sink:   SinkConfig{Type: "http"},
-				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
-					"module":    "/path/to/app.wasm",
-					"execution": "invalid-mode",
-				}}},
-			},
-			wantErr: "interceptors[0].config.execution must be 'perRequest', 'longRunning', or 'pooled'",
-		},
-		{
-			name: "wasmer-app interceptor valid perRequest execution",
-			flow: FlowDefinition{
-				Name:   "t",
-				Source: SourceConfig{Type: "http"},
-				Sink:   SinkConfig{Type: "http"},
-				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
-					"module":    "/path/to/app.wasm",
-					"execution": "perRequest",
-				}}},
-			},
-		},
-		{
-			name: "wasmer-app interceptor valid longRunning execution",
+			// wasmer-app was accepted historically but implemented by no
+			// binary; rejected until one executes it (issue #34, ADR 0003).
+			name: "wasmer-app interceptor rejected",
 			flow: FlowDefinition{
 				Name:   "t",
 				Source: SourceConfig{Type: "http"},
@@ -669,18 +625,7 @@ func TestFlowDefinition_Validate(t *testing.T) {
 					"execution": "longRunning",
 				}}},
 			},
-		},
-		{
-			name: "wasmer-app interceptor valid pooled execution",
-			flow: FlowDefinition{
-				Name:   "t",
-				Source: SourceConfig{Type: "http"},
-				Sink:   SinkConfig{Type: "http"},
-				Interceptors: []InterceptorConfig{{Type: "wasmer-app", Config: map[string]interface{}{
-					"module":    "/path/to/app.wasm",
-					"execution": "pooled",
-				}}},
-			},
+			wantErr: `interceptors[0].type "wasmer-app" is not valid`,
 		},
 		{
 			name: "grpc interceptor valid",
@@ -976,8 +921,8 @@ func TestLoadFile_ReadError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when reading file without permissions")
 	}
-	if !strings.Contains(err.Error(), "read file") {
-		t.Errorf("expected 'read file' error, got: %v", err)
+	if !strings.Contains(err.Error(), "read "+path) {
+		t.Errorf("expected error naming the unreadable file, got: %v", err)
 	}
 }
 
@@ -1490,6 +1435,63 @@ sink:
 	}
 }
 
+func TestFlowDefinition_ValidateWasmRuntimeValueType(t *testing.T) {
+	tests := []struct {
+		name    string
+		runtime interface{}
+		wantErr string
+	}{
+		{name: "boolean runtime", runtime: true, wantErr: "must be 'wazero' or 'wasmer', got non-string value"},
+		{name: "numeric runtime", runtime: 42, wantErr: "must be 'wazero' or 'wasmer', got non-string value"},
+		{name: "null runtime treated as omitted", runtime: nil},
+		{name: "wazero", runtime: "wazero"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module":  "/path/to/module.wasm",
+					"runtime": tt.runtime,
+				}}},
+			}
+			err := flow.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestFlowDefinition_ValidateRejectsUnimplementedInterceptorTypes(t *testing.T) {
+	// wasmer-app is validated today but implemented by no binary; until one
+	// does, validation must reject it (ADR 0003).
+	flow := FlowDefinition{
+		Name:   "wasmer-app-flow",
+		Source: SourceConfig{Type: "http"},
+		Sink:   SinkConfig{Type: "http"},
+		Interceptors: []InterceptorConfig{{
+			Type:   "wasmer-app",
+			Config: map[string]interface{}{"module": "app.wasm", "execution": "longRunning"},
+		}},
+	}
+	err := flow.Validate()
+	if err == nil {
+		t.Fatal("expected wasmer-app interceptor type to be rejected")
+	}
+	if !strings.Contains(err.Error(), "wasmer-app") {
+		t.Fatalf("expected error to name wasmer-app, got %v", err)
+	}
+}
+
 func TestFlowDefinition_ValidateZeroMaxRetries(t *testing.T) {
 	// Zero maxRetries should be valid
 	flow := FlowDefinition{
@@ -1764,5 +1766,57 @@ func TestFlowDefinition_Validate_KafkaTransactionValidConfig(t *testing.T) {
 
 	if err := flow.Validate(); err != nil {
 		t.Fatalf("expected valid kafka_transaction config, got %v", err)
+	}
+}
+
+// TestLoadStrict_SurfacesInvalidFiles pins the strict-loading contract used
+// by binaries that must fail closed on invalid flow definitions: Load logs
+// and skips invalid files, LoadStrict returns their errors.
+func TestLoadStrict_SurfacesInvalidFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "good.yaml", `
+name: good-flow
+source:
+  type: http
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+	writeFile(t, dir, "bad.yaml", `
+name: bad-flow
+source:
+  type: http
+  config: {}
+sink:
+  type: http
+  config: {}
+interceptors:
+  - type: wasmer-app
+    config:
+      module: /etc/fiso/wasm/app.wasm
+`)
+
+	loader := NewLoader(dir, nil)
+	flows, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(flows) != 1 {
+		t.Fatalf("Load should skip the invalid file, got %d flows", len(flows))
+	}
+
+	// A parse failure must also name the offending file.
+	writeFile(t, dir, "malformed.yaml", "{{{{not yaml")
+
+	_, err = loader.LoadStrict()
+	if err == nil {
+		t.Fatal("LoadStrict must surface the invalid flow file")
+	}
+	if !strings.Contains(err.Error(), "bad.yaml") || !strings.Contains(err.Error(), "wasmer-app") {
+		t.Fatalf("expected error naming the file and the rejected type, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "malformed.yaml") {
+		t.Fatalf("expected parse failure to name its file, got %v", err)
 	}
 }

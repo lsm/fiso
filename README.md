@@ -1284,7 +1284,6 @@ interceptors:
   - type: wasm
     config:
       module: /etc/fiso/wasm/transform.wasm
-      timeout: "5s"
 sink:
   type: http
   config:
@@ -1313,9 +1312,15 @@ Expected output:
 {"data":{"key":"VALUE"}}
 ```
 
-### Wasmer Runtime for Full Applications
+### Wasmer Runtime (experimental)
 
-For WASM applications that require network access, threading, or database connectivity, Fiso supports the Wasmer runtime with WASIX support.
+The Wasmer engine runs the same per-request WASM model as wazero — modules
+are invoked per request over a host-side HTTP facade. WASM modules have no
+network access, no threads, and no in-memory state between invocations
+(files under a configured preopen do persist). Beyond the engine, the
+input mechanism also differs: wasmer delivers input as a `--stdin-file`
+argument rather than stdin, so a stdin-based module does not work
+unchanged under wasmer.
 
 **Deployment Modes:**
 - **fiso-wasmer**: Standalone Wasmer app runner
@@ -1330,15 +1335,22 @@ interceptors:
     config:
       module: /etc/fiso/modules/app.wasm
       runtime: wasmer    # Use wasmer instead of default wazero
-      timeout: 30s
 ```
 
-**Building:**
+Only `module` and `runtime` are honored; the plain `fiso-flow` binary
+rejects `runtime: wasmer` instead of silently downgrading to wazero.
+
+**Building** (the flow example above needs the flow binary, run with
+`FISO_CONFIG_DIR` pointing at the flow definitions):
 ```bash
-CGO_ENABLED=1 go build -tags wasmer -o fiso-wasmer ./cmd/fiso-wasmer
+CGO_ENABLED=1 go build -tags wasmer -o fiso-flow-wasmer ./cmd/fiso-flow-wasmer
+FISO_CONFIG_DIR=/etc/fiso/flows ./fiso-flow-wasmer
 ```
 
-See the [Wasmer Integration Guide](./docs/wasmer-integration.md) for full documentation.
+The wasmer binaries are experimental and are not part of GitHub releases;
+build them from source. See the
+[Wasmer Integration Guide](./docs/wasmer-integration.md) for the full,
+executable contract.
 
 ### Environment Variables
 

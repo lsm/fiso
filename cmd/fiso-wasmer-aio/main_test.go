@@ -103,3 +103,24 @@ func TestBuildPipeline_GRPCSink(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildPipeline_UnimplementedInterceptorErrors pins that unsupported
+// interceptor types fail construction instead of being silently dropped.
+func TestBuildPipeline_UnimplementedInterceptorErrors(t *testing.T) {
+	flowDef := &config.FlowDefinition{
+		Name:   "wasmer-app-flow",
+		Source: config.SourceConfig{Type: "grpc", Config: map[string]interface{}{"listenAddr": "127.0.0.1:0"}},
+		Sink:   config.SinkConfig{Type: "http", Config: map[string]interface{}{"url": "http://127.0.0.1:19090"}},
+		Interceptors: []config.InterceptorConfig{{
+			Type:   "wasmer-app",
+			Config: map[string]interface{}{"module": "app.wasm"},
+		}},
+	}
+	_, err := buildPipeline(flowDef, slog.Default(), httpsource.NewServerPool(slog.Default()), noop.NewTracerProvider().Tracer("test"))
+	if err == nil {
+		t.Fatal("expected unimplemented interceptor type to fail construction, got nil (silently dropped)")
+	}
+	if !strings.Contains(err.Error(), "wasmer-app") {
+		t.Fatalf("expected error to name wasmer-app, got %v", err)
+	}
+}
