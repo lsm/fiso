@@ -921,8 +921,8 @@ func TestLoadFile_ReadError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when reading file without permissions")
 	}
-	if !strings.Contains(err.Error(), "read file") {
-		t.Errorf("expected 'read file' error, got: %v", err)
+	if !strings.Contains(err.Error(), "read "+path) {
+		t.Errorf("expected error naming the unreadable file, got: %v", err)
 	}
 }
 
@@ -1806,11 +1806,17 @@ interceptors:
 		t.Fatalf("Load should skip the invalid file, got %d flows", len(flows))
 	}
 
+	// A parse failure must also name the offending file.
+	writeFile(t, dir, "malformed.yaml", "{{{{not yaml")
+
 	_, err = loader.LoadStrict()
 	if err == nil {
 		t.Fatal("LoadStrict must surface the invalid flow file")
 	}
 	if !strings.Contains(err.Error(), "bad.yaml") || !strings.Contains(err.Error(), "wasmer-app") {
 		t.Fatalf("expected error naming the file and the rejected type, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "malformed.yaml") {
+		t.Fatalf("expected parse failure to name its file, got %v", err)
 	}
 }

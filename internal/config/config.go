@@ -369,12 +369,12 @@ func (l *Loader) GetFlows() map[string]*FlowDefinition {
 func (l *Loader) loadFile(path string) (*FlowDefinition, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
 	var flow FlowDefinition
 	if err := yaml.Unmarshal(data, &flow); err != nil {
-		return nil, fmt.Errorf("parse yaml: %w", err)
+		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 
 	if err := flow.Validate(); err != nil {

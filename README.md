@@ -1317,7 +1317,10 @@ Expected output:
 The Wasmer engine runs the same per-request WASM model as wazero — modules
 are invoked per request over a host-side HTTP facade. WASM modules have no
 network access, no threads, and no in-memory state between invocations
-(files under a configured preopen do persist); only the engine differs.
+(files under a configured preopen do persist). Beyond the engine, the
+input mechanism also differs: wasmer delivers input as a `--stdin-file`
+argument rather than stdin, so a stdin-based module does not work
+unchanged under wasmer.
 
 **Deployment Modes:**
 - **fiso-wasmer**: Standalone Wasmer app runner

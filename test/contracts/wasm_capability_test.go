@@ -18,7 +18,7 @@ import (
 // affirmativeCapabilityClaim matches capability verbs joined to guest-level
 // networking/threading/application capabilities, e.g. "supports sockets and
 // threading", "enables database connectivity", "apps with network access".
-var affirmativeCapabilityClaim = regexp.MustCompile(`(?i)\b(support(?:s|ed|ing)?|enable(?:s|d)?|provid(?:e|es|ing)|offer(?:s|ing)?|requir(?:e|es|ing)|with)\b[^.]{0,100}\b(sockets?|threading|multithreading|pthreads|database connect\w+|network access|persistent (?:in-memory )?state|full[-\s]?fledged applications?|full applications?)\b`)
+var affirmativeCapabilityClaim = regexp.MustCompile(`(?i)\b(support(?:s|ed|ing)?|enable(?:s|d)?|provid(?:e|es|ing)|offer(?:s|ing)?|requir(?:e|es|ing)|with|can|may|able to)\b[^.]{0,100}\b(sockets?|threads?|threading|multithreading|pthreads|database connect\w+|network access|persistent (?:in-memory )?state|full[-\s]?fledged applications?|full applications?)\b`)
 
 // ecosystemTokens name the unsupported ecosystem explicitly; they may appear
 // only in negated context ("WASIX is not supported", "no Django").
@@ -27,14 +27,14 @@ var ecosystemTokens = regexp.MustCompile(`(?i)(WASIX|Django|FastAPI|Next\.js|pth
 // negatedSentence matches sentence-level limitation wording: a capability
 // mention whose sentence contains one of these forms is a limitation
 // statement, not a claim.
-var negatedSentence = regexp.MustCompile(`(?i)(do(?:es)? not (?:support|provide|enable|have|use|work)|(?:are|is|was|were) (?:not supported|unsupported)|cannot [a-z]+|can not [a-z]+|not (?:currently )?(?:supported|implemented|applied|available)|no longer [a-z]+|lacks? |excludes? |without )`)
+var negatedSentence = regexp.MustCompile(`(?i)((?:do(?:es)? not|don't|doesn't|cannot|can not|may not) (?:support|provide|enable|have|use|work|open|spawn|make|call)|(?:are|is|was|were) (?:not supported|unsupported)|not (?:currently )?(?:supported|implemented|applied|available)|no longer [a-z]+|\bno (?:wasm|wasmer|wazero|sockets?|threads?|threading|multithreading|pthreads|network access|database connectivity|WASIX|Django|FastAPI|Next\.js|poolSize)|lacks? |excludes? |without )`)
 
 // clauseSplit separates contrast clauses within a sentence.
 var clauseSplit = regexp.MustCompile(`(?i),?\s*(?:but|yet|however|whereas|while|though)\s+|;`)
 
 // wasmContext identifies sentences about WASM subjects; capability claims
 // attributed to anything else are out of this contract's scope.
-var wasmContext = regexp.MustCompile(`(?i)(wasm|wasmer|wazero|module|guest|interceptor|app)`)
+var wasmContext = regexp.MustCompile(`(?i)\b(wasm|wasmer|wazero|modules?|guests?|interceptors?|apps?)\b`)
 
 // negatedMentions are phrase-level limitation markers masked before
 // affirmative matching.

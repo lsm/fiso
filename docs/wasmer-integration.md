@@ -140,7 +140,8 @@ one:
 
 `bodyText` may substitute for `body` when the response is not JSON. This is
 the ABI used by `fiso-wasmer`, `fiso-wasmer-link`, and `fiso-wasmer-aio` app
-mode — distinct from the plain payload-in/payload-out interceptor ABI.
+mode — distinct from the interceptor envelope documented under Building
+WASM Modules.
 
 Fields with **no current runtime effect** (accepted for compatibility,
 documented here so nobody relies on them): `execution` and `memoryMB`.
@@ -166,13 +167,25 @@ considered healthy immediately at startup, before the first check completes.
 
 ## Building WASM Modules
 
-The two engines deliver input differently — a module written for one will
-not read input under the other:
+**The interceptor ABI.** A `wasm` interceptor does not receive the bare
+event payload: the pipeline sends a JSON envelope and expects one back.
 
-- **wazero**: the JSON payload is piped to the module's **stdin**; the
-  transformed payload is read from **stdout**.
-- **wasmer**: input is written to a temporary file mapped into the guest,
-  and the module receives `--stdin-file <path>` as a **command-line
+```json
+// input the module receives
+{ "payload": { ...event data... }, "headers": { ... },
+  "direction": "request" }
+
+// output the module returns
+{ "payload": { ...transformed data... }, "headers": { ... } }
+```
+
+**The two engines deliver that envelope differently** — a module written
+for one will not read input under the other:
+
+- **wazero**: the envelope JSON is piped to the module's **stdin**; the
+  response envelope is read from **stdout**.
+- **wasmer**: the envelope is written to a temporary file mapped into the
+  guest, and the module receives `--stdin-file <path>` as a **command-line
   argument** — it must parse that argument and read the file. Output is
   still stdout. A stdin-reading module run under wasmer receives no input
   and will fail or produce empty output.
