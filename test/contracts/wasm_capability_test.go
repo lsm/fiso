@@ -18,7 +18,7 @@ import (
 // affirmativeCapabilityClaim matches capability verbs joined to guest-level
 // networking/threading/application capabilities, e.g. "supports sockets and
 // threading", "enables database connectivity", "apps with network access".
-var affirmativeCapabilityClaim = regexp.MustCompile(`(?i)\b(support(?:s|ed|ing)?|enable(?:s|d)?|provid(?:e|es|ing)|offer(?:s|ing)?|requir(?:e|es|ing)|with|can|may|able to)\b[^.]{0,100}\b(sockets?|threads?|threading|multithreading|pthreads|database connect\w+|network access|persistent (?:in-memory )?state|full[-\s]?fledged applications?|full applications?)\b`)
+var affirmativeCapabilityClaim = regexp.MustCompile(`(?i)\b(support(?:s|ed|ing)?|enable(?:s|d)?|provid(?:e|es|ing)|offer(?:s|ing)?|requir(?:e|es|ing)|with|can|may|able to|open|opens|spawn|spawns|make|makes|call|calls)\b[^.]{0,100}\b(sockets?|threads?|threading|multithreading|pthreads|database connect\w+|network access|persistent (?:in-memory )?state|full[-\s]?fledged applications?|full applications?)\b`)
 
 // ecosystemTokens name the unsupported ecosystem explicitly; they may appear
 // only in negated context ("WASIX is not supported", "no Django").
@@ -115,15 +115,17 @@ func findWasmClaims(doc string) []claimLine {
 	}
 	var claims []claimLine
 	for _, m := range affirmativeCapabilityClaim.FindAllStringIndex(text, -1) {
-		sentence := sentenceOf(m[0], m[1])
+		clause := clauseOf(m[0], m[1])
 		// Negation in the match's own clause exempts it; negation elsewhere
 		// in the sentence does not.
-		if negatedSentence.MatchString(clauseOf(m[0], m[1])) {
+		if negatedSentence.MatchString(clause) {
 			continue
 		}
-		// Only claims attributed to a WASM subject count; capability
-		// statements about other components are not this contract's concern.
-		if !wasmContext.MatchString(sentence) {
+		// Only claims whose own clause attributes the capability to a WASM
+		// subject count; capability statements about other components are
+		// not this contract's concern even when WASM is mentioned elsewhere
+		// in the sentence.
+		if !wasmContext.MatchString(clause) {
 			continue
 		}
 		claims = append(claims, claimLine{line: lineOf(m[0]), match: strings.TrimSpace(text[m[0]:m[1]])})
@@ -131,11 +133,11 @@ func findWasmClaims(doc string) []claimLine {
 	// Ecosystem tokens: flag only when the surrounding clause carries no
 	// negation and the sentence is about WASM.
 	for _, m := range ecosystemTokens.FindAllStringIndex(unmasked, -1) {
-		sentence := sentenceOf(m[0], m[1])
-		if negatedSentence.MatchString(clauseOf(m[0], m[1])) {
+		clause := clauseOf(m[0], m[1])
+		if negatedSentence.MatchString(clause) {
 			continue
 		}
-		if !wasmContext.MatchString(sentence) {
+		if !wasmContext.MatchString(clause) {
 			continue
 		}
 		claims = append(claims, claimLine{line: lineOf(m[0]), match: strings.TrimSpace(unmasked[m[0]:m[1]])})

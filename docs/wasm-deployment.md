@@ -872,7 +872,7 @@ ERROR wasm module execution failed error="wasm: exit code 1"
 | Error | Cause | Solution |
 |-------|-------|----------|
 | `exit code 1` | Module panic or error | Check module error handling |
-| `timeout` | The `timeout` interceptor key is not currently applied by the Flow binaries | Do not rely on it; bound execution outside the module |
+| Module appears to hang | No execution bound is applied to Flow interceptor invocations today (the `timeout` key is not read) | A long-running invocation continues until the request context is cancelled; keep modules short-running |
 | `invalid JSON` | Malformed input/output | Validate JSON parsing in module |
 | `out of memory` | Memory limit exceeded | Increase container memory limit |
 

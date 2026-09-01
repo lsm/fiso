@@ -83,7 +83,9 @@ func run() error {
 
 	// Load configuration
 	loader := config.NewLoader(configDir, logger)
-	flows, err := loader.Load()
+	// Strict: an invalid flow file fails startup instead of being logged
+	// and silently skipped.
+	flows, err := loader.LoadStrict()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
