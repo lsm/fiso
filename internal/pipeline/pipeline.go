@@ -156,7 +156,10 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 		)
 	}
 
-	// Run interceptors
+	// Run interceptors. The interceptor ABI returns headers alongside the
+	// payload; they are merged into the sink delivery headers (the
+	// interceptor's Content-Type does not override the envelope's).
+	var interceptorHeaders map[string]string
 	if p.interceptors != nil && p.interceptors.Len() > 0 {
 		req := &interceptor.Request{
 			Payload:   payload,
@@ -168,6 +171,7 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 			return p.handleFailure(ctx, evt, "INTERCEPTOR_FAILED", err)
 		}
 		payload = result.Payload
+		interceptorHeaders = result.Headers
 	}
 
 	// Wrap in CloudEvent (skip if already in CE format)
@@ -183,10 +187,13 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 		return p.handleFailure(ctx, evt, "CLOUDEVENT_WRAP_FAILED", err)
 	}
 
-	// Deliver to sink
-	headers := map[string]string{
-		"Content-Type": "application/cloudevents+json",
+	// Deliver to sink. Interceptor-provided headers travel with the event;
+	// the envelope's content type and correlation stay authoritative.
+	headers := map[string]string{}
+	for k, v := range interceptorHeaders {
+		headers[k] = v
 	}
+	headers["Content-Type"] = "application/cloudevents+json"
 	headers = correlation.AddToHeaders(headers, corrID)
 
 	if err := p.sink.Deliver(ctx, wrapped, headers); err != nil {

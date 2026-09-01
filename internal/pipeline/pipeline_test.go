@@ -2950,3 +2950,43 @@ func TestToNative_ValueMethodFallbackAndDefaultReturn(t *testing.T) {
 		t.Fatalf("expected passthrough value, got %#v", got)
 	}
 }
+
+// headerInterceptor returns fixed headers alongside the payload, pinning
+// the interceptor ABI's header return path.
+type headerInterceptor struct {
+	headers map[string]string
+}
+
+func (h *headerInterceptor) Process(_ context.Context, req *interceptor.Request) (*interceptor.Request, error) {
+	return &interceptor.Request{Payload: req.Payload, Headers: h.headers, Direction: req.Direction}, nil
+}
+
+func (h *headerInterceptor) Close() error { return nil }
+
+// TestPipeline_InterceptorHeadersReachSink pins that headers returned by an
+// interceptor are delivered to the sink alongside the envelope's own
+// content type and correlation — the documented {payload, headers} ABI.
+func TestPipeline_InterceptorHeadersReachSink(t *testing.T) {
+	sk := &mockSink{}
+	chain := interceptor.NewChain(&headerInterceptor{
+		headers: map[string]string{"X-Enriched-By": "sidecar"},
+	})
+
+	p := New(Config{FlowName: "hdr-test"}, &mockSource{}, nil, sk, nil, chain)
+
+	evt := source.Event{Topic: "t", Headers: map[string]string{"origin": "kafka"}, CorrelationID: "corr-1"}
+	if err := p.processEvent(context.Background(), evt); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+
+	received := sk.received[0]
+	if got := received.headers["X-Enriched-By"]; got != "sidecar" {
+		t.Errorf("interceptor header not delivered: got %q", got)
+	}
+	if got := received.headers["Content-Type"]; got != "application/cloudevents+json" {
+		t.Errorf("envelope content type must stay authoritative, got %q", got)
+	}
+	if got := received.headers["fiso-correlation-id"]; got != "corr-1" {
+		t.Errorf("correlation header missing: got %q", got)
+	}
+}

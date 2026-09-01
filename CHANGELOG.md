@@ -14,7 +14,11 @@ unreleased work and will be versioned when a release tag is cut.
 
 - **gRPC interceptors are now executable** — the `grpc` interceptor type was
   accepted by validation but constructed by no binary; all Flow-capable
-  binaries now wire it. The sidecar contract is a raw-unary gRPC call to
+  binaries now wire it. The raw response bytes are copied out of gRPC's
+  receive buffer (pooled memory could otherwise race across concurrent
+  interceptor calls), and headers returned by any interceptor — wasm or
+  gRPC — now reach the sink; previously the pipeline kept only the payload
+  and silently discarded the documented `headers` return. The sidecar contract is a raw-unary gRPC call to
   `/fiso.v1.InterceptorService/Process` carrying the interceptor JSON
   envelope (`{payload, headers, direction}` in, `{payload, headers}` out) as
   raw bytes, mirroring the Flow gRPC sink's codec convention. `address` is

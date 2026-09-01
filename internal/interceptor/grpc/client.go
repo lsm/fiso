@@ -67,7 +67,10 @@ func (rawCodec) Unmarshal(data []byte, v interface{}) error {
 	if !ok {
 		return fmt.Errorf("rawCodec: expected *[]byte, got %T", v)
 	}
-	*bp = data
+	// Copy: gRPC-Go may recycle the receive buffer after Unmarshal returns,
+	// and the caller reads the bytes afterwards (concurrent RPCs would
+	// otherwise race on pooled memory).
+	*bp = append([]byte(nil), data...)
 	return nil
 }
 
