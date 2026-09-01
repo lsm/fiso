@@ -60,7 +60,7 @@ func main() {
 			if err := manager.StartApp(ctx, appCfg); err != nil {
 				fmt.Fprintf(os.Stderr, "Error starting app %s: %v\n", appCfg.Name, err)
 				// Stop already started apps
-				manager.StopAll(ctx)
+				_ = manager.StopAll(ctx) // best-effort cleanup on the start-failure path
 				os.Exit(1)
 			}
 			fmt.Printf("Started app %s\n", appCfg.Name)

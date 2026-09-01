@@ -51,7 +51,7 @@ func (p *Proxy) Forward(ctx context.Context, appName string, req *interceptor.Re
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)

@@ -103,7 +103,7 @@ func (w *WasmerAppRuntime) handleHTTP(rw http.ResponseWriter, req *http.Request)
 
 	var body []byte
 	if req.Body != nil {
-		defer req.Body.Close()
+		defer func() { _ = req.Body.Close() }()
 		b, err := io.ReadAll(req.Body)
 		if err != nil {
 			http.Error(rw, fmt.Sprintf("read body: %v", err), http.StatusBadRequest)

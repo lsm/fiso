@@ -74,7 +74,7 @@ func (p *PortPool) Allocate() (int, error) {
 			if err != nil {
 				continue
 			}
-			ln.Close()
+			_ = ln.Close() // port-probe listener
 
 			p.used[port] = true
 			return port, nil
@@ -179,7 +179,7 @@ func (m *Manager) StartApp(ctx context.Context, cfg AppConfig) error {
 	// Start the app
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	if _, err := runtime.Start(ctx); err != nil {
-		runtime.Close()
+		_ = runtime.Close() // best-effort cleanup on the start-failure path
 		m.portPool.Release(port)
 		return fmt.Errorf("start app: %w", err)
 	}
@@ -237,7 +237,7 @@ func (m *Manager) StopApp(ctx context.Context, name string) error {
 		return fmt.Errorf("stop app: %w", err)
 	}
 
-	app.Runtime.Close()
+	_ = app.Runtime.Close() // best-effort cleanup after a successful stop
 	m.portPool.Release(extractPort(app.Addr))
 	delete(m.apps, name)
 
@@ -274,7 +274,7 @@ func (m *Manager) StopAll(ctx context.Context) error {
 		if err := app.Runtime.Stop(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("stop %s: %w", name, err))
 		}
-		app.Runtime.Close()
+		_ = app.Runtime.Close() // best-effort cleanup
 		m.portPool.Release(extractPort(app.Addr))
 	}
 	m.apps = make(map[string]*AppInstance)
@@ -288,7 +288,7 @@ func (m *Manager) StopAll(ctx context.Context) error {
 // extractPort extracts the port from an address string.
 func extractPort(addr string) int {
 	var port int
-	fmt.Sscanf(addr, "127.0.0.1:%d", &port)
+	_, _ = fmt.Sscanf(addr, "127.0.0.1:%d", &port)
 	return port
 }
 
@@ -337,7 +337,7 @@ func (m *Manager) checkHealth(app *AppInstance) {
 		m.setAppHealth(app.Name, HealthUnhealthy)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		m.setAppHealth(app.Name, HealthHealthy)

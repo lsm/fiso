@@ -3,6 +3,7 @@
 package wasmer
 
 import (
+	"context"
 	"testing"
 )
 
@@ -205,7 +206,7 @@ func TestManager_ListApps_WithApps(t *testing.T) {
 func TestManager_StopApp_NotFound(t *testing.T) {
 	manager := NewManager()
 
-	err := manager.StopApp(nil, "nonexistent")
+	err := manager.StopApp(context.TODO(), "nonexistent")
 	if err == nil {
 		t.Error("expected error when stopping nonexistent app")
 	}
@@ -222,7 +223,7 @@ func TestManager_StartApp_AlreadyExists(t *testing.T) {
 		Module: "/path/to/module.wasm",
 	}
 
-	err := manager.StartApp(nil, cfg)
+	err := manager.StartApp(context.TODO(), cfg)
 	if err == nil {
 		t.Error("expected error when starting app that already exists")
 	}
@@ -236,7 +237,7 @@ func TestManager_StartApp_MissingModule(t *testing.T) {
 		Module: "/nonexistent/path/to/module.wasm",
 	}
 
-	err := manager.StartApp(nil, cfg)
+	err := manager.StartApp(context.TODO(), cfg)
 	if err == nil {
 		t.Error("expected error when starting app with missing module")
 	}

@@ -57,6 +57,7 @@ coverage-check: test
 
 lint:
 	golangci-lint run ./...
+	CGO_ENABLED=1 golangci-lint run --build-tags=wasmer ./cmd/... ./internal/wasmer/... ./internal/wasm/...
 
 fmt-check:
 	@UNFORMATTED=$$(gofmt -l .); \

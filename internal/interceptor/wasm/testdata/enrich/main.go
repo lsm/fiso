@@ -18,7 +18,26 @@ type wasmOutput struct {
 }
 
 func main() {
-	input, err := io.ReadAll(os.Stdin)
+	// The two engines deliver input differently: wazero pipes JSON to
+	// stdin; wasmer writes it to a file passed as --stdin-file. Support
+	// both so the same module runs under either engine. Args are parsed
+	// manually: the flag package exits(2) on any unexpected argument,
+	// which engines may pass.
+	var (
+		input    []byte
+		err      error
+		stdinArg string
+	)
+	for i := 1; i+1 < len(os.Args); i++ {
+		if os.Args[i] == "--stdin-file" {
+			stdinArg = os.Args[i+1]
+		}
+	}
+	if stdinArg != "" {
+		input, err = os.ReadFile(stdinArg)
+	} else {
+		input, err = io.ReadAll(os.Stdin)
+	}
 	if err != nil {
 		os.Exit(1)
 	}

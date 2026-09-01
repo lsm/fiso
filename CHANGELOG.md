@@ -12,6 +12,16 @@ unreleased work and will be versioned when a release tag is cut.
 
 ### Changed
 
+- **WASM verification hygiene** — wasmer-tagged code is now inside every
+  quality gate: CI runs the `internal/wasmer` and `internal/wasm` unit tests
+  (the only tests that execute modules through wasmer-go) and the two
+  remaining wasmer binaries' tests, lint runs a second pass with
+  `--build-tags=wasmer`, and `govulncheck` scans the tagged surface
+  (wazero also upgraded to v1.12.0). The blind spot was hiding real
+  breakage: the shared WASM test fixture only read stdin and failed under
+  the wasmer engine's `--stdin-file` input mechanism — it now supports
+  both — and 18 lint findings in the tagged code were fixed.
+
 - **Corrected the WASM/Wasmer capability contract** — authoritative
   documentation no longer claims WASIX sockets, threading, database
   connectivity, or full in-guest applications (Django/FastAPI/Next.js) for

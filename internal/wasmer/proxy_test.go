@@ -3,6 +3,7 @@
 package wasmer
 
 import (
+	"context"
 	"testing"
 
 	"github.com/lsm/fiso/internal/interceptor"
@@ -30,7 +31,7 @@ func TestProxy_Forward_AppNotFound(t *testing.T) {
 		Direction: interceptor.Inbound,
 	}
 
-	_, err := proxy.Forward(nil, "nonexistent-app", req)
+	_, err := proxy.Forward(context.TODO(), "nonexistent-app", req)
 	if err == nil {
 		t.Fatal("expected error when forwarding to nonexistent app")
 	}
@@ -53,7 +54,7 @@ func TestProxy_Forward_AppNotHealthy(t *testing.T) {
 		Direction: interceptor.Inbound,
 	}
 
-	_, err := proxy.Forward(nil, "unhealthy-app", req)
+	_, err := proxy.Forward(context.TODO(), "unhealthy-app", req)
 	if err == nil {
 		t.Fatal("expected error when forwarding to unhealthy app")
 	}
@@ -76,7 +77,7 @@ func TestProxy_Forward_AppStarting(t *testing.T) {
 		Direction: interceptor.Inbound,
 	}
 
-	_, err := proxy.Forward(nil, "starting-app", req)
+	_, err := proxy.Forward(context.TODO(), "starting-app", req)
 	if err == nil {
 		t.Fatal("expected error when forwarding to starting app")
 	}
@@ -99,7 +100,7 @@ func TestProxy_Forward_AppStopped(t *testing.T) {
 		Direction: interceptor.Inbound,
 	}
 
-	_, err := proxy.Forward(nil, "stopped-app", req)
+	_, err := proxy.Forward(context.TODO(), "stopped-app", req)
 	if err == nil {
 		t.Fatal("expected error when forwarding to stopped app")
 	}

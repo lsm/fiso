@@ -152,7 +152,7 @@ func run() error {
 
 	// 1. Start Wasmer Apps
 	appManager := wasmer.NewManager()
-	defer appManager.StopAll(context.Background())
+	defer func() { _ = appManager.StopAll(context.Background()) }()
 
 	for _, appCfg := range cfg.Wasmer.Apps {
 		if err := appManager.StartApp(ctx, appCfg); err != nil {
@@ -241,7 +241,7 @@ func run() error {
 				}
 			}
 			publisherPool := internal_kafka.NewPublisherPool(clusterRegistry)
-			defer publisherPool.Close()
+			defer func() { _ = publisherPool.Close() }()
 
 			// Build Link components
 			breakers := make(map[string]*circuitbreaker.Breaker)
@@ -288,7 +288,7 @@ func run() error {
 
 			store := link.NewTargetStore(linkCfg.Targets)
 			interceptorRegistry := linkinterceptor.NewRegistry(linkMetrics, logger)
-			defer interceptorRegistry.Close()
+			defer func() { _ = interceptorRegistry.Close() }()
 			if err := interceptorRegistry.Load(context.Background(), linkCfg.Targets); err != nil {
 				return fmt.Errorf("load link interceptors: %w", err)
 			}
@@ -341,13 +341,21 @@ func run() error {
 	defer shutdownCancel()
 
 	if linkServer != nil {
-		linkServer.Shutdown(shutdownCtx)
+		if err := linkServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("link server shutdown error", "error", err)
+		}
 	}
-	httpPool.Close()
+	if err := httpPool.Close(); err != nil {
+		logger.Error("http pool shutdown error", "error", err)
+	}
 	for _, runner := range runners {
-		runner.pipeline.Shutdown(shutdownCtx)
+		if err := runner.pipeline.Shutdown(shutdownCtx); err != nil {
+			logger.Error("pipeline shutdown error", "flow", runner.name, "error", err)
+		}
 	}
-	metricsServer.Shutdown(shutdownCtx)
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("metrics server shutdown error", "error", err)
+	}
 
 	return nil
 }
