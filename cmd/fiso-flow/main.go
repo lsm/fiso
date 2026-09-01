@@ -21,6 +21,7 @@ import (
 	"github.com/lsm/fiso/internal/dlq"
 	"github.com/lsm/fiso/internal/flowruntime"
 	"github.com/lsm/fiso/internal/interceptor"
+	grpcinterceptor "github.com/lsm/fiso/internal/interceptor/grpc"
 	"github.com/lsm/fiso/internal/interceptor/wasm"
 	"github.com/lsm/fiso/internal/observability"
 	"github.com/lsm/fiso/internal/pipeline"
@@ -555,6 +556,17 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 				}
 				interceptors = append(interceptors, wasm.New(rt, modulePath))
 				logger.Info("loaded wasm interceptor", "module", modulePath)
+			case "grpc":
+				client, err := grpcinterceptor.NewConnClient(getString(ic.Config, "address"))
+				if err != nil {
+					return nil, fmt.Errorf("grpc interceptor: %w", err)
+				}
+				var timeout time.Duration
+				if d, err := time.ParseDuration(getString(ic.Config, "timeout")); err == nil && d > 0 {
+					timeout = d
+				}
+				interceptors = append(interceptors, grpcinterceptor.New(client, timeout))
+				logger.Info("loaded grpc interceptor", "address", getString(ic.Config, "address"))
 			default:
 				return nil, fmt.Errorf("unsupported interceptor type: %s", ic.Type)
 			}

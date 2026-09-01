@@ -634,7 +634,7 @@ func TestFlowDefinition_Validate(t *testing.T) {
 				Source: SourceConfig{Type: "http"},
 				Sink:   SinkConfig{Type: "http"},
 				Interceptors: []InterceptorConfig{{Type: "grpc", Config: map[string]interface{}{
-					"endpoint": "localhost:9000",
+					"address": "localhost:9000",
 				}}},
 			},
 		},
@@ -1166,7 +1166,7 @@ func TestFlowDefinition_ValidateGRPCInterceptor(t *testing.T) {
 		Source: SourceConfig{Type: "http"},
 		Sink:   SinkConfig{Type: "http"},
 		Interceptors: []InterceptorConfig{
-			{Type: "grpc", Config: map[string]interface{}{"endpoint": "localhost:9000"}},
+			{Type: "grpc", Config: map[string]interface{}{"address": "localhost:9000"}},
 		},
 	}
 	err := flow.Validate()
@@ -1456,6 +1456,59 @@ func TestFlowDefinition_ValidateWasmRuntimeValueType(t *testing.T) {
 					"module":  "/path/to/module.wasm",
 					"runtime": tt.runtime,
 				}}},
+			}
+			err := flow.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestFlowDefinition_ValidateGRPCInterceptorConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  map[string]interface{}
+		wantErr string
+	}{
+		{
+			name:    "missing address",
+			config:  map[string]interface{}{},
+			wantErr: "interceptors[0].config.address is required for grpc interceptor",
+		},
+		{
+			name:    "non-string address",
+			config:  map[string]interface{}{"address": 50051},
+			wantErr: "interceptors[0].config.address is required for grpc interceptor",
+		},
+		{
+			name:    "invalid timeout",
+			config:  map[string]interface{}{"address": "sidecar:50051", "timeout": "not-a-duration"},
+			wantErr: `interceptors[0].config.timeout "not-a-duration" is not a valid duration`,
+		},
+		{
+			name:    "zero timeout",
+			config:  map[string]interface{}{"address": "sidecar:50051", "timeout": "0s"},
+			wantErr: `interceptors[0].config.timeout "0s" must be positive`,
+		},
+		{
+			name:   "valid",
+			config: map[string]interface{}{"address": "sidecar:50051", "timeout": "3s"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "grpc", Config: tt.config}},
 			}
 			err := flow.Validate()
 			if tt.wantErr == "" {
