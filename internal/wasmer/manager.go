@@ -4,6 +4,7 @@ package wasmer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -83,6 +84,19 @@ func (p *PortPool) Allocate() (int, error) {
 	return 0, fmt.Errorf("no available ports in range %d-%d", p.minPort, p.maxPort)
 }
 
+// Reserve marks an explicitly configured port as used so the pool's
+// accounting stays symmetric: an explicit-port app is never handed its own
+// port by Allocate, and its later Release is legitimate.
+func (p *PortPool) Reserve(port int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if port < p.minPort || port > p.maxPort || p.used[port] {
+		return false
+	}
+	p.used[port] = true
+	return true
+}
+
 // Release returns a port to the pool.
 func (p *PortPool) Release(port int) {
 	p.mu.Lock()
@@ -92,26 +106,16 @@ func (p *PortPool) Release(port int) {
 
 // NewManager creates a new Wasmer app manager.
 func NewManager() *Manager {
-	return &Manager{
-		apps:     make(map[string]*AppInstance),
-		portPool: NewPortPool(9000, 9999),
-	}
+	return NewManagerWithPortRange(9000, 9999)
 }
 
-// NewManagerWithLogger creates a new Wasmer app manager with a custom logger.
-func NewManagerWithLogger(logger *slog.Logger) *Manager {
+// NewManagerWithPortRange creates a Manager whose dynamic port pool uses
+// the supplied inclusive range instead of the 9000-9999 default.
+func NewManagerWithPortRange(minPort, maxPort int) *Manager {
 	return &Manager{
 		apps:     make(map[string]*AppInstance),
-		portPool: NewPortPool(9000, 9999),
-		logger:   logger,
+		portPool: NewPortPool(minPort, maxPort),
 	}
-}
-
-// SetLogger sets the logger for the manager.
-func (m *Manager) SetLogger(logger *slog.Logger) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logger = logger
 }
 
 // getLogger returns the configured logger or a default discard logger.
@@ -134,7 +138,9 @@ func (m *Manager) StartApp(ctx context.Context, cfg AppConfig) error {
 		return fmt.Errorf("app %q already running", cfg.Name)
 	}
 
-	// Allocate port if not specified
+	// Allocate port if not specified; an explicit port is reserved in the
+	// pool so Allocate never hands it to another app and Release on stop is
+	// symmetric.
 	port := cfg.Port
 	if port == 0 {
 		var err error
@@ -142,6 +148,8 @@ func (m *Manager) StartApp(ctx context.Context, cfg AppConfig) error {
 		if err != nil {
 			return fmt.Errorf("allocate port: %w", err)
 		}
+	} else if !m.portPool.Reserve(port) {
+		return fmt.Errorf("port %d is outside the pool range %d-%d or already in use", port, m.portPool.minPort, m.portPool.maxPort)
 	}
 
 	// Read WASM module
@@ -228,9 +236,11 @@ func (m *Manager) StopApp(ctx context.Context, name string) error {
 		return fmt.Errorf("app %q not found", name)
 	}
 
-	// Stop health check goroutine if running
+	// Stop health check goroutine if running. The nil-out guard makes a
+	// retry after a failed stop safe (no double close).
 	if app.StopHealth != nil {
 		close(app.StopHealth)
+		app.StopHealth = nil
 	}
 
 	if err := app.Runtime.Stop(ctx); err != nil {
@@ -271,6 +281,12 @@ func (m *Manager) StopAll(ctx context.Context) error {
 
 	var errs []error
 	for name, app := range m.apps {
+		// Terminate the health-check goroutine; without this it leaks and
+		// keeps probing the shut-down server for the process lifetime.
+		if app.StopHealth != nil {
+			close(app.StopHealth)
+			app.StopHealth = nil
+		}
 		if err := app.Runtime.Stop(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("stop %s: %w", name, err))
 		}
@@ -280,7 +296,7 @@ func (m *Manager) StopAll(ctx context.Context) error {
 	m.apps = make(map[string]*AppInstance)
 
 	if len(errs) > 0 {
-		return fmt.Errorf("errors stopping apps: %v", errs)
+		return fmt.Errorf("errors stopping apps: %w", errors.Join(errs...))
 	}
 	return nil
 }
@@ -353,14 +369,4 @@ func (m *Manager) setAppHealth(name string, status HealthStatus) {
 	if app, ok := m.apps[name]; ok {
 		app.Health = status
 	}
-}
-
-// IsHealthy returns the health status of an app.
-func (m *Manager) IsHealthy(name string) (HealthStatus, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if app, ok := m.apps[name]; ok {
-		return app.Health, true
-	}
-	return HealthStopped, false
 }

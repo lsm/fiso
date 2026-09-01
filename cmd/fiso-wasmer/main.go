@@ -56,6 +56,11 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Honor the configured dynamic port range (default 9000-9999).
+		if cfg.DefaultPortRange.Min > 0 && cfg.DefaultPortRange.Max >= cfg.DefaultPortRange.Min {
+			manager = wasmer.NewManagerWithPortRange(cfg.DefaultPortRange.Min, cfg.DefaultPortRange.Max)
+		}
+
 		for _, appCfg := range cfg.Apps {
 			if err := manager.StartApp(ctx, appCfg); err != nil {
 				fmt.Fprintf(os.Stderr, "Error starting app %s: %v\n", appCfg.Name, err)
