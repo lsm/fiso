@@ -34,6 +34,9 @@ type AppInstance struct {
 	Health     HealthStatus
 	Started    time.Time
 	StopHealth chan struct{} `json:"-"` // Channel to stop health check goroutine
+	// stopHealthOnce guards closing StopHealth exactly once across
+	// StopApp/StopAll retries.
+	stopHealthOnce sync.Once
 }
 
 // HealthStatus represents the health of an app.
@@ -149,7 +152,11 @@ func (m *Manager) StartApp(ctx context.Context, cfg AppConfig) error {
 			return fmt.Errorf("allocate port: %w", err)
 		}
 	} else if !m.portPool.Reserve(port) {
-		return fmt.Errorf("port %d is outside the pool range %d-%d or already in use", port, m.portPool.minPort, m.portPool.maxPort)
+		// Outside the dynamic range: allowed (the app binds it directly),
+		// just not tracked by the pool. In-range but taken is a conflict.
+		if port >= m.portPool.minPort && port <= m.portPool.maxPort {
+			return fmt.Errorf("port %d is already in use in the pool range %d-%d", port, m.portPool.minPort, m.portPool.maxPort)
+		}
 	}
 
 	// Read WASM module
@@ -236,12 +243,14 @@ func (m *Manager) StopApp(ctx context.Context, name string) error {
 		return fmt.Errorf("app %q not found", name)
 	}
 
-	// Stop health check goroutine if running. The nil-out guard makes a
-	// retry after a failed stop safe (no double close).
-	if app.StopHealth != nil {
-		close(app.StopHealth)
-		app.StopHealth = nil
-	}
+	// Stop the health-check goroutine exactly once; a retry after a failed
+	// stop must not close the channel again. The field is never nil-ed —
+	// the health goroutine holds its own reference.
+	app.stopHealthOnce.Do(func() {
+		if app.StopHealth != nil {
+			close(app.StopHealth)
+		}
+	})
 
 	if err := app.Runtime.Stop(ctx); err != nil {
 		return fmt.Errorf("stop app: %w", err)
@@ -283,10 +292,11 @@ func (m *Manager) StopAll(ctx context.Context) error {
 	for name, app := range m.apps {
 		// Terminate the health-check goroutine; without this it leaks and
 		// keeps probing the shut-down server for the process lifetime.
-		if app.StopHealth != nil {
-			close(app.StopHealth)
-			app.StopHealth = nil
-		}
+		app.stopHealthOnce.Do(func() {
+			if app.StopHealth != nil {
+				close(app.StopHealth)
+			}
+		})
 		if err := app.Runtime.Stop(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("stop %s: %w", name, err))
 		}

@@ -131,3 +131,52 @@ func TestPortPool_ExplicitPortReserved(t *testing.T) {
 		t.Fatal("after Release, the port must be reserveable again")
 	}
 }
+
+// TestPortPool_OutOfRangeExplicitPortAllowed pins that an explicit port
+// outside the dynamic range is permitted (the app binds it directly); only
+// in-range conflicts are rejected.
+func TestPortPool_OutOfRangeExplicitPortAllowed(t *testing.T) {
+	m := NewManagerWithPortRange(49200, 49210)
+
+	// Far outside the range: Reserve reports untracked, StartApp proceeds.
+	if m.portPool.Reserve(49555) {
+		t.Fatal("an out-of-range port should not be pool-tracked")
+	}
+	// In-range reservation works and a second reservation of the same port
+	// fails (conflict).
+	if !m.portPool.Reserve(49205) {
+		t.Fatal("first in-range reservation must succeed")
+	}
+	if m.portPool.Reserve(49205) {
+		t.Fatal("double reservation of an in-range port must fail")
+	}
+}
+
+// TestStopApp_HealthChannelNotNiled pins that after a failed stop the app
+// remains registered with its StopHealth channel still set (closed but not
+// nil-ed), so the health goroutine's held reference stays valid.
+func TestStopApp_HealthChannelNotNiled(t *testing.T) {
+	stopHealth := make(chan struct{})
+	m := populatedManager(&fakeAppRuntime{
+		startAddr: "127.0.0.1:19090",
+		stopErr:   errFakeStop,
+	}, stopHealth)
+
+	if err := m.StopApp(context.Background(), "app"); err == nil {
+		t.Fatal("expected the stop to fail")
+	}
+	app, ok := m.GetApp("app")
+	if !ok {
+		t.Fatal("a failed stop must leave the app registered for retry")
+	}
+	if app.StopHealth != nil {
+		select {
+		case <-app.StopHealth:
+			// closed exactly once — correct
+		default:
+			t.Fatal("StopHealth should be closed after the stop attempt")
+		}
+	} else {
+		t.Fatal("StopHealth must not be nil-ed; the health goroutine holds the reference")
+	}
+}
