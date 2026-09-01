@@ -252,14 +252,35 @@ func (l *Loader) OnChange(fn func(map[string]*FlowDefinition)) {
 	l.onChange = fn
 }
 
-// Load reads all YAML files from the configured directory.
+// Load reads all YAML files from the configured directory. Files that fail
+// to parse or validate are logged and skipped.
 func (l *Loader) Load() (map[string]*FlowDefinition, error) {
+	flows, _, err := l.loadEntries(false)
+	return flows, err
+}
+
+// LoadStrict reads all YAML files like Load but returns an error joining
+// every parse or validation failure instead of logging and skipping the
+// file. Binaries that must fail closed on invalid configuration use this.
+func (l *Loader) LoadStrict() (map[string]*FlowDefinition, error) {
+	flows, errs, err := l.loadEntries(true)
+	if err != nil {
+		return nil, err
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return flows, nil
+}
+
+func (l *Loader) loadEntries(strict bool) (map[string]*FlowDefinition, []error, error) {
 	entries, err := os.ReadDir(l.dir)
 	if err != nil {
-		return nil, fmt.Errorf("read config dir %s: %w", l.dir, err)
+		return nil, nil, fmt.Errorf("read config dir %s: %w", l.dir, err)
 	}
 
 	flows := make(map[string]*FlowDefinition)
+	var errs []error
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -272,7 +293,11 @@ func (l *Loader) Load() (map[string]*FlowDefinition, error) {
 		path := filepath.Join(l.dir, entry.Name())
 		flow, err := l.loadFile(path)
 		if err != nil {
-			l.logger.Error("failed to load config file", "path", path, "error", err)
+			if strict {
+				errs = append(errs, err)
+			} else {
+				l.logger.Error("failed to load config file", "path", path, "error", err)
+			}
 			continue
 		}
 		flows[flow.Name] = flow
@@ -282,7 +307,7 @@ func (l *Loader) Load() (map[string]*FlowDefinition, error) {
 	l.flows = flows
 	l.mu.Unlock()
 
-	return flows, nil
+	return flows, errs, nil
 }
 
 // Watch starts watching the config directory for changes. Blocks until ctx.Done.

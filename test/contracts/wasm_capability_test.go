@@ -18,7 +18,7 @@ import (
 // affirmativeCapabilityClaim matches capability verbs joined to guest-level
 // networking/threading/application capabilities, e.g. "supports sockets and
 // threading", "enables database connectivity", "apps with network access".
-var affirmativeCapabilityClaim = regexp.MustCompile(`(?i)\b(support(?:s|ed|ing)?|enable(?:s|d)?|provid(?:e|es|ing)|offer(?:s|ing)?|requir(?:e|es|ing)|with)\b[^.]{0,100}\b(sockets?|threading|multithreading|pthreads|database connect\w+|network access|full[-\s]?fledged applications?|full applications?)\b`)
+var affirmativeCapabilityClaim = regexp.MustCompile(`(?i)\b(support(?:s|ed|ing)?|enable(?:s|d)?|provid(?:e|es|ing)|offer(?:s|ing)?|requir(?:e|es|ing)|with)\b[^.]{0,100}\b(sockets?|threading|multithreading|pthreads|database connect\w+|network access|persistent (?:in-memory )?state|full[-\s]?fledged applications?|full applications?)\b`)
 
 // ecosystemTokens name the unsupported ecosystem explicitly; they may appear
 // only in negated context ("WASIX is not supported", "no Django").
@@ -29,9 +29,16 @@ var ecosystemTokens = regexp.MustCompile(`(?i)(WASIX|Django|FastAPI|Next\.js|pth
 // statement, not a claim.
 var negatedSentence = regexp.MustCompile(`(?i)(do(?:es)? not (?:support|provide|enable|have|use|work)|(?:are|is|was|were) (?:not supported|unsupported)|cannot [a-z]+|can not [a-z]+|not (?:currently )?(?:supported|implemented|applied|available)|no longer [a-z]+|lacks? |excludes? |without )`)
 
+// clauseSplit separates contrast clauses within a sentence.
+var clauseSplit = regexp.MustCompile(`(?i),?\s*(?:but|yet|however|whereas|while|though)\s+|;`)
+
+// wasmContext identifies sentences about WASM subjects; capability claims
+// attributed to anything else are out of this contract's scope.
+var wasmContext = regexp.MustCompile(`(?i)(wasm|wasmer|wazero|module|guest|interceptor|app)`)
+
 // negatedMentions are phrase-level limitation markers masked before
 // affirmative matching.
-var negatedMentions = regexp.MustCompile(`(?i)((no|without|lacks?|excludes?) (network access|sockets?|threading|multithreading|pthreads|persistent state|database connectivity)|no longer \w+|not (?:currently )?(?:supported|implemented|applied|available)|unsupported|cannot |does not |doesn't |never )`)
+var negatedMentions = regexp.MustCompile(`(?i)((no|without|lacks?|excludes?) (network access|sockets?|threading|multithreading|pthreads|persistent (?:in-memory )?state|database connectivity)|(?:(?:do(?:es)? not|don't|doesn't) (?:support|provide|enable|have|use|work))|no longer \w+|not (?:currently )?(?:supported|implemented|applied|available)|unsupported|cannot |does not |doesn't |never )`)
 
 // claimLine maps a match offset in normalized text back to its source line.
 type claimLine struct {
@@ -86,21 +93,49 @@ func findWasmClaims(doc string) []claimLine {
 		}
 		return unmasked[sentStart:sentEnd]
 	}
+	// clauseOf narrows a sentence to the contrast clause containing the
+	// match, so "wazero does not support sockets, but Wasmer supports
+	// sockets" only exempts the first clause.
+	clauseOf := func(start, end int) string {
+		sentence := sentenceOf(start, end)
+		sentStart := strings.LastIndex(unmasked[:start], ".")
+		if sentStart == -1 {
+			sentStart = 0
+		}
+		offsetInSentence := start - sentStart
+		pos := 0
+		for _, c := range clauseSplit.Split(sentence, -1) {
+			next := pos + len(c)
+			if offsetInSentence <= next {
+				return c
+			}
+			pos = next
+		}
+		return sentence
+	}
 	var claims []claimLine
 	for _, m := range affirmativeCapabilityClaim.FindAllStringIndex(text, -1) {
-		// Whole-sentence negation: limitation wording anywhere in the same
-		// sentence ("modules do not support sockets", "modules requiring
-		// network access are unsupported") makes the mention a limitation
-		// statement, not a claim.
-		if negatedSentence.MatchString(sentenceOf(m[0], m[1])) {
+		sentence := sentenceOf(m[0], m[1])
+		// Negation in the match's own clause exempts it; negation elsewhere
+		// in the sentence does not.
+		if negatedSentence.MatchString(clauseOf(m[0], m[1])) {
+			continue
+		}
+		// Only claims attributed to a WASM subject count; capability
+		// statements about other components are not this contract's concern.
+		if !wasmContext.MatchString(sentence) {
 			continue
 		}
 		claims = append(claims, claimLine{line: lineOf(m[0]), match: strings.TrimSpace(text[m[0]:m[1]])})
 	}
-	// Ecosystem tokens: flag only when the surrounding sentence carries no
-	// negation.
+	// Ecosystem tokens: flag only when the surrounding clause carries no
+	// negation and the sentence is about WASM.
 	for _, m := range ecosystemTokens.FindAllStringIndex(unmasked, -1) {
-		if negatedSentence.MatchString(sentenceOf(m[0], m[1])) {
+		sentence := sentenceOf(m[0], m[1])
+		if negatedSentence.MatchString(clauseOf(m[0], m[1])) {
+			continue
+		}
+		if !wasmContext.MatchString(sentence) {
 			continue
 		}
 		claims = append(claims, claimLine{line: lineOf(m[0]), match: strings.TrimSpace(unmasked[m[0]:m[1]])})

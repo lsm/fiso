@@ -1768,3 +1768,49 @@ func TestFlowDefinition_Validate_KafkaTransactionValidConfig(t *testing.T) {
 		t.Fatalf("expected valid kafka_transaction config, got %v", err)
 	}
 }
+
+// TestLoadStrict_SurfacesInvalidFiles pins the strict-loading contract used
+// by binaries that must fail closed on invalid flow definitions: Load logs
+// and skips invalid files, LoadStrict returns their errors.
+func TestLoadStrict_SurfacesInvalidFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "good.yaml", `
+name: good-flow
+source:
+  type: http
+  config: {}
+sink:
+  type: http
+  config: {}
+`)
+	writeFile(t, dir, "bad.yaml", `
+name: bad-flow
+source:
+  type: http
+  config: {}
+sink:
+  type: http
+  config: {}
+interceptors:
+  - type: wasmer-app
+    config:
+      module: /etc/fiso/wasm/app.wasm
+`)
+
+	loader := NewLoader(dir, nil)
+	flows, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(flows) != 1 {
+		t.Fatalf("Load should skip the invalid file, got %d flows", len(flows))
+	}
+
+	_, err = loader.LoadStrict()
+	if err == nil {
+		t.Fatal("LoadStrict must surface the invalid flow file")
+	}
+	if !strings.Contains(err.Error(), "bad.yaml") || !strings.Contains(err.Error(), "wasmer-app") {
+		t.Fatalf("expected error naming the file and the rejected type, got %v", err)
+	}
+}

@@ -168,9 +168,13 @@ func run() error {
 		cfg.Flow.ConfigDir = "/etc/fiso/flows"
 	}
 	loader := config.NewLoader(cfg.Flow.ConfigDir, logger)
-	flows, err := loader.Load()
-	if err != nil {
-		logger.Warn("failed to load flows, continuing without flow", "error", err)
+	flows := map[string]*config.FlowDefinition{}
+	if _, statErr := os.Stat(cfg.Flow.ConfigDir); statErr != nil {
+		logger.Warn("flow config dir not present, continuing without flow", "dir", cfg.Flow.ConfigDir)
+	} else if flows, err = loader.LoadStrict(); err != nil {
+		// Invalid flow definitions fail startup: silently skipping a file
+		// would drop a configured pipeline without notice.
+		return fmt.Errorf("load flows: %w", err)
 	}
 
 	// Start config watcher

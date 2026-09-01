@@ -125,6 +125,23 @@ apps:
     healthCheckInterval: 10s
 ```
 
+**App module ABI.** An app module does not receive the raw request payload.
+For each HTTP request the host serializes an envelope and the module returns
+one:
+
+```json
+// input the module receives (via the wasmer input mechanism above)
+{ "method": "POST", "path": "/process", "query": "",
+  "headers": {"content-type": "application/json"}, "body": { ... } }
+
+// output the module returns (stdout)
+{ "status": 200, "headers": {"x-app": "processor"}, "body": { ... } }
+```
+
+`bodyText` may substitute for `body` when the response is not JSON. This is
+the ABI used by `fiso-wasmer`, `fiso-wasmer-link`, and `fiso-wasmer-aio` app
+mode — distinct from the plain payload-in/payload-out interceptor ABI.
+
 Fields with **no current runtime effect** (accepted for compatibility,
 documented here so nobody relies on them): `execution` and `memoryMB`.
 There is one execution behavior — per-request invocation — regardless of the
