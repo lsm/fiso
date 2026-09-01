@@ -27,9 +27,13 @@ func NewConnClient(addr string) (Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("grpc interceptor address is required")
 	}
+	// Interceptor responses carry the full transformed payload; the gRPC
+	// default 4 MiB receive limit would reject large legitimate events.
+	const maxReceiveBytes = 64 << 20
 	conn, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxReceiveBytes)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("grpc dial: %w", err)

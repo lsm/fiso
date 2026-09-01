@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -188,9 +189,18 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 	}
 
 	// Deliver to sink. Interceptor-provided headers travel with the event;
-	// the envelope's content type and correlation stay authoritative.
+	// the envelope's content type and correlation stay authoritative even
+	// against casing variants (the HTTP sink canonicalizes header keys, so a
+	// lowercase variant would otherwise race with the envelope's value).
+	reserved := map[string]bool{
+		"content-type":        true,
+		"fiso-correlation-id": true,
+	}
 	headers := map[string]string{}
 	for k, v := range interceptorHeaders {
+		if reserved[strings.ToLower(k)] {
+			continue
+		}
 		headers[k] = v
 	}
 	headers["Content-Type"] = "application/cloudevents+json"
