@@ -17,7 +17,10 @@ unreleased work and will be versioned when a release tag is cut.
   connectivity, or full in-guest applications (Django/FastAPI/Next.js) for
   the Wasmer runtime. The executable contract is now stated explicitly:
   WASM modules are invoked per request over a host-side HTTP facade, with no
-  network access, no threads, and no persistent state between invocations.
+  network access, no threads, and no persistent in-memory state between
+  invocations (files written through a configured preopen do persist). The
+  wasmer engine delivers input via a mapped `--stdin-file` argument rather
+  than stdin — a stdin-based module does not work unchanged under wasmer.
   Configuration knobs with no runtime effect (`execution`, `memoryMB` on
   apps; `timeout`/`memoryLimit`/`env`/`preopens` on interceptors) are
   documented as such. A documentation-contract test under `test/contracts`
