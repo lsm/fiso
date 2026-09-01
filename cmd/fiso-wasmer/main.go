@@ -59,7 +59,7 @@ func main() {
 		// Honor the configured dynamic port range (default 9000-9999). A
 		// malformed range is a configuration error, not a silent default.
 		if cfg.DefaultPortRange.Min != 0 || cfg.DefaultPortRange.Max != 0 {
-			if cfg.DefaultPortRange.Min <= 0 || cfg.DefaultPortRange.Max < cfg.DefaultPortRange.Min {
+			if cfg.DefaultPortRange.Min <= 0 || cfg.DefaultPortRange.Max < cfg.DefaultPortRange.Min || cfg.DefaultPortRange.Max > 65535 {
 				fmt.Fprintf(os.Stderr, "Error: invalid defaultPortRange %d-%d\n", cfg.DefaultPortRange.Min, cfg.DefaultPortRange.Max)
 				os.Exit(1)
 			}
