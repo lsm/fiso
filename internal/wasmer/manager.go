@@ -4,6 +4,7 @@ package wasmer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -33,6 +34,9 @@ type AppInstance struct {
 	Health     HealthStatus
 	Started    time.Time
 	StopHealth chan struct{} `json:"-"` // Channel to stop health check goroutine
+	// stopHealthOnce guards closing StopHealth exactly once across
+	// StopApp/StopAll retries.
+	stopHealthOnce sync.Once
 }
 
 // HealthStatus represents the health of an app.
@@ -83,6 +87,19 @@ func (p *PortPool) Allocate() (int, error) {
 	return 0, fmt.Errorf("no available ports in range %d-%d", p.minPort, p.maxPort)
 }
 
+// Reserve marks an explicitly configured port as used so the pool's
+// accounting stays symmetric: an explicit-port app is never handed its own
+// port by Allocate, and its later Release is legitimate.
+func (p *PortPool) Reserve(port int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if port < p.minPort || port > p.maxPort || p.used[port] {
+		return false
+	}
+	p.used[port] = true
+	return true
+}
+
 // Release returns a port to the pool.
 func (p *PortPool) Release(port int) {
 	p.mu.Lock()
@@ -92,26 +109,16 @@ func (p *PortPool) Release(port int) {
 
 // NewManager creates a new Wasmer app manager.
 func NewManager() *Manager {
-	return &Manager{
-		apps:     make(map[string]*AppInstance),
-		portPool: NewPortPool(9000, 9999),
-	}
+	return NewManagerWithPortRange(9000, 9999)
 }
 
-// NewManagerWithLogger creates a new Wasmer app manager with a custom logger.
-func NewManagerWithLogger(logger *slog.Logger) *Manager {
+// NewManagerWithPortRange creates a Manager whose dynamic port pool uses
+// the supplied inclusive range instead of the 9000-9999 default.
+func NewManagerWithPortRange(minPort, maxPort int) *Manager {
 	return &Manager{
 		apps:     make(map[string]*AppInstance),
-		portPool: NewPortPool(9000, 9999),
-		logger:   logger,
+		portPool: NewPortPool(minPort, maxPort),
 	}
-}
-
-// SetLogger sets the logger for the manager.
-func (m *Manager) SetLogger(logger *slog.Logger) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logger = logger
 }
 
 // getLogger returns the configured logger or a default discard logger.
@@ -134,13 +141,21 @@ func (m *Manager) StartApp(ctx context.Context, cfg AppConfig) error {
 		return fmt.Errorf("app %q already running", cfg.Name)
 	}
 
-	// Allocate port if not specified
+	// Allocate port if not specified; an explicit port is reserved in the
+	// pool so Allocate never hands it to another app and Release on stop is
+	// symmetric.
 	port := cfg.Port
 	if port == 0 {
 		var err error
 		port, err = m.portPool.Allocate()
 		if err != nil {
 			return fmt.Errorf("allocate port: %w", err)
+		}
+	} else if !m.portPool.Reserve(port) {
+		// Outside the dynamic range: allowed (the app binds it directly),
+		// just not tracked by the pool. In-range but taken is a conflict.
+		if port >= m.portPool.minPort && port <= m.portPool.maxPort {
+			return fmt.Errorf("port %d is already in use in the pool range %d-%d", port, m.portPool.minPort, m.portPool.maxPort)
 		}
 	}
 
@@ -228,10 +243,14 @@ func (m *Manager) StopApp(ctx context.Context, name string) error {
 		return fmt.Errorf("app %q not found", name)
 	}
 
-	// Stop health check goroutine if running
-	if app.StopHealth != nil {
-		close(app.StopHealth)
-	}
+	// Stop the health-check goroutine exactly once; a retry after a failed
+	// stop must not close the channel again. The field is never nil-ed —
+	// the health goroutine holds its own reference.
+	app.stopHealthOnce.Do(func() {
+		if app.StopHealth != nil {
+			close(app.StopHealth)
+		}
+	})
 
 	if err := app.Runtime.Stop(ctx); err != nil {
 		return fmt.Errorf("stop app: %w", err)
@@ -271,6 +290,13 @@ func (m *Manager) StopAll(ctx context.Context) error {
 
 	var errs []error
 	for name, app := range m.apps {
+		// Terminate the health-check goroutine; without this it leaks and
+		// keeps probing the shut-down server for the process lifetime.
+		app.stopHealthOnce.Do(func() {
+			if app.StopHealth != nil {
+				close(app.StopHealth)
+			}
+		})
 		if err := app.Runtime.Stop(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("stop %s: %w", name, err))
 		}
@@ -280,7 +306,7 @@ func (m *Manager) StopAll(ctx context.Context) error {
 	m.apps = make(map[string]*AppInstance)
 
 	if len(errs) > 0 {
-		return fmt.Errorf("errors stopping apps: %v", errs)
+		return fmt.Errorf("errors stopping apps: %w", errors.Join(errs...))
 	}
 	return nil
 }
@@ -353,14 +379,4 @@ func (m *Manager) setAppHealth(name string, status HealthStatus) {
 	if app, ok := m.apps[name]; ok {
 		app.Health = status
 	}
-}
-
-// IsHealthy returns the health status of an app.
-func (m *Manager) IsHealthy(name string) (HealthStatus, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if app, ok := m.apps[name]; ok {
-		return app.Health, true
-	}
-	return HealthStopped, false
 }

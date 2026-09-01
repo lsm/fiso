@@ -10,6 +10,24 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Wasmer manager lifecycle defects** — `StopAll` now terminates every
+  app's health-check goroutine (previously they leaked and kept probing the
+  shut-down server for the process lifetime in every long-running wasmer
+  binary); `StopApp` is safe to retry after a failed stop (previously a
+  second call panicked on a double channel close); and an explicitly
+  configured `port` is now reserved in the port pool so it is never handed
+  to another app and its release on stop is symmetric. The manager's
+  `defaultPortRange` setting is now actually honored by `fiso-wasmer`
+  (previously the pool was hardcoded to 9000-9999 and the setting was dead).
+
+### Removed
+
+- **Dead Wasmer code** — the unimported `internal/wasmer/unified` package,
+  the never-called `Proxy` type, and the unreferenced
+  `NewManagerWithLogger`/`SetLogger`/`IsHealthy` manager methods.
+
 ### Changed
 
 - **WASM verification hygiene** — wasmer-tagged code is now inside every
