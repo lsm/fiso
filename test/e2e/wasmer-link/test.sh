@@ -24,13 +24,15 @@ sleep 3
 
 echo ""
 echo "Testing proxy with WASM interception..."
-STATUS=$(curl -s -o /tmp/e2e-wasmer-link-response.txt -w "%{http_code}" \
+STATUS=$(curl -s -D /tmp/e2e-wasmer-link-headers.txt -o /tmp/e2e-wasmer-link-response.txt -w "%{http_code}" \
     -X POST http://localhost:3500/link/api/process \
     -H "Content-Type: application/json" \
     -H "X-Request-ID: test-req-001" \
     -d '{"action": "calculate", "params": {"value": 100, "operation": "double"}}')
 
 echo "Response status: $STATUS"
+echo "Response headers:"
+cat /tmp/e2e-wasmer-link-headers.txt
 echo "Response body:"
 cat /tmp/e2e-wasmer-link-response.txt
 echo ""
@@ -48,11 +50,43 @@ if [ "$STATUS" != "200" ]; then
     exit 1
 fi
 
-# Verify the backend received enriched request
+# The backend stamps X-Proxy on responses; it must survive the proxy hop.
+if grep -qi '^x-proxy:' /tmp/e2e-wasmer-link-headers.txt; then
+    echo "SUCCESS: Response carried the backend's X-Proxy header through the link"
+else
+    echo ""
+    echo "FAIL: Response did not carry the backend's X-Proxy header"
+    echo ""
+    echo "=== fiso-wasmer-link logs ==="
+    docker compose logs fiso-wasmer-link
+    echo ""
+    echo "=== backend-service logs ==="
+    docker compose logs backend-service
+    docker compose down
+    exit 1
+fi
+
+# The transformed payload must still be processable: value 100 doubled.
+if grep -q '"result":200' /tmp/e2e-wasmer-link-response.txt; then
+    echo "SUCCESS: Backend processed the intercepted payload (100 doubled to 200)"
+else
+    echo ""
+    echo "FAIL: Backend did not process the intercepted payload as expected"
+    echo ""
+    echo "=== fiso-wasmer-link logs ==="
+    docker compose logs fiso-wasmer-link
+    echo ""
+    echo "=== backend-service logs ==="
+    docker compose logs backend-service
+    docker compose down
+    exit 1
+fi
+
+# Verify the backend received the intercepted request, not just any request.
 BACKEND_LOGS=$(docker compose logs backend-service)
 
 echo ""
-echo "Checking for proxy + WASM markers..."
+echo "Checking for WASM interception markers at the backend..."
 
 # Check that backend received the request
 if echo "$BACKEND_LOGS" | grep -q "received request"; then
@@ -70,11 +104,52 @@ else
     exit 1
 fi
 
-# Check for X-Proxy header (from link)
-if echo "$BACKEND_LOGS" | grep -q "X-Proxy"; then
-    echo "SUCCESS: Found X-Proxy header (link working)"
+# The interceptor adds an X-Intercepted-By header; the backend must see it.
+if echo "$BACKEND_LOGS" | grep -q "X-Intercepted-By=wasmer-link"; then
+    echo "SUCCESS: Interceptor's X-Intercepted-By header reached the backend"
 else
-    echo "WARNING: X-Proxy header not found"
+    echo ""
+    echo "FAIL: Interceptor's X-Intercepted-By header did not reach the backend (no interception?)"
+    echo ""
+    echo "=== fiso-wasmer-link logs ==="
+    docker compose logs fiso-wasmer-link
+    echo ""
+    echo "=== backend-service logs ==="
+    echo "$BACKEND_LOGS"
+    docker compose down
+    exit 1
+fi
+
+# The interceptor stamps the payload; the backend must log the markers.
+if echo "$BACKEND_LOGS" | grep -q '"intercepted":true'; then
+    echo "SUCCESS: Interceptor's payload marker reached the backend"
+else
+    echo ""
+    echo "FAIL: Interceptor's payload marker did not reach the backend (no interception?)"
+    echo ""
+    echo "=== fiso-wasmer-link logs ==="
+    docker compose logs fiso-wasmer-link
+    echo ""
+    echo "=== backend-service logs ==="
+    echo "$BACKEND_LOGS"
+    docker compose down
+    exit 1
+fi
+
+# The interceptor's env (INTERCEPT_MODE) must propagate through the runtime.
+if echo "$BACKEND_LOGS" | grep -q '"intercept_mode":"request-response"'; then
+    echo "SUCCESS: Interceptor env propagated (intercept_mode=request-response)"
+else
+    echo ""
+    echo "FAIL: Interceptor env did not propagate (intercept_mode missing or wrong)"
+    echo ""
+    echo "=== fiso-wasmer-link logs ==="
+    docker compose logs fiso-wasmer-link
+    echo ""
+    echo "=== backend-service logs ==="
+    echo "$BACKEND_LOGS"
+    docker compose down
+    exit 1
 fi
 
 echo ""
@@ -115,7 +190,8 @@ fi
 echo ""
 echo "SUCCESS: All wasmer-link tests passed"
 echo "  - Proxy routing working"
-echo "  - Backend service reachable through link"
+echo "  - WASM interceptor transformed the outbound request (header + payload + env)"
+echo "  - Backend processed the intercepted payload"
 echo "  - Multiple HTTP methods supported"
 echo ""
 echo "=== Full Flow Summary ==="
