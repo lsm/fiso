@@ -1,13 +1,16 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	kafka "github.com/lsm/fiso/internal/kafka"
@@ -450,4 +453,157 @@ func TestProxy_InboundRejection_SpanMarkedError(t *testing.T) {
 		}
 	}
 	t.Fatal("no proxy span recorded")
+}
+
+// trackedBody records whether it was drained to EOF before Close — closing
+// an undrained HTTP/1.x body forfeits the keep-alive connection.
+type trackedBody struct {
+	reader  *bytes.Reader
+	eofRead bool
+	closed  bool
+}
+
+func (b *trackedBody) Read(p []byte) (int, error) {
+	n, err := b.reader.Read(p)
+	if err == io.EOF {
+		b.eofRead = true
+	}
+	return n, err
+}
+
+func (b *trackedBody) Close() error { b.closed = true; return nil }
+
+// TestProxy_RetryDrainsIntermediateResponses pins that retried attempts
+// drain the previous response body to EOF before closing it, keeping the
+// transport's keep-alive connections reusable (the final attempt's body
+// stays forwardable).
+func TestProxy_RetryDrainsIntermediateResponses(t *testing.T) {
+	var attempts int32
+	var first *trackedBody
+	rt := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		n := atomic.AddInt32(&attempts, 1)
+		body := &trackedBody{reader: bytes.NewReader([]byte(`{"err":true}`))}
+		if n == 1 {
+			first = body
+		}
+		status := http.StatusInternalServerError
+		if n > 1 {
+			status = http.StatusOK
+			body = &trackedBody{reader: bytes.NewReader([]byte(`{"ok":true}`))}
+		}
+		return &http.Response{
+			StatusCode:    status,
+			Header:        http.Header{},
+			Body:          body,
+			ContentLength: int64(body.reader.Len()),
+		}, nil
+	})
+
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: "upstream.test", Retry: link.RetryConfig{MaxAttempts: 2}},
+	})
+	handler := NewHandler(Config{Targets: store, Metrics: link.NewMetrics(prometheus.NewRegistry())})
+	handler.client = &http.Client{Transport: rt}
+
+	req := httptest.NewRequest("POST", "/link/svc/x", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected the retried request to succeed, got %d", w.Code)
+	}
+	if first == nil || !first.closed {
+		t.Fatal("the intermediate response must be closed")
+	}
+	if !first.eofRead {
+		t.Fatal("the intermediate response must be drained to EOF before close (keep-alive reuse)")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestProxy_OutboundRejection_SpanMarkedError pins the tracing for outbound
+// rejections: the span carries the guest status attribute and is marked as
+// an error, mirroring the inbound path (ADR 0007).
+func TestProxy_OutboundRejection_SpanMarkedError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     host,
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	handler := NewHandler(Config{Targets: store, Metrics: link.NewMetrics(prometheus.NewRegistry()), Interceptors: icRegistry})
+	handler.SetTracer(tp.Tracer("test"))
+	defer func() { _ = tp.Shutdown(context.Background()) }()
+
+	req := httptest.NewRequest("GET", "/link/svc/x", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+
+	for _, span := range sr.Ended() {
+		if span.Name() == "fiso.proxy.request" {
+			if span.Status().Code != codes.Error {
+				t.Fatalf("an outbound rejection must mark the proxy span as an error, got %v", span.Status().Code)
+			}
+			return
+		}
+	}
+	t.Fatal("no proxy span recorded")
+}
+
+// TestProxy_ErrorResponse_StreamsWithoutInboundChain pins the unbuffered
+// error-forwarding path: a target with no inbound interceptors forwards the
+// upstream error response verbatim without buffering it.
+func TestProxy_ErrorResponse_StreamsWithoutInboundChain(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream exploded", http.StatusBadGateway)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: host, Retry: link.RetryConfig{MaxAttempts: 1}},
+	})
+	metrics := link.NewMetrics(prometheus.NewRegistry())
+	handler := NewHandler(Config{Targets: store, Metrics: metrics})
+
+	req := httptest.NewRequest("POST", "/link/svc/x", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected the upstream 502 forwarded, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "upstream exploded") {
+		t.Fatalf("expected the error body forwarded verbatim, got %q", w.Body.String())
+	}
+	if got := rejectionCount(t, metrics, "svc", "POST", "502"); got != 1 {
+		t.Fatalf("expected the 502 recorded once, got %v", got)
+	}
 }

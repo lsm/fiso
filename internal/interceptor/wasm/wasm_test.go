@@ -313,3 +313,40 @@ func TestWASMInterceptor_NonJSONPayload_WrappedAsString(t *testing.T) {
 		t.Fatalf("expected the wrapped string in the envelope, got %s", mr.lastInput)
 	}
 }
+
+// TestWASMInterceptor_BinaryPayload_LosslessRoundTrip pins that binary
+// (invalid-UTF-8) bodies survive the envelope: base64-wrapped on the way in,
+// byte-identical after a pass-through module (ADR 0007).
+func TestWASMInterceptor_BinaryPayload_LosslessRoundTrip(t *testing.T) {
+	echo := &echoRuntime{}
+	ic := New(echo, "policy")
+
+	raw := []byte{0xff, 0xfe, 0x00, 0x42, 0x80}
+	result, err := ic.Process(context.Background(), &interceptor.Request{
+		Payload:   raw,
+		Headers:   map[string]string{},
+		Direction: interceptor.Inbound,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.Equal(result.Payload, raw) {
+		t.Fatalf("binary payload must round-trip byte-identical, got %x want %x", result.Payload, raw)
+	}
+}
+
+// echoRuntime returns the payload it was given, like a pass-through module.
+type echoRuntime struct{ lastInput []byte }
+
+func (e *echoRuntime) Call(_ context.Context, input []byte) ([]byte, error) {
+	e.lastInput = input
+	var in struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(input, &in); err != nil {
+		return nil, err
+	}
+	return []byte(`{"payload":` + string(in.Payload) + `}`), nil
+}
+
+func (e *echoRuntime) Close() error { return nil }

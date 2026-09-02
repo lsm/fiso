@@ -266,6 +266,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					"status", rej.Status,
 					"reason", rej.Reason,
 				)
+				span.SetAttributes(tracing.HTTPStatusAttr(rej.Status))
+				tracing.SetSpanError(span, rej)
 				h.recordSyncRequest(targetName, r.Method, strconv.Itoa(rej.Status), time.Since(start).Seconds())
 				http.Error(w, rej.Reason, rej.Status)
 				return
@@ -306,12 +308,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	retryCfg := buildRetryConfig(target)
 
 	retryErr := retry.Do(ctx, retryCfg, func() error {
-		// A retried attempt must not leak its predecessor's body; close it
-		// before issuing the next request. The final attempt's body stays
-		// open so the error response can be forwarded — and seen by the
-		// inbound interceptors (ADR 0007).
+		// A retried attempt must not leak its predecessor's body; drain it
+		// to EOF before closing so the keep-alive connection stays reusable,
+		// then issue the next request. The final attempt's body stays open
+		// so the error response can be forwarded — and seen by the inbound
+		// interceptors (ADR 0007).
 		if resp != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
+			resp = nil
 		}
 		req, reqErr := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(requestBody))
 		if reqErr != nil {
@@ -379,13 +384,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if retryErr != nil {
 		tracing.SetSpanError(span, retryErr)
 		if resp != nil {
-			// Forward the error response from upstream — through the
-			// inbound interceptors, so a policy module can also refuse
-			// error bodies (ADR 0007). The final caller-visible status is
-			// what the interceptors left in place.
-			finalStatus := h.copyResponseWithInterceptors(ctx, w, resp, targetName)
-			span.SetAttributes(tracing.HTTPStatusAttr(finalStatus))
-			h.recordSyncRequest(targetName, r.Method, strconv.Itoa(finalStatus), duration)
+			// Forward the error response from upstream. When the target has
+			// an inbound chain it routes through interception so a policy
+			// module can also refuse error bodies (ADR 0007); without one,
+			// stream the body through unbuffered rather than reading it all
+			// into memory just to discover there is nothing to process.
+			if h.hasInboundChain(targetName) {
+				finalStatus := h.copyResponseWithInterceptors(ctx, w, resp, targetName)
+				span.SetAttributes(tracing.HTTPStatusAttr(finalStatus))
+				h.recordSyncRequest(targetName, r.Method, strconv.Itoa(finalStatus), duration)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			for k, vv := range resp.Header {
+				for _, v := range vv {
+					w.Header().Add(k, v)
+				}
+			}
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			span.SetAttributes(tracing.HTTPStatusAttr(resp.StatusCode))
+			h.recordSyncRequest(targetName, r.Method, strconv.Itoa(resp.StatusCode), duration)
 			return
 		}
 		span.SetAttributes(tracing.HTTPStatusAttr(http.StatusBadGateway))
@@ -428,6 +447,16 @@ func (h *Handler) recordSyncRequest(targetName, method, status string, durationS
 	}
 	h.metrics.RequestsTotal.WithLabelValues(targetName, method, status, "sync").Inc()
 	h.metrics.RequestDuration.WithLabelValues(targetName, method).Observe(durationSeconds)
+}
+
+// hasInboundChain reports whether the target has inbound interceptors that
+// response forwarding must route through.
+func (h *Handler) hasInboundChain(targetName string) bool {
+	if h.interceptors == nil {
+		return false
+	}
+	chains := h.interceptors.GetChains(targetName)
+	return chains != nil && chains.Inbound != nil && chains.Inbound.Len() > 0
 }
 
 // copyResponseWithInterceptors copies the response to the writer, optionally

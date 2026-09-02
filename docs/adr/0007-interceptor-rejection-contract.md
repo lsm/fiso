@@ -62,9 +62,12 @@ Interceptors gain a first-class **rejection** verdict, distinct from failure:
 2b. **Payload equivalence.** An empty body and a JSON `null` payload are
    the same thing in both directions: a bodyless request arrives as
    `"payload": null`, and a module returning null leaves the request
-   bodyless. Non-JSON bodies (e.g. a plain-text upstream error response)
-   travel in the envelope as JSON strings and are restored to the original
-   bytes when a module returns them unchanged.
+   bodyless. Non-JSON bodies travel in the envelope losslessly: valid
+   UTF-8 text (e.g. a plain-text upstream error response) as a JSON
+   string, and arbitrary binary bytes base64-encoded inside a
+   `{"fisoB64": "..."}` object (JSON strings cannot carry invalid UTF-8
+   without corruption). A module returning the wrapper unchanged restores
+   the original bytes.
 
 3. **Fiso-Link.** An outbound or inbound interceptor rejection responds with
    the guest-chosen status and reason instead of 500 — including inbound

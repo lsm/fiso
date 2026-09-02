@@ -2,11 +2,30 @@ package wasm
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/lsm/fiso/internal/interceptor"
 )
+
+// wrapMode records how a non-JSON payload was packaged into the envelope so
+// the module's output can be unwrapped symmetrically (ADR 0007).
+type wrapMode int
+
+const (
+	wrapNone wrapMode = iota
+	wrapString
+	wrapBase64
+)
+
+// wasmB64Payload is the lossless carrier for binary payloads: JSON strings
+// cannot hold invalid UTF-8 without corruption, so arbitrary bytes travel
+// base64-encoded instead.
+type wasmB64Payload struct {
+	B64 string `json:"fisoB64"`
+}
 
 // Runtime abstracts the WASM runtime for testability.
 // In production this would be backed by wazero or similar.
@@ -50,20 +69,29 @@ type wasmOutput struct {
 // Process invokes the WASM module to process the request.
 func (i *Interceptor) Process(ctx context.Context, req *interceptor.Request) (*interceptor.Request, error) {
 	payload := req.Payload
-	wrappedString := false
+	wrapMode := wrapNone
 	if len(payload) == 0 {
 		// A bodyless request (e.g. a GET through Link) arrives with an
 		// empty payload; an empty json.RawMessage does not marshal, so the
 		// envelope carries an explicit null instead (ADR 0007).
 		payload = json.RawMessage("null")
 	} else if !json.Valid(payload) {
-		// Non-JSON bodies (e.g. a plain-text upstream error response)
-		// travel as JSON strings so the envelope stays marshalable; a
-		// module that returns the string unchanged gets the original bytes
-		// back (ADR 0007).
-		wrappedString = true
-		if b, err := json.Marshal(string(payload)); err == nil {
-			payload = b
+		// Non-JSON bodies travel losslessly: valid UTF-8 text as a JSON
+		// string, arbitrary bytes base64-encoded inside a {"fisoB64":...}
+		// object (JSON strings cannot carry invalid UTF-8 without
+		// corruption). A module returning the wrapper unchanged restores
+		// the original bytes (ADR 0007).
+		if utf8.Valid(payload) {
+			wrapMode = wrapString
+			if b, err := json.Marshal(string(payload)); err == nil {
+				payload = b
+			}
+		} else {
+			wrapMode = wrapBase64
+			b, err := json.Marshal(wasmB64Payload{B64: base64.StdEncoding.EncodeToString(payload)})
+			if err == nil {
+				payload = b
+			}
 		}
 	}
 	input := wasmInput{
@@ -109,12 +137,20 @@ func (i *Interceptor) Process(ctx context.Context, req *interceptor.Request) (*i
 	if string(output.Payload) == "null" {
 		output.Payload = nil
 	}
-	// Symmetrically unwrap: a guest returning the wrapped string unchanged
-	// restores the original non-JSON bytes.
-	if wrappedString {
+	// Symmetrically unwrap: a guest returning the wrapper unchanged
+	// restores the original non-JSON bytes, losslessly for binary too.
+	switch wrapMode {
+	case wrapString:
 		var s string
 		if err := json.Unmarshal(output.Payload, &s); err == nil {
 			output.Payload = []byte(s)
+		}
+	case wrapBase64:
+		var wrapped wasmB64Payload
+		if err := json.Unmarshal(output.Payload, &wrapped); err == nil && wrapped.B64 != "" {
+			if raw, err := base64.StdEncoding.DecodeString(wrapped.B64); err == nil {
+				output.Payload = raw
+			}
 		}
 	}
 
