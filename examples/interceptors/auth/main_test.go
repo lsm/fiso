@@ -103,6 +103,13 @@ func validClaims() map[string]any {
 	return map[string]any{"sub": "alice", "exp": float64(testNow.Add(time.Hour).Unix())}
 }
 
+// audClaims is validClaims addressed to a specific audience.
+func audClaims(audience string) map[string]any {
+	claims := validClaims()
+	claims["aud"] = audience
+	return claims
+}
+
 func hs256Config() *authConfig {
 	return &authConfig{hs256Secret: "secret"}
 }
@@ -142,6 +149,13 @@ func TestAuthenticate(t *testing.T) {
 			name:    "lowercase bearer prefix accepted",
 			cfg:     hs256Config(),
 			headers: map[string]string{"authorization": "bearer " + hs256Token(t, validClaims(), "secret")},
+			wantOK:  true,
+			wantSub: "alice",
+		},
+		{
+			name:    "uppercase bearer prefix accepted",
+			cfg:     hs256Config(),
+			headers: map[string]string{"Authorization": "BEARER " + hs256Token(t, validClaims(), "secret")},
 			wantOK:  true,
 			wantSub: "alice",
 		},
@@ -296,6 +310,57 @@ func TestAuthenticate(t *testing.T) {
 			headers: bearerHeader(hs256Token(t, map[string]any{"sub": 42, "exp": float64(testNow.Add(time.Hour).Unix())}, "secret")),
 			wantOK:  true,
 		},
+		{
+			name:    "nbf present but not numeric",
+			cfg:     hs256Config(),
+			headers: bearerHeader(hs256Token(t, map[string]any{"sub": "alice", "exp": float64(testNow.Add(time.Hour).Unix()), "nbf": "1700000060"}, "secret")),
+			wantRej: "malformed claims",
+		},
+		{
+			name:    "exp present but not numeric is not a missing expiry",
+			cfg:     &authConfig{hs256Secret: "secret", allowMissingExpiry: true},
+			headers: bearerHeader(hs256Token(t, map[string]any{"sub": "alice", "exp": "never"}, "secret")),
+			wantRej: "malformed claims",
+		},
+		{
+			name:    "audience matches expectation",
+			cfg:     &authConfig{hs256Secret: "secret", expectedAudience: "orders-api"},
+			headers: bearerHeader(hs256Token(t, audClaims("orders-api"), "secret")),
+			wantOK:  true,
+			wantSub: "alice",
+		},
+		{
+			name:    "audience array contains expectation",
+			cfg:     &authConfig{hs256Secret: "secret", expectedAudience: "orders-api"},
+			headers: bearerHeader(hs256Token(t, map[string]any{"sub": "alice", "exp": float64(testNow.Add(time.Hour).Unix()), "aud": []any{"billing-api", "orders-api"}}, "secret")),
+			wantOK:  true,
+			wantSub: "alice",
+		},
+		{
+			name:    "audience mismatch",
+			cfg:     &authConfig{hs256Secret: "secret", expectedAudience: "orders-api"},
+			headers: bearerHeader(hs256Token(t, audClaims("billing-api"), "secret")),
+			wantRej: "invalid audience",
+		},
+		{
+			name:    "token without audience when one is expected",
+			cfg:     &authConfig{hs256Secret: "secret", expectedAudience: "orders-api"},
+			headers: bearerHeader(hs256Token(t, validClaims(), "secret")),
+			wantRej: "invalid audience",
+		},
+		{
+			name:    "no expected audience means aud is not enforced",
+			cfg:     hs256Config(),
+			headers: bearerHeader(hs256Token(t, audClaims("anything"), "secret")),
+			wantOK:  true,
+			wantSub: "alice",
+		},
+		{
+			name:    "audience claim of the wrong type",
+			cfg:     &authConfig{hs256Secret: "secret", expectedAudience: "orders-api"},
+			headers: bearerHeader(hs256Token(t, map[string]any{"sub": "alice", "exp": float64(testNow.Add(time.Hour).Unix()), "aud": 42}, "secret")),
+			wantRej: "invalid audience",
+		},
 	}
 
 	for _, tt := range tests {
@@ -437,6 +502,23 @@ func TestLoadConfig(t *testing.T) {
 			}
 		}
 	})
+	t.Run("expected audience", func(t *testing.T) {
+		cfg, err := loadConfig(func(k string) string {
+			switch k {
+			case "AUTH_HS256_SECRET":
+				return "s"
+			case "AUTH_EXPECTED_AUDIENCE":
+				return "orders-api"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.expectedAudience != "orders-api" {
+			t.Fatalf("expectedAudience = %q", cfg.expectedAudience)
+		}
+	})
 }
 
 func TestRun(t *testing.T) {
@@ -498,6 +580,34 @@ func TestRun(t *testing.T) {
 		}
 		if string(out.Payload) != wrapped {
 			t.Fatalf("payload = %s, want %s", out.Payload, wrapped)
+		}
+	})
+
+	t.Run("caller-supplied verdict headers are stripped", func(t *testing.T) {
+		// A valid token without a sub claim: the caller's forged verdict
+		// headers must not survive to the sink alongside X-Authenticated.
+		noSub := map[string]any{"exp": float64(time.Now().Add(time.Hour).Unix())}
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"auth"}, strings.NewReader(input(map[string]string{
+			"Authorization":   "Bearer " + hs256Token(t, noSub, "secret"),
+			"X-Auth-Subject":  "admin",
+			"x-auth-subject":  "admin-lower",
+			"X-Authenticated": "spoofed",
+		}, `{"a":1}`)), env, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("exit = %d, stderr %s", code, stderr.String())
+		}
+		var out output
+		if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+			t.Fatalf("parse output: %v", err)
+		}
+		for name := range out.Headers {
+			if strings.EqualFold(name, "X-Auth-Subject") {
+				t.Fatalf("caller-supplied %s must be stripped; headers: %+v", name, out.Headers)
+			}
+		}
+		if out.Headers["X-Authenticated"] != "true" {
+			t.Fatalf("X-Authenticated = %q, want the module's own verdict", out.Headers["X-Authenticated"])
 		}
 	})
 

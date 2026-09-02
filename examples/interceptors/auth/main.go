@@ -63,6 +63,7 @@ type authConfig struct {
 	rs256PublicKey     *rsa.PublicKey
 	ed25519PublicKey   ed25519.PublicKey
 	allowMissingExpiry bool
+	expectedAudience   string
 }
 
 func main() {
@@ -120,9 +121,13 @@ func run(args []string, stdin io.Reader, getenv func(string) string, stdout, std
 
 	headers := make(map[string]string, len(req.Headers)+2)
 	for k, v := range req.Headers {
-		// Strip every casing of the credential header: downstream systems
-		// must not receive the raw token.
-		if strings.EqualFold(k, "Authorization") {
+		// Strip every casing of the credential header and of the reserved
+		// verdict headers: downstream systems must not receive the raw
+		// token, nor a caller-forged authentication verdict that verified
+		// claims did not produce.
+		if strings.EqualFold(k, "Authorization") ||
+			strings.EqualFold(k, "X-Authenticated") ||
+			strings.EqualFold(k, "X-Auth-Subject") {
 			continue
 		}
 		headers[k] = v
@@ -147,6 +152,7 @@ func loadConfig(getenv func(string) string) (*authConfig, error) {
 	cfg := &authConfig{
 		hs256Secret:        getenv("AUTH_HS256_SECRET"),
 		allowMissingExpiry: getenv("AUTH_ALLOW_MISSING_EXPIRY") == "true",
+		expectedAudience:   getenv("AUTH_EXPECTED_AUDIENCE"),
 	}
 
 	if pemKey := getenv("AUTH_RS256_PUBLIC_KEY"); pemKey != "" {
@@ -260,18 +266,38 @@ func authenticate(cfg *authConfig, headers map[string]string, now time.Time) dec
 		return refuse(401, "malformed claims")
 	}
 
-	// exp is required by default: a credential without an expiry outlives
-	// every rotation policy.
-	exp, hasExp := numericClaim(claims, "exp")
-	if !hasExp {
-		if !cfg.allowMissingExpiry {
-			return refuse(401, "token has no expiry")
-		}
-	} else if now.After(time.Unix(int64(exp), 0)) {
-		return refuse(401, "token expired")
+	// An expected audience prevents cross-service token replay when an
+	// issuer's signing key is shared between APIs: a token signed for a
+	// different service is not a credential here.
+	if cfg.expectedAudience != "" && !audienceMatches(claims, cfg.expectedAudience) {
+		return refuse(401, "invalid audience")
 	}
-	if nbf, hasNbf := numericClaim(claims, "nbf"); hasNbf && now.Before(time.Unix(int64(nbf), 0)) {
-		return refuse(401, "token not yet valid")
+
+	// Presence is tracked separately from numeric parsing: a present but
+	// non-numeric exp/nbf is malformed, not absent — treating it as absent
+	// would honor an attacker-chosen interpretation.
+	expRaw, hasExp := claims["exp"]
+	if hasExp {
+		exp, isNumeric := expRaw.(float64)
+		if !isNumeric {
+			return refuse(401, "malformed claims")
+		}
+		if now.After(time.Unix(int64(exp), 0)) {
+			return refuse(401, "token expired")
+		}
+	} else if !cfg.allowMissingExpiry {
+		// exp is required by default: a credential without an expiry
+		// outlives every rotation policy.
+		return refuse(401, "token has no expiry")
+	}
+	if nbfRaw, hasNbf := claims["nbf"]; hasNbf {
+		nbf, isNumeric := nbfRaw.(float64)
+		if !isNumeric {
+			return refuse(401, "malformed claims")
+		}
+		if now.Before(time.Unix(int64(nbf), 0)) {
+			return refuse(401, "token not yet valid")
+		}
 	}
 
 	dec := decision{ok: true}
@@ -282,17 +308,15 @@ func authenticate(cfg *authConfig, headers map[string]string, now time.Time) dec
 }
 
 // bearerToken extracts the Authorization bearer credential, tolerating
-// header-name casing differences across sources.
+// header-name and scheme casing differences across sources (scheme names
+// are case-insensitive per RFC 9110).
 func bearerToken(headers map[string]string) string {
 	for k, v := range headers {
 		if !strings.EqualFold(k, "Authorization") {
 			continue
 		}
-		rest, isBearer := strings.CutPrefix(v, "Bearer ")
-		if !isBearer {
-			rest, isBearer = strings.CutPrefix(v, "bearer ")
-		}
-		if !isBearer {
+		scheme, rest, found := strings.Cut(v, " ")
+		if !found || !strings.EqualFold(scheme, "Bearer") {
 			return ""
 		}
 		return strings.TrimSpace(rest)
@@ -300,9 +324,18 @@ func bearerToken(headers map[string]string) string {
 	return ""
 }
 
-// numericClaim reads a JWT numeric-date claim, tolerating the JSON number
-// decode (float64) and integer encodings.
-func numericClaim(claims map[string]interface{}, name string) (float64, bool) {
-	n, ok := claims[name].(float64)
-	return n, ok
+// audienceMatches reports whether the aud claim — a string or an array of
+// strings in JWT — contains the expected audience.
+func audienceMatches(claims map[string]interface{}, expected string) bool {
+	switch aud := claims["aud"].(type) {
+	case string:
+		return aud == expected
+	case []interface{}:
+		for _, entry := range aud {
+			if s, isStr := entry.(string); isStr && s == expected {
+				return true
+			}
+		}
+	}
+	return false
 }

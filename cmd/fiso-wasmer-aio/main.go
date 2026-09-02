@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -709,6 +710,14 @@ func getEnvMap(cfg map[string]interface{}) (map[string]string, error) {
 		s, isStr := v.(string)
 		if !isStr {
 			return nil, fmt.Errorf("config.env[%q] must be a string", k)
+		}
+		// WASI entries are KEY=VALUE strings; reject unrepresentable
+		// names and values at construction, not per event.
+		if k == "" || strings.ContainsAny(k, "=\x00") {
+			return nil, fmt.Errorf("config.env[%q] is not a valid environment name", k)
+		}
+		if strings.ContainsRune(s, '\x00') {
+			return nil, fmt.Errorf("config.env[%q] is not a valid environment value", k)
 		}
 		env[k] = s
 	}

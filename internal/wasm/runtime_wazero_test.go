@@ -372,3 +372,30 @@ func TestWazeroRuntime_GuestClockFollowsHost(t *testing.T) {
 		t.Fatalf("guest clock %d is outside the host window [%d, %d] — sandbox default clock?", report.Now, before-300, after+300)
 	}
 }
+
+// TestWazeroRuntime_StderrSurfacedOnError pins the guest-stderr contract:
+// a failing guest's diagnostic must reach the operator. The auth guest's
+// misconfiguration message ("auth: configuration: ...") is its only
+// diagnostic; discarding stderr leaves a generic exit error that cannot
+// be acted on.
+func TestWazeroRuntime_StderrSurfacedOnError(t *testing.T) {
+	wasmPath := buildWASMModule(t, filepath.Join("testdata", "stderr-fail"))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	rt, err := NewWazeroRuntime(context.Background(), wasmBytes)
+	if err != nil {
+		t.Fatalf("NewWazeroRuntime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	_, err = rt.Call(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatal("expected execution error")
+	}
+	if !strings.Contains(err.Error(), "auth-config-boom") {
+		t.Fatalf("error must surface the guest's stderr diagnostic, got: %v", err)
+	}
+}

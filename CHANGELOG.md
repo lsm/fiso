@@ -16,11 +16,14 @@ unreleased work and will be versioned when a release tag is cut.
   (`examples/interceptors/auth`) verifies the `Authorization: Bearer`
   token as a JWT (HS256/RS256/Ed25519, pure Go) and refuses
   unauthenticated traffic with 401 through the rejection contract,
-  stripping the credential and setting `X-Authenticated`/`X-Auth-Subject`
-  on the way through; the body passes byte-identically. Verification keys
-  reach the guest through the new `interceptors[].config.env` map
-  (validated, delivered on both runtimes and in every Flow binary) —
-  see the new "Authenticating Requests" README section and
+  stripping the credential and any caller-supplied verdict headers and
+  setting `X-Authenticated`/`X-Auth-Subject` from verified claims on the
+  way through; the body passes byte-identically. Optional audience
+  validation (`AUTH_EXPECTED_AUDIENCE`) refuses tokens minted for another
+  service. Verification keys reach the guest through the new
+  `interceptors[].config.env` map (validated — types and
+  WASI-representable names — and delivered on both runtimes and in every
+  Flow binary) — see the new "Authenticating Requests" README section and
   [ADR 0008](docs/adr/0008-interceptor-env-configuration.md).
 
 - **Interceptor rejection contract** — a wasm interceptor can refuse an
@@ -43,7 +46,9 @@ unreleased work and will be versioned when a release tag is cut.
   which would make a time-dependent guest such as a JWT verifier silently
   accept expired credentials. Guests now see the real system clock,
   nanosleep, and a crypto-grade random source; pinned by a runtime
-  contract test.
+  contract test. A failing guest's stderr diagnostic is also embedded in
+  the execution error instead of being discarded, so misconfiguration is
+  diagnosable.
 
 ## [0.21.0] — 2026-09-02
 

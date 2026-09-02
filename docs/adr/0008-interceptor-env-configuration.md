@@ -42,11 +42,17 @@ expired credentials against the frozen clock.
 4. **Misconfiguration is an error, not a verdict.** A guest that cannot
    load its key material exits non-zero, which the host surfaces as an
    interceptor error (500-path, `failOpen` policy applies) — never as a
-   rejection that would masquerade as an authentication decision.
+   rejection that would masquerade as an authentication decision. The
+   wazero runtime embeds the failing guest's stderr diagnostic in the
+   execution error so the operator can see which setting is wrong.
 5. **Secret delivery is deploy-time rendering.** `env` values are plain
    configuration; operators template them from their secret store when
    rendering flow configs. No host-side secret references in this
    contract.
+6. **Env entries must be WASI-representable.** Empty names, `=` or NUL in
+   a key, and NUL in a value are rejected at validation and construction
+   time — a KEY=VALUE environment cannot carry them, and failing at load
+   time beats failing on every event.
 
 ## Consequences
 
