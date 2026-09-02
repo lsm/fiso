@@ -285,3 +285,45 @@ func TestHostHTTP_InvalidMethodRejected(t *testing.T) {
 		}
 	}
 }
+
+// TestHostHTTP_StrictMethodTokens pins the RFC 7230 tchar rule: separator
+// characters are valid tchars, other non-tchars are not.
+func TestHostHTTP_StrictMethodTokens(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	// Valid methods.
+	for _, m := range []string{"GET", "PATCH", "CUSTOM-1"} {
+		if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Method: m}); err != nil {
+			t.Errorf("method %q should be accepted: %v", m, err)
+		}
+	}
+	// Invalid: colon, space, question mark, control.
+	for _, m := range []string{"GE:T", "GET X", "GET?x", "A(B", "A;B"} {
+		if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Method: m}); err == nil {
+			t.Errorf("method %q must be rejected", m)
+		}
+	}
+}
+
+// TestHostHTTP_InvalidHeadersRejected pins the header field validation.
+func TestHostHTTP_InvalidHeadersRejected(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Headers: map[string]string{"Bad Name": "v"}}); err == nil {
+		t.Error("header name with space must be rejected")
+	}
+	if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Headers: map[string]string{"X-A": "bad\x01value"}}); err == nil {
+		t.Error("header value with control character must be rejected")
+	}
+}
+
+// TestHostHTTP_EmptyPathSegmentsRejected pins the canonical-redirect rule.
+func TestHostHTTP_EmptyPathSegmentsRejected(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	for _, path := range []string{"/api//score", "/api/", "//x"} {
+		if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Path: path}); err == nil {
+			t.Errorf("path %q must be rejected", path)
+		}
+	}
+	if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Path: "/"}); err != nil {
+		t.Errorf("the structural root path must be accepted: %v", err)
+	}
+}

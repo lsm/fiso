@@ -107,23 +107,61 @@ func sanitizePath(path string) (string, error) {
 		if strings.Contains(candidate, "%2f") || strings.Contains(candidate, "%2F") || strings.Contains(candidate, "%25") {
 			return "", fmt.Errorf("encoded slashes or percent signs are not allowed in path")
 		}
-		for _, seg := range strings.Split(candidate, "/") {
+		segs := strings.Split(candidate, "/")
+		for i, seg := range segs {
 			if seg == ".." || seg == "." {
 				return "", fmt.Errorf("path must not contain traversal segments")
+			}
+			// The leading empty from the absolute slash (and the trailing
+			// one for exactly "/") are structural; any other empty segment
+			// (repeated or trailing slashes) triggers ServeMux's canonical
+			// redirect, which rewrites the path.
+			structural := i == 0 || (i == len(segs)-1 && candidate == "/")
+			if seg == "" && !structural {
+				return "", fmt.Errorf("path must not contain empty segments")
 			}
 		}
 	}
 	return path, nil
 }
 
-// validMethodToken reports whether the method is a valid RFC 7230 token
-// (no spaces or control characters).
+// methodTcharSpecials are the RFC 7230 tchar specials beyond alphanumerics.
+const methodTcharSpecials = "!#$%&'*+-.^_`|~"
+
+// validMethodToken reports whether the method is a valid RFC 7230 token:
+// tchars only — separators, spaces, and control characters are excluded
+// (stricter than net/http, which rejects some of these only later).
 func validMethodToken(method string) bool {
 	if method == "" {
 		return false
 	}
-	for _, r := range method {
-		if r <= 0x20 || r >= 0x7f {
+	for i := 0; i < len(method); i++ {
+		c := method[i]
+		isTchar := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			strings.IndexByte(methodTcharSpecials, c) >= 0
+		if !isTchar {
+			return false
+		}
+	}
+	return true
+}
+
+// validHeaderPair reports whether a header name and value are safe to set
+// on the outbound request (RFC 7230 field name and no control characters).
+func validHeaderPair(name, value string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		isTchar := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0
+		if !isTchar {
+			return false
+		}
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x20 || value[i] == 0x7f {
 			return false
 		}
 	}
@@ -166,6 +204,9 @@ func (h *hostHTTPClient) call(ctx context.Context, req hostHTTPRequest) (hostHTT
 		return hostHTTPResponse{}, err
 	}
 	for k, v := range req.Headers {
+		if !validHeaderPair(k, v) {
+			return hostHTTPResponse{}, fmt.Errorf("invalid request: header %q is not a valid HTTP field", k)
+		}
 		httpReq.Header.Set(k, v)
 	}
 

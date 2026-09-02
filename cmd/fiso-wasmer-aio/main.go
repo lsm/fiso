@@ -163,67 +163,8 @@ func run() error {
 		logger.Info("started wasmer app", "name", appCfg.Name, "addr", app.Addr)
 	}
 
-	// 2. Start Flow
-	// Load Flow definitions
-	if cfg.Flow.ConfigDir == "" {
-		cfg.Flow.ConfigDir = "/etc/fiso/flows"
-	}
-	loader := config.NewLoader(cfg.Flow.ConfigDir, logger)
-	flows := map[string]*config.FlowDefinition{}
-	if _, statErr := os.Stat(cfg.Flow.ConfigDir); os.IsNotExist(statErr) {
-		logger.Warn("flow config dir not present, continuing without flow", "dir", cfg.Flow.ConfigDir)
-	} else if statErr != nil {
-		// A present-but-inaccessible flow directory is a configuration
-		// error, not a missing component.
-		return fmt.Errorf("stat flow config dir: %w", statErr)
-	} else if flows, err = loader.LoadStrict(); err != nil {
-		// Invalid flow definitions fail startup: silently skipping a file
-		// would drop a configured pipeline without notice.
-		return fmt.Errorf("load flows: %w", err)
-	}
-
-	// Start config watcher
-	watchDone := make(chan struct{})
-	go func() {
-		if err := loader.Watch(watchDone); err != nil {
-			logger.Error("config watcher error", "error", err)
-		}
-	}()
-
-	// HTTP Pool for Flow sources
-	httpPool := httpsource.NewServerPool(logger)
-
-	// Required-runner gate: a terminal Flow return drops process readiness
-	// while surviving components keep running (ADR 0005).
-	gate := flowruntime.NewGate(health)
-
-	type flowRunner struct {
-		name     string
-		pipeline *pipeline.Pipeline
-	}
-	runners := make([]*flowRunner, 0, len(flows))
-
-	if len(flows) > 0 {
-		for name, def := range flows {
-			p, err := buildPipeline(def, logger, httpPool, tracer)
-			if err != nil {
-				return fmt.Errorf("build flow %s: %w", name, err)
-			}
-			runners = append(runners, &flowRunner{name: name, pipeline: p})
-		}
-
-		go func() {
-			if err := httpPool.Start(ctx); err != nil && err != context.Canceled {
-				logger.Error("http pool error", "error", err)
-			}
-		}()
-
-		for _, runner := range runners {
-			gate.GoContext(ctx, runner.name, runner.pipeline.Run)
-		}
-	}
-
-	// 3. Start Link
+	// 2. Start Link (before Flows: HTTP-enabled interceptors
+	// call into it at build/run time via the default linkAddr)
 	var linkServer *http.Server
 	if cfg.Link.ConfigPath != "" {
 		linkCfg, err := link.LoadConfig(cfg.Link.ConfigPath)
@@ -323,6 +264,66 @@ func run() error {
 					logger.Error("link server error", "error", err)
 				}
 			}()
+		}
+	}
+
+	// 3. Start Flow
+	// Load Flow definitions
+	if cfg.Flow.ConfigDir == "" {
+		cfg.Flow.ConfigDir = "/etc/fiso/flows"
+	}
+	loader := config.NewLoader(cfg.Flow.ConfigDir, logger)
+	flows := map[string]*config.FlowDefinition{}
+	if _, statErr := os.Stat(cfg.Flow.ConfigDir); os.IsNotExist(statErr) {
+		logger.Warn("flow config dir not present, continuing without flow", "dir", cfg.Flow.ConfigDir)
+	} else if statErr != nil {
+		// A present-but-inaccessible flow directory is a configuration
+		// error, not a missing component.
+		return fmt.Errorf("stat flow config dir: %w", statErr)
+	} else if flows, err = loader.LoadStrict(); err != nil {
+		// Invalid flow definitions fail startup: silently skipping a file
+		// would drop a configured pipeline without notice.
+		return fmt.Errorf("load flows: %w", err)
+	}
+
+	// Start config watcher
+	watchDone := make(chan struct{})
+	go func() {
+		if err := loader.Watch(watchDone); err != nil {
+			logger.Error("config watcher error", "error", err)
+		}
+	}()
+
+	// HTTP Pool for Flow sources
+	httpPool := httpsource.NewServerPool(logger)
+
+	// Required-runner gate: a terminal Flow return drops process readiness
+	// while surviving components keep running (ADR 0005).
+	gate := flowruntime.NewGate(health)
+
+	type flowRunner struct {
+		name     string
+		pipeline *pipeline.Pipeline
+	}
+	runners := make([]*flowRunner, 0, len(flows))
+
+	if len(flows) > 0 {
+		for name, def := range flows {
+			p, err := buildPipeline(def, logger, httpPool, tracer)
+			if err != nil {
+				return fmt.Errorf("build flow %s: %w", name, err)
+			}
+			runners = append(runners, &flowRunner{name: name, pipeline: p})
+		}
+
+		go func() {
+			if err := httpPool.Start(ctx); err != nil && err != context.Canceled {
+				logger.Error("http pool error", "error", err)
+			}
+		}()
+
+		for _, runner := range runners {
+			gate.GoContext(ctx, runner.name, runner.pipeline.Run)
 		}
 	}
 

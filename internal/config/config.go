@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -141,8 +142,11 @@ func (f *FlowDefinition) Validate() error {
 					}
 					for j, tv := range targets {
 						name, isStr := tv.(string)
-						if !isStr || name == "" {
-							errs = append(errs, fmt.Errorf("interceptors[%d].config.httpTargets[%d] must be a non-empty target name string", i, j))
+						// A target is a single URL path segment: route syntax
+						// (slashes, dots, query) would compose into the
+						// /link/{target}{path} URL unsafely.
+						if !isStr || name == "" || strings.ContainsAny(name, "/?#") || strings.Contains(name, "..") || name != url.PathEscape(name) {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.httpTargets[%d] must be a single URL path segment (the Link target name)", i, j))
 						}
 					}
 					// linkAddr is optional but, when present, must be a
@@ -150,9 +154,12 @@ func (f *FlowDefinition) Validate() error {
 					if la, present := ic.Config["linkAddr"]; present && la != nil {
 						linkAddr, isStr := la.(string)
 						if !isStr || linkAddr == "" {
-							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr must be an absolute http(s) URL string", i))
-						} else if u, err := url.Parse(linkAddr); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr %q must be an absolute http(s) URL", i, linkAddr))
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr must be an absolute http(s) origin string", i))
+						} else if u, err := url.Parse(linkAddr); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" {
+							// A path/query/fragment on linkAddr would be
+							// silently dropped or miscomposed into the
+							// /link/{target}{path} URL.
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr %q must be an absolute http(s) origin (no path, query, or fragment)", i, linkAddr))
 						}
 					}
 				}
