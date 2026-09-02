@@ -199,3 +199,51 @@ func TestProxy_KafkaTarget_Rejection_MapsStatus(t *testing.T) {
 		t.Fatalf("expected the rejection reason in the body, got %q", w.Body.String())
 	}
 }
+
+// TestProxy_InboundInterceptorRejection_MapsStatus pins the response-side
+// mapping: an inbound-phase module can refuse an upstream response and the
+// caller sees the guest-chosen status (ADR 0007).
+func TestProxy_InboundInterceptorRejection_MapsStatus(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"response":true}`))
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     host,
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module, "phase": "inbound"}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	handler := NewHandler(Config{
+		Targets:      store,
+		Metrics:      link.NewMetrics(prometheus.NewRegistry()),
+		Interceptors: icRegistry,
+	})
+
+	// The upstream response carries no Authorization header, so the
+	// inbound module refuses it.
+	req := httptest.NewRequest("POST", "/link/svc/x", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected the refused response to surface as 401, got %d (body %q)", w.Code, w.Body.String())
+	}
+}
