@@ -235,11 +235,10 @@ func TestAuthenticate(t *testing.T) {
 			wantRej: "token expired",
 		},
 		{
-			name:    "exp exactly now still valid",
+			name:    "exp exactly now is expired",
 			cfg:     hs256Config(),
 			headers: bearerHeader(hs256Token(t, map[string]any{"sub": "alice", "exp": float64(testNow.Unix())}, "secret")),
-			wantOK:  true,
-			wantSub: "alice",
+			wantRej: "token expired",
 		},
 		{
 			name:    "missing exp refused by default",

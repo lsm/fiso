@@ -294,7 +294,9 @@ func authenticate(cfg *authConfig, headers map[string]string, now time.Time) dec
 		if !isNumeric {
 			return refuse(401, "malformed claims")
 		}
-		if now.After(time.Unix(int64(exp), 0)) {
+		// RFC 7519: the current time MUST be strictly before exp — a
+		// credential at its expiration instant is expired.
+		if !now.Before(time.Unix(int64(exp), 0)) {
 			return refuse(401, "token expired")
 		}
 	} else if !cfg.allowMissingExpiry {
