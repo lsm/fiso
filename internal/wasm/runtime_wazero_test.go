@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // buildWASMModule compiles a Go source file to a WASM binary using wasip1/wasm.
@@ -332,5 +333,42 @@ func TestWazeroRuntime_LargeInput(t *testing.T) {
 	}
 	if len(output) == 0 {
 		t.Error("expected non-empty output for large input")
+	}
+}
+
+// TestWazeroRuntime_GuestClockFollowsHost pins the guest-clock contract:
+// wazero's sandbox default is a frozen fake wall clock, which would make a
+// time-dependent guest (JWT exp/nbf verification) silently accept expired
+// credentials. The guest must see the real host time.
+func TestWazeroRuntime_GuestClockFollowsHost(t *testing.T) {
+	wasmPath := buildWASMModule(t, filepath.Join("testdata", "clock"))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	rt, err := NewWazeroRuntime(context.Background(), wasmBytes)
+	if err != nil {
+		t.Fatalf("NewWazeroRuntime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	before := time.Now().Unix()
+	out, err := rt.Call(context.Background(), []byte(`{}`))
+	after := time.Now().Unix()
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	var report struct {
+		Now int64 `json:"now"`
+	}
+	if err := json.Unmarshal(out, &report); err != nil {
+		t.Fatalf("parse guest report %s: %v", out, err)
+	}
+	// The guest ran between the two host readings; anything outside that
+	// window (within tolerance) is a frozen or skewed clock.
+	if report.Now < before-300 || report.Now > after+300 {
+		t.Fatalf("guest clock %d is outside the host window [%d, %d] — sandbox default clock?", report.Now, before-300, after+300)
 	}
 }

@@ -636,7 +636,7 @@ func TestFlowDefinition_Validate(t *testing.T) {
 					"env":    map[string]interface{}{"AUTH_HS256_SECRET": 42},
 				}}},
 			},
-			wantErr: "interceptors[0].config.env must be a map of strings",
+			wantErr: `interceptors[0].config.env["AUTH_HS256_SECRET"] must be a string`,
 		},
 		{
 			name: "wasm interceptor env null value",
@@ -649,7 +649,7 @@ func TestFlowDefinition_Validate(t *testing.T) {
 					"env":    map[string]interface{}{"AUTH_HS256_SECRET": nil},
 				}}},
 			},
-			wantErr: "interceptors[0].config.env must be a map of strings",
+			wantErr: `interceptors[0].config.env["AUTH_HS256_SECRET"] must be a string`,
 		},
 		{
 			name: "wasm interceptor valid wazero runtime",

@@ -1299,6 +1299,67 @@ evaluation and dead-lettering. This is the
 primitive a guest-side authentication module builds on (see
 [ADR 0007](docs/adr/0007-interceptor-rejection-contract.md)).
 
+### Authenticating Requests (JWT verification)
+
+`examples/interceptors/auth` is a supported guest that turns the rejection
+primitive into an authentication layer: it verifies the `Authorization:
+Bearer` token as a JWT against keys delivered through interceptor
+configuration and refuses unauthenticated traffic with 401 before any
+transform or sink sees it.
+
+```yaml
+name: auth-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8083"
+    path: /ingest
+interceptors:
+  - type: wasm
+    config:
+      module: /etc/fiso/modules/auth.wasm
+      env:
+        AUTH_HS256_SECRET: ${AUTH_HS256_SECRET}   # render at deploy time
+sink:
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST
+```
+
+Build it like any guest: `GOOS=wasip1 GOARCH=wasm go build -o auth.wasm
+./examples/interceptors/auth/`. It is pure Go (no cgo), so it runs on both
+the wazero and wasmer runtimes.
+
+**Keys arrive as environment variables** through the interceptor's `env`
+map (see [ADR 0008](docs/adr/0008-interceptor-env-configuration.md)):
+
+| Variable | Meaning |
+| --- | --- |
+| `AUTH_HS256_SECRET` | HMAC-SHA256 shared secret (enables HS256) |
+| `AUTH_RS256_PUBLIC_KEY` | PEM-encoded PKIX RSA public key (enables RS256) |
+| `AUTH_ED25519_PUBLIC_KEY` | base64 (std) raw 32-byte public key (enables EdDSA) |
+| `AUTH_ALLOW_MISSING_EXPIRY` | set to `true` to accept tokens without `exp` |
+
+A token's algorithm is allowed only when its key is configured — `alg:
+none` and unconfigured algorithms are refused. `exp` is required by
+default and enforced together with `nbf`. On success the credential header
+is stripped (downstream systems never see the raw token), the verdict
+travels as `X-Authenticated: true` and `X-Auth-Subject` (from `sub`), and
+the body passes through byte-identically. Missing or malformed key
+material is an interceptor *error* — never a silent allow, and never a
+blanket 401 pretending to decide — so `failOpen` policy applies to it
+explicitly.
+
+**Secret delivery:** `env` values are plain configuration. Render them at
+deploy time from your secret store (Kubernetes: a Secret mounted and
+templated into the flow config, or your config generator of choice). The
+guest is trusted code executing inside the process — env values are
+visible to it by design; only deploy modules you trust with the keys they
+receive. Guests see the real system clock and a real random source on the
+wazero runtime, so time-based and cryptographic verification behave as
+written.
+
 ### Flow Configuration
 
 Reference the WASM module in your flow definition:

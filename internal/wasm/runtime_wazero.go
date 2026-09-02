@@ -5,6 +5,7 @@ package wasm
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 
 	"github.com/tetratelabs/wazero"
@@ -16,21 +17,40 @@ import (
 type WazeroRuntime struct {
 	rt     wazero.Runtime
 	module wazero.CompiledModule
+	env    map[string]string
 }
 
 // NewWazeroRuntime compiles a WASM module from raw bytes.
 // The module must be a WASI binary (wasip1) that reads JSON from stdin and writes JSON to stdout.
 func NewWazeroRuntime(ctx context.Context, wasmBytes []byte) (*WazeroRuntime, error) {
-	return newWazeroRuntime(ctx, wasmBytes, nil)
+	return newWazeroRuntime(ctx, wasmBytes, nil, nil)
 }
 
 // NewWazeroRuntimeWithHTTP additionally instantiates the fiso.http_call
 // host function with the supplied allowlist (ADR 0006).
 func NewWazeroRuntimeWithHTTP(ctx context.Context, wasmBytes []byte, cfg HostHTTPConfig) (*WazeroRuntime, error) {
-	return newWazeroRuntime(ctx, wasmBytes, &cfg)
+	return newWazeroRuntime(ctx, wasmBytes, &cfg, nil)
 }
 
-func newWazeroRuntime(ctx context.Context, wasmBytes []byte, httpCfg *HostHTTPConfig) (*WazeroRuntime, error) {
+// WazeroOptions configures the optional capabilities of a WazeroRuntime.
+type WazeroOptions struct {
+	// Env is delivered to the guest as environment variables on every
+	// invocation (ADR 0008) — the channel for key material such as JWT
+	// verification keys.
+	Env map[string]string
+
+	// HostHTTP enables the fiso.http_call host function with the supplied
+	// allowlist (ADR 0006). Nil disables the capability entirely.
+	HostHTTP *HostHTTPConfig
+}
+
+// NewWazeroRuntimeWithOptions compiles a WASM module with env delivery and
+// optionally the host HTTP capability combined.
+func NewWazeroRuntimeWithOptions(ctx context.Context, wasmBytes []byte, opts WazeroOptions) (*WazeroRuntime, error) {
+	return newWazeroRuntime(ctx, wasmBytes, opts.HostHTTP, opts.Env)
+}
+
+func newWazeroRuntime(ctx context.Context, wasmBytes []byte, httpCfg *HostHTTPConfig, env map[string]string) (*WazeroRuntime, error) {
 	rt := wazero.NewRuntime(ctx)
 
 	// Instantiate WASI so the module can use stdin/stdout.
@@ -56,12 +76,13 @@ func newWazeroRuntime(ctx context.Context, wasmBytes []byte, httpCfg *HostHTTPCo
 		return nil, fmt.Errorf("compile wasm module: %w", err)
 	}
 
-	return &WazeroRuntime{rt: rt, module: compiled}, nil
+	return &WazeroRuntime{rt: rt, module: compiled, env: env}, nil
 }
 
 // Call invokes the WASM module with input on stdin and captures stdout as the result.
+// The guest is instantiated with the env configured at construction.
 func (w *WazeroRuntime) Call(ctx context.Context, input []byte) ([]byte, error) {
-	return w.CallWithEnv(ctx, input, nil)
+	return w.CallWithEnv(ctx, input, w.env)
 }
 
 // CallWithEnv is Call with environment variables set for the invocation
@@ -74,7 +95,16 @@ func (w *WazeroRuntime) CallWithEnv(ctx context.Context, input []byte, env map[s
 		WithStdin(stdin).
 		WithStdout(&stdout).
 		WithStderr(&bytes.Buffer{}). // discard stderr
-		WithName("")                 // anonymous module so multiple calls don't collide
+		WithName("").                // anonymous module so multiple calls don't collide
+		// wazero's sandbox defaults are a fake clock and a deterministic
+		// random source. Time-dependent guests — an authentication module
+		// checking JWT exp/nbf — would silently accept expired credentials
+		// against a frozen clock, so the guest sees the real system
+		// facilities (ADR 0008).
+		WithSysWalltime().
+		WithSysNanotime().
+		WithSysNanosleep().
+		WithRandSource(rand.Reader)
 	for k, v := range env {
 		cfg = cfg.WithEnv(k, v)
 	}

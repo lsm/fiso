@@ -175,6 +175,23 @@ func (f *FlowDefinition) Validate() error {
 					errs = append(errs, fmt.Errorf("interceptors[%d].config.runtime must be 'wazero' or 'wasmer', got %q", i, runtimeStr))
 				}
 			}
+			// Env delivery (ADR 0008): configured env reaches the guest at
+			// instantiation. Malformed values fail validation instead of
+			// being silently dropped — a dropped verification key would
+			// silently turn an authentication module into a refusal-only
+			// gate. Null is treated as omitted, matching runtime.
+			if envVal, present := ic.Config["env"]; present && envVal != nil {
+				envMap, isMap := envVal.(map[string]interface{})
+				if !isMap {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.env must be a map of strings", i))
+				} else {
+					for k, v := range envMap {
+						if _, isStr := v.(string); !isStr {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.env[%q] must be a string", i, k))
+						}
+					}
+				}
+			}
 		}
 	}
 

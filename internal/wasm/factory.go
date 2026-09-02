@@ -26,10 +26,10 @@ func (f *DefaultFactory) Create(ctx context.Context, cfg Config) (Runtime, error
 
 	switch cfg.Type {
 	case RuntimeWazero, "": // default to wazero
-		if cfg.HostHTTP != nil {
-			return NewWazeroRuntimeWithHTTP(ctx, wasmBytes, *cfg.HostHTTP)
-		}
-		return NewWazeroRuntime(ctx, wasmBytes)
+		return NewWazeroRuntimeWithOptions(ctx, wasmBytes, WazeroOptions{
+			Env:      cfg.Env,
+			HostHTTP: cfg.HostHTTP,
+		})
 	case RuntimeWasmer:
 		if cfg.HostHTTP != nil {
 			return nil, fmt.Errorf("host HTTP calls require the wazero runtime")

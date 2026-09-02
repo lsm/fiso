@@ -12,6 +12,17 @@ unreleased work and will be versioned when a release tag is cut.
 
 ### Added
 
+- **WASM interceptor authentication** — a supported guest module
+  (`examples/interceptors/auth`) verifies the `Authorization: Bearer`
+  token as a JWT (HS256/RS256/Ed25519, pure Go) and refuses
+  unauthenticated traffic with 401 through the rejection contract,
+  stripping the credential and setting `X-Authenticated`/`X-Auth-Subject`
+  on the way through; the body passes byte-identically. Verification keys
+  reach the guest through the new `interceptors[].config.env` map
+  (validated, delivered on both runtimes and in every Flow binary) —
+  see the new "Authenticating Requests" README section and
+  [ADR 0008](docs/adr/0008-interceptor-env-configuration.md).
+
 - **Interceptor rejection contract** — a wasm interceptor can refuse an
   event instead of transforming it by returning
   `{"reject": {"status": 400-599, "reason": "..."}}`. A rejection is
@@ -24,6 +35,15 @@ unreleased work and will be versioned when a release tag is cut.
   verdict, not a failure. This is the primitive guest-side authentication
   modules build on. See
   [ADR 0007](docs/adr/0007-interceptor-rejection-contract.md).
+
+### Fixed
+
+- **Guest clock and randomness on wazero** — the runtime's sandbox
+  defaults froze the guest wall clock (wazero's deterministic default),
+  which would make a time-dependent guest such as a JWT verifier silently
+  accept expired credentials. Guests now see the real system clock,
+  nanosleep, and a crypto-grade random source; pinned by a runtime
+  contract test.
 
 ## [0.21.0] — 2026-09-02
 

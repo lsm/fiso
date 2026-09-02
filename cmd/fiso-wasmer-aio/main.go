@@ -598,6 +598,13 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 					Type:       wasmruntime.RuntimeType(runtimeType),
 					ModulePath: modulePath,
 				}
+				// Env delivery (ADR 0008): configured env reaches the guest
+				// at instantiation — the channel for key material such as
+				// JWT verification keys.
+				wasmCfg.Env, err = getEnvMap(ic.Config)
+				if err != nil {
+					return nil, fmt.Errorf("wasm interceptor %s: %w", modulePath, err)
+				}
 				if httpEnabled(ic.Config) {
 					if runtimeType != "wazero" && runtimeType != "" {
 						return nil, fmt.Errorf("wasm interceptor %s: host HTTP calls require the wazero runtime", modulePath)
@@ -682,6 +689,30 @@ func loopbackLinkAddr(ln net.Listener) string {
 func getString(m map[string]interface{}, key string) string {
 	v, _ := m[key].(string)
 	return v
+}
+
+// getEnvMap extracts the env delivered to the guest at instantiation (ADR
+// 0008). Malformed values fail construction instead of being silently
+// dropped — a dropped verification key would silently disable an
+// authentication module's allow path.
+func getEnvMap(cfg map[string]interface{}) (map[string]string, error) {
+	raw, present := cfg["env"]
+	if !present || raw == nil {
+		return nil, nil
+	}
+	envMap, isMap := raw.(map[string]interface{})
+	if !isMap {
+		return nil, fmt.Errorf("config.env must be a map of strings")
+	}
+	env := make(map[string]string, len(envMap))
+	for k, v := range envMap {
+		s, isStr := v.(string)
+		if !isStr {
+			return nil, fmt.Errorf("config.env[%q] must be a string", k)
+		}
+		env[k] = s
+	}
+	return env, nil
 }
 
 func capitalizeAuthType(t string) string {

@@ -1,0 +1,17 @@
+name: auth-flow
+source:
+  type: http
+  config:
+    listenAddr: ":8083"
+    path: /ingest
+interceptors:
+  - type: wasm
+    config:
+      module: /etc/fiso/modules/auth.wasm
+      env:
+        AUTH_HS256_SECRET: e2e-hs256-secret
+sink:
+  type: http
+  config:
+    url: http://user-service:8082
+    method: POST
