@@ -1,8 +1,11 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,5 +157,45 @@ func TestPipeline_InterceptorFailure_StillDLQs(t *testing.T) {
 			t.Fatal("an interceptor failure must not be classified as a rejection")
 		}
 		t.Fatalf("without PropagateErrors a failure must stay swallowed, got %v", src.gotErr)
+	}
+}
+
+// TestPipeline_InterceptorRejection_LogsResolvedCorrelationID pins the
+// rejection log's observability: the pooled http source builds events with
+// headers only (no CorrelationID field), so the verdict must log the
+// correlation ID resolved from the incoming headers — the log line is the
+// contract's primary rejection record (ADR 0007).
+func TestPipeline_InterceptorRejection_LogsResolvedCorrelationID(t *testing.T) {
+	var buf bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	defer slog.SetDefault(orig)
+
+	rejecting := &mockInterceptor{
+		process: func(_ context.Context, _ *interceptor.Request) (*interceptor.Request, error) {
+			return nil, &interceptor.RejectedError{Status: 401, Reason: "missing credentials"}
+		},
+	}
+	// Mirrors the pooled source: correlation travels in headers only (the
+	// resolver reads the lowercase spelling).
+	src := &capturingSource{
+		evt: source.Event{
+			Value:   []byte(`{}`),
+			Topic:   "http",
+			Headers: map[string]string{"x-correlation-id": "corr-e2e-001"},
+		},
+		done: make(chan struct{}),
+	}
+
+	p := New(Config{FlowName: "auth-flow", SourceType: "http"}, src, nil, &mockSink{}, dlq.NewHandler(&mockPublisher{}), interceptor.NewChain(rejecting))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	go func() { _ = p.Run(ctx) }()
+	<-src.done
+	cancel()
+
+	if !strings.Contains(buf.String(), "corr-e2e-001") {
+		t.Fatalf("the rejection log must carry the resolved correlation ID, got:\n%s", buf.String())
 	}
 }

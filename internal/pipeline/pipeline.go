@@ -181,9 +181,11 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 			// dead-letter queue must not absorb unauthenticated traffic) —
 			// and let request-response sources answer with the status.
 			if rej, ok := interceptor.AsRejection(err); ok {
+				// Log the resolved correlation ID: pooled sources carry it
+				// in headers only, so evt.CorrelationID can be empty.
 				p.logger.Warn("event rejected by interceptor",
 					"flow", p.config.FlowName,
-					"correlation_id", evt.CorrelationID,
+					"correlation_id", corrID.Value,
 					"status", rej.Status,
 					"reason", rej.Reason,
 				)
