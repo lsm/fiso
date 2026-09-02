@@ -10,6 +10,8 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-09-02
+
 ### Added
 
 - **HTTP-calling WASM interceptors** — a WASM module can now make HTTP calls
@@ -33,34 +35,6 @@ unreleased work and will be versioned when a release tag is cut.
   raw bytes, mirroring the Flow gRPC sink's codec convention. `address` is
   required; `timeout` defaults to 5s and must be a positive duration
   (ADR 0003).
-
-### Fixed
-
-- **wasmer-link E2E now exercises interception** — the end-to-end test
-  claimed "proxy with WASM interception" but configured no interceptor on
-  the link target and asserted none of the module's effects (its only
-  interception-adjacent check grepped for a request header no component
-  sets). The `api` target now runs the intercept module on the wasmer
-  engine, and the test fails unless the interceptor's header, payload
-  marker, and env reach the backend and the transformed payload still
-  processes. CI also builds the four wasmer CGO images once per run
-  instead of four times.
-
-- **Wasmer manager lifecycle defects** — `StopAll` now terminates every
-  app's health-check goroutine (previously they leaked and kept probing the
-  shut-down server for the process lifetime in every long-running wasmer
-  binary); `StopApp` is safe to retry after a failed stop (previously a
-  second call panicked on a double channel close); and an explicitly
-  configured `port` is now reserved in the port pool so it is never handed
-  to another app and its release on stop is symmetric. The manager's
-  `defaultPortRange` setting is now actually honored by `fiso-wasmer`
-  (previously the pool was hardcoded to 9000-9999 and the setting was dead).
-
-### Removed
-
-- **Dead Wasmer code** — the unimported `internal/wasmer/unified` package,
-  the never-called `Proxy` type, and the unreferenced
-  `NewManagerWithLogger`/`SetLogger`/`IsHealthy` manager methods.
 
 ### Changed
 
@@ -90,11 +64,35 @@ unreleased work and will be versioned when a release tag is cut.
 
 ### Removed
 
+- **Dead Wasmer code** — the unimported `internal/wasmer/unified` package,
+  the never-called `Proxy` type, and the unreferenced
+  `NewManagerWithLogger`/`SetLogger`/`IsHealthy` manager methods.
+
 - **Advertised-but-unimplemented `wasmer-app` interceptor type** — accepted by
   Flow validation but implemented by no binary. It is now rejected with an
   actionable error until a binary executes it (ADR 0003).
 
 ### Fixed
+
+- **wasmer-link E2E now exercises interception** — the end-to-end test
+  claimed "proxy with WASM interception" but configured no interceptor on
+  the link target and asserted none of the module's effects (its only
+  interception-adjacent check grepped for a request header no component
+  sets). The `api` target now runs the intercept module on the wasmer
+  engine, and the test fails unless the interceptor's header, payload
+  marker, and env reach the backend and the transformed payload still
+  processes. CI also builds the four wasmer CGO images once per run
+  instead of four times.
+
+- **Wasmer manager lifecycle defects** — `StopAll` now terminates every
+  app's health-check goroutine (previously they leaked and kept probing the
+  shut-down server for the process lifetime in every long-running wasmer
+  binary); `StopApp` is safe to retry after a failed stop (previously a
+  second call panicked on a double channel close); and an explicitly
+  configured `port` is now reserved in the port pool so it is never handed
+  to another app and its release on stop is symmetric. The manager's
+  `defaultPortRange` setting is now actually honored by `fiso-wasmer`
+  (previously the pool was hardcoded to 9000-9999 and the setting was dead).
 
 - **No more silent WASM downgrades** — the plain `fiso-flow` binary now
   rejects `runtime: wasmer` with an explicit error instead of silently
@@ -279,6 +277,7 @@ unreleased work and will be versioned when a release tag is cut.
 
 ---
 
-[Unreleased]: https://github.com/lsm/fiso/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/lsm/fiso/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/lsm/fiso/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/lsm/fiso/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/lsm/fiso/compare/v0.18.0...v0.19.0
