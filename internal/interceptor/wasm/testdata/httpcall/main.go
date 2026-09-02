@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/binary"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,13 +22,13 @@ type callRequest struct {
 	Method  string            `json:"method"`
 	Path    string            `json:"path"`
 	Headers map[string]string `json:"headers,omitempty"`
-	Body    json.RawMessage   `json:"body,omitempty"`
+	BodyB64 string            `json:"bodyB64,omitempty"`
 }
 
 type callResponse struct {
 	Status  int               `json:"status"`
 	Headers map[string]string `json:"headers"`
-	Body    json.RawMessage   `json:"body,omitempty"`
+	BodyB64 string            `json:"bodyB64,omitempty"`
 }
 
 func main() {
@@ -44,17 +44,31 @@ func main() {
 		Method:  "POST",
 		Path:    "/lookup",
 		Headers: map[string]string{"X-Caller": "wasm"},
-		Body:    env.Payload,
+		BodyB64: base64.StdEncoding.EncodeToString(env.Payload),
 	})
 	reqBuf := []byte(req)
 	respBuf := make([]byte, 64*1024)
 
 	// Test modes (set via FISO_TEST_MODE) exercise the host error paths.
 	mode := os.Getenv("FISO_TEST_MODE")
-	if mode == "badreq" {
+	switch mode {
+	case "badreq":
 		reqBuf = []byte("not-json")
-	} else if mode == "smallbuf" {
+	case "smallbuf":
 		respBuf = respBuf[:8]
+	case "traversal":
+		cr := callRequest{Target: "enrich-api", Path: "/../secret"}
+		b, _ := json.Marshal(cr)
+		reqBuf = b
+	case "emptytarget":
+		cr := callRequest{}
+		b, _ := json.Marshal(cr)
+		reqBuf = b
+	case "plaintext":
+		// Body that is not JSON: base64 carries it verbatim.
+		cr := callRequest{Target: "enrich-api", Path: "/", Method: "POST", BodyB64: base64.StdEncoding.EncodeToString([]byte("hello=world"))}
+		b, _ := json.Marshal(cr)
+		reqBuf = b
 	}
 
 	n := http_call(
@@ -71,7 +85,9 @@ func main() {
 		var cr callResponse
 		if json.Unmarshal(respBuf[:n], &cr) == nil {
 			env.Headers["X-Api-Status"] = fmt.Sprintf("%d", cr.Status)
-			env.Payload = cr.Body
+			if raw, err := base64.StdEncoding.DecodeString(cr.BodyB64); err == nil {
+				env.Payload = raw
+			}
 		}
 	}
 
@@ -90,5 +106,3 @@ func readAllStdin() ([]byte, error) {
 		}
 	}
 }
-
-var _ = binary.LittleEndian

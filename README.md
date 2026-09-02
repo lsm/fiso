@@ -1311,12 +1311,16 @@ interceptors:
 
 The module imports and calls `fiso.http_call(req_ptr, req_len, resp_ptr,
 resp_cap) -> i32`. The request is JSON `{target, method, path, headers,
-body}`; the host writes `{status, headers, body}` into the response buffer
-and returns its length, or a negative error code (`-1` invalid request, `-2`
-target denied, `-3` response buffer too small, `-4` upstream failure). A
-module that imports the function without `http: true` fails to instantiate —
-the capability is absent, not merely unchecked. Currently supported on the
-wazero runtime.
+bodyB64}`; the host writes `{status, headers, bodyB64}` into the response
+buffer and returns its length, or a negative error code (`-1` invalid
+request, `-2` target denied, `-3` response buffer too small, `-4` upstream
+failure). Bodies travel base64-encoded so arbitrary bytes — JSON, text,
+form-encoded, binary — round-trip verbatim. The path must be absolute with
+no `..` segments or encoded slashes; the guest cannot escape its target's
+prefix. A module that imports the function without `http: true` fails to
+instantiate — the capability is absent, not merely unchecked. Supported on
+the wazero runtime in every Flow-capable binary (including
+`fiso-flow-wasmer` and `fiso-wasmer-aio` when `runtime` is wazero).
 
 ### gRPC Interceptors
 

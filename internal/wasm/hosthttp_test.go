@@ -2,9 +2,12 @@ package wasm
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -67,7 +70,7 @@ func TestHostHTTP_RoundTrip(t *testing.T) {
 		Method:  "post",
 		Path:    "/score",
 		Headers: map[string]string{"X-Trace": "t-1"},
-		Body:    json.RawMessage(`{"amount":100}`),
+		BodyB64: "eyJhbW91bnQiOjEwMH0=",
 	})
 	if err != nil {
 		t.Fatalf("call: %v", err)
@@ -87,8 +90,8 @@ func TestHostHTTP_RoundTrip(t *testing.T) {
 	if resp.Headers["X-Score"] != "42" {
 		t.Errorf("response header missing: %v", resp.Headers)
 	}
-	if string(resp.Body) != `{"risk":"low"}` {
-		t.Errorf("body = %s", resp.Body)
+	if raw, _ := base64.StdEncoding.DecodeString(resp.BodyB64); string(raw) != `{"risk":"low"}` {
+		t.Errorf("body = %s", resp.BodyB64)
 	}
 }
 
@@ -152,4 +155,112 @@ func TestHostHTTP_HeaderMultiValueKeepsFirst(t *testing.T) {
 	if resp.Headers["X-Multi"] != "first" {
 		t.Errorf("multi-value header: got %q, want first", resp.Headers["X-Multi"])
 	}
+}
+
+// TestHostHTTP_PathTraversalRejected pins that a guest cannot escape its
+// target's path prefix: absolute paths without .. or encoded slashes only.
+func TestHostHTTP_PathTraversalRejected(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	for _, path := range []string{"/../secret", "/a/../../b", "relative", "/%2f%2fescape"} {
+		if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Path: path}); err == nil {
+			t.Errorf("path %q must be rejected", path)
+		}
+	}
+}
+
+// TestHostHTTP_EmptyTargetIsInvalidRequest pins the error classification.
+func TestHostHTTP_EmptyTargetIsInvalidRequest(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := client.call(context.Background(), hostHTTPRequest{})
+	if err == nil || !strings.Contains(err.Error(), "invalid request") {
+		t.Fatalf("expected invalid-request classification, got %v", err)
+	}
+}
+
+// TestHostHTTP_InvalidBase64BodyRejected pins the request validation.
+func TestHostHTTP_InvalidBase64BodyRejected(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", BodyB64: "!!!not-base64!!!"})
+	if err == nil || !strings.Contains(err.Error(), "invalid request") {
+		t.Fatalf("expected invalid-request classification, got %v", err)
+	}
+}
+
+// TestNewHostHTTPClient_InvalidLinkAddr pins the constructor validation.
+func TestNewHostHTTPClient_InvalidLinkAddr(t *testing.T) {
+	if _, err := newHostHTTPClient(HostHTTPConfig{LinkAddr: "http://a b"}); err == nil {
+		t.Fatal("expected invalid linkAddr to be rejected")
+	}
+}
+
+// TestHostHTTP_PlaintextBodyRoundTrip pins that non-JSON bodies survive
+// verbatim in both directions.
+func TestHostHTTP_PlaintextBodyRoundTrip(t *testing.T) {
+	var gotBody string
+	client, _ := newTestHostClient(t, []string{"api"}, func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		gotBody = string(buf)
+		_, _ = w.Write([]byte("plain text response"))
+	})
+	resp, err := client.call(context.Background(), hostHTTPRequest{
+		Target:  "api",
+		BodyB64: "aGVsbG89d29ybGQ=", // "hello=world"
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if gotBody != "hello=world" {
+		t.Errorf("request body mangled: %q", gotBody)
+	}
+	if raw, _ := base64.StdEncoding.DecodeString(resp.BodyB64); string(raw) != "plain text response" {
+		t.Errorf("response body mangled: %q", resp.BodyB64)
+	}
+}
+
+// TestFactory_CreateWithHostHTTP pins the factory path used by the wasmer
+// binaries: HostHTTP config produces an HTTP-enabled wazero runtime, and
+// requesting it with the wasmer engine is rejected.
+func TestFactory_CreateWithHostHTTP(t *testing.T) {
+	dir := t.TempDir()
+	modPath := compilePlainModule(t, dir)
+
+	f := NewFactory()
+	cfg := HostHTTPConfig{LinkAddr: "http://127.0.0.1:3500", AllowedTargets: []string{"api"}}
+	rt, err := f.Create(context.Background(), Config{Type: RuntimeWazero, ModulePath: modPath, HostHTTP: &cfg})
+	if err != nil {
+		t.Fatalf("Create with HostHTTP: %v", err)
+	}
+	if rt == nil {
+		t.Fatal("expected a runtime")
+	}
+	_ = rt.Close()
+
+	wasmerCfg := Config{Type: RuntimeWasmer, ModulePath: modPath, HostHTTP: &cfg}
+	if _, err := f.Create(context.Background(), wasmerCfg); err == nil {
+		t.Fatal("expected host HTTP with wasmer engine to be rejected")
+	}
+}
+
+// compilePlainModule builds a minimal wasip1 module for construction tests.
+func compilePlainModule(t *testing.T, dir string) string {
+	t.Helper()
+	src := filepath.Join(dir, "plain")
+	if err := os.MkdirAll(src, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "go.mod"), []byte("module plain\n\ngo 1.25\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "plain.wasm")
+	cmd := exec.Command("go", "build", "-o", out, ".")
+	cmd.Dir = src
+	cmd.Env = append(cmd.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("compile plain module: %v\n%s", err, b)
+	}
+	return out
 }

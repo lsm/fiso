@@ -21,10 +21,34 @@ type WazeroRuntime struct {
 // NewWazeroRuntime compiles a WASM module from raw bytes.
 // The module must be a WASI binary (wasip1) that reads JSON from stdin and writes JSON to stdout.
 func NewWazeroRuntime(ctx context.Context, wasmBytes []byte) (*WazeroRuntime, error) {
+	return newWazeroRuntime(ctx, wasmBytes, nil)
+}
+
+// NewWazeroRuntimeWithHTTP additionally instantiates the fiso.http_call
+// host function with the supplied allowlist (ADR 0006).
+func NewWazeroRuntimeWithHTTP(ctx context.Context, wasmBytes []byte, cfg HostHTTPConfig) (*WazeroRuntime, error) {
+	return newWazeroRuntime(ctx, wasmBytes, &cfg)
+}
+
+func newWazeroRuntime(ctx context.Context, wasmBytes []byte, httpCfg *HostHTTPConfig) (*WazeroRuntime, error) {
 	rt := wazero.NewRuntime(ctx)
 
 	// Instantiate WASI so the module can use stdin/stdout.
 	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
+
+	if httpCfg != nil {
+		client, err := newHostHTTPClient(*httpCfg)
+		if err != nil {
+			_ = rt.Close(ctx)
+			return nil, err
+		}
+		builder := rt.NewHostModuleBuilder("fiso")
+		hostHTTPExport(builder, client)
+		if _, err := builder.Instantiate(ctx); err != nil {
+			_ = rt.Close(ctx)
+			return nil, fmt.Errorf("instantiate fiso host module: %w", err)
+		}
+	}
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
@@ -37,6 +61,12 @@ func NewWazeroRuntime(ctx context.Context, wasmBytes []byte) (*WazeroRuntime, er
 
 // Call invokes the WASM module with input on stdin and captures stdout as the result.
 func (w *WazeroRuntime) Call(ctx context.Context, input []byte) ([]byte, error) {
+	return w.CallWithEnv(ctx, input, nil)
+}
+
+// CallWithEnv is Call with environment variables set for the invocation
+// (used by tests to select guest code paths).
+func (w *WazeroRuntime) CallWithEnv(ctx context.Context, input []byte, env map[string]string) ([]byte, error) {
 	stdin := bytes.NewReader(input)
 	var stdout bytes.Buffer
 
@@ -45,6 +75,9 @@ func (w *WazeroRuntime) Call(ctx context.Context, input []byte) ([]byte, error) 
 		WithStdout(&stdout).
 		WithStderr(&bytes.Buffer{}). // discard stderr
 		WithName("")                 // anonymous module so multiple calls don't collide
+	for k, v := range env {
+		cfg = cfg.WithEnv(k, v)
+	}
 
 	mod, err := w.rt.InstantiateModule(ctx, w.module, cfg)
 	if err != nil {

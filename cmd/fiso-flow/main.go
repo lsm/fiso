@@ -36,6 +36,7 @@ import (
 	"github.com/lsm/fiso/internal/tracing"
 	"github.com/lsm/fiso/internal/transform"
 	unifiedxform "github.com/lsm/fiso/internal/transform/unified"
+	wasmruntime "github.com/lsm/fiso/internal/wasm"
 )
 
 var logLevel string
@@ -554,7 +555,9 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 				// deny-by-default allowlist, routed through Fiso-Link.
 				var runtime wasm.Runtime
 				if httpEnabled(ic.Config) {
-					runtime, err = wasm.NewWazeroRuntimeWithHTTP(context.Background(), wasmBytes, hostHTTPConfig(ic.Config))
+					var httpRt *wasmruntime.WazeroRuntime
+					httpRt, err = wasmruntime.NewWazeroRuntimeWithHTTP(context.Background(), wasmBytes, hostHTTPConfig(ic.Config))
+					runtime = httpRt
 				} else {
 					runtime, err = wasm.NewWazeroRuntime(context.Background(), wasmBytes)
 				}
@@ -591,7 +594,7 @@ func httpEnabled(cfg map[string]interface{}) bool {
 }
 
 // hostHTTPConfig builds the host-function config from interceptor settings.
-func hostHTTPConfig(cfg map[string]interface{}) wasm.HostHTTPConfig {
+func hostHTTPConfig(cfg map[string]interface{}) wasmruntime.HostHTTPConfig {
 	linkAddr := getString(cfg, "linkAddr")
 	if linkAddr == "" {
 		linkAddr = "http://127.0.0.1:3500"
@@ -604,7 +607,7 @@ func hostHTTPConfig(cfg map[string]interface{}) wasm.HostHTTPConfig {
 			}
 		}
 	}
-	return wasm.HostHTTPConfig{LinkAddr: linkAddr, AllowedTargets: targets}
+	return wasmruntime.HostHTTPConfig{LinkAddr: linkAddr, AllowedTargets: targets}
 }
 
 func getString(m map[string]interface{}, key string) string {

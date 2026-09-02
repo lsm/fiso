@@ -26,8 +26,14 @@ func (f *DefaultFactory) Create(ctx context.Context, cfg Config) (Runtime, error
 
 	switch cfg.Type {
 	case RuntimeWazero, "": // default to wazero
+		if cfg.HostHTTP != nil {
+			return NewWazeroRuntimeWithHTTP(ctx, wasmBytes, *cfg.HostHTTP)
+		}
 		return NewWazeroRuntime(ctx, wasmBytes)
 	case RuntimeWasmer:
+		if cfg.HostHTTP != nil {
+			return nil, fmt.Errorf("host HTTP calls require the wazero runtime")
+		}
 		return NewWasmerRuntime(ctx, wasmBytes, cfg)
 	default:
 		return nil, fmt.Errorf("unknown runtime type: %s", cfg.Type)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -139,8 +140,19 @@ func (f *FlowDefinition) Validate() error {
 						errs = append(errs, fmt.Errorf("interceptors[%d].config.httpTargets is required when http is enabled (deny-by-default allowlist)", i))
 					}
 					for j, tv := range targets {
-						if _, isStr := tv.(string); !isStr {
-							errs = append(errs, fmt.Errorf("interceptors[%d].config.httpTargets[%d] must be a target name string", i, j))
+						name, isStr := tv.(string)
+						if !isStr || name == "" {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.httpTargets[%d] must be a non-empty target name string", i, j))
+						}
+					}
+					// linkAddr is optional but, when present, must be a
+					// usable URL string — no silent fallback to the default.
+					if la, present := ic.Config["linkAddr"]; present && la != nil {
+						linkAddr, isStr := la.(string)
+						if !isStr || linkAddr == "" {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr must be a URL string", i))
+						} else if _, err := url.Parse(linkAddr); err != nil {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr %q is not a valid URL", i, linkAddr))
 						}
 					}
 				}
