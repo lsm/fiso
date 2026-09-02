@@ -422,11 +422,55 @@ jobs:
         env:
           E2E_BUILD_FLAG: " "
 
-  e2e-flow-wasmer:
+  # ── Wasmer images, built once per run ───────────────────────────────────
+  # Each wasmer E2E job used to let docker compose build its CGO image
+  # in-job (apt llvm-dev + go mod download + CGO compile), so every CI run
+  # paid the full wasmer toolchain cost four times. Build them once here
+  # (with buildx layer caching keyed per image so unchanged sources skip
+  # the CGO compile on later runs) and ship them as an artifact.
+  wasmer-images:
     runs-on: ubuntu-latest
-    needs: [build]
     steps:
       - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the four wasmer images
+        run: |
+          set -e
+          build() {
+            docker buildx build \
+              --cache-from "type=gha,scope=fiso-$1" \
+              --cache-to "type=gha,scope=fiso-$1,mode=max" \
+              --load -f "Dockerfile.$1" -t "fiso-$1:e2e" .
+          }
+          build wasmer
+          build flow-wasmer
+          build wasmer-link
+          build wasmer-aio
+          docker save fiso-wasmer:e2e fiso-flow-wasmer:e2e fiso-wasmer-link:e2e fiso-wasmer-aio:e2e \
+            -o /tmp/wasmer-images.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasmer-images
+          path: /tmp/wasmer-images.tar
+          retention-days: 1
+
+  e2e-flow-wasmer:
+    runs-on: ubuntu-latest
+    needs: [build, wasmer-images]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load prebuilt wasmer images
+        uses: actions/download-artifact@v4
+        with:
+          name: wasmer-images
+          path: /tmp/wasmer-images/
+
+      - name: Docker load
+        run: docker load -i /tmp/wasmer-images/wasmer-images.tar
 
       - uses: actions/setup-go@v5
         with:
@@ -440,9 +484,18 @@ jobs:
 
   e2e-wasmer-link:
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build, wasmer-images]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Load prebuilt wasmer images
+        uses: actions/download-artifact@v4
+        with:
+          name: wasmer-images
+          path: /tmp/wasmer-images/
+
+      - name: Docker load
+        run: docker load -i /tmp/wasmer-images/wasmer-images.tar
 
       - uses: actions/setup-go@v5
         with:
@@ -456,9 +509,18 @@ jobs:
 
   e2e-wasmer-aio:
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build, wasmer-images]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Load prebuilt wasmer images
+        uses: actions/download-artifact@v4
+        with:
+          name: wasmer-images
+          path: /tmp/wasmer-images/
+
+      - name: Docker load
+        run: docker load -i /tmp/wasmer-images/wasmer-images.tar
 
       - uses: actions/setup-go@v5
         with:
@@ -472,9 +534,18 @@ jobs:
 
   e2e-wasmer-standalone:
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build, wasmer-images]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Load prebuilt wasmer images
+        uses: actions/download-artifact@v4
+        with:
+          name: wasmer-images
+          path: /tmp/wasmer-images/
+
+      - name: Docker load
+        run: docker load -i /tmp/wasmer-images/wasmer-images.tar
 
       - uses: actions/setup-go@v5
         with:
@@ -579,6 +650,7 @@ jobs:
       - e2e-kafka-temporal-signal
       - e2e-temporal-auth-oidc
       - e2e-wasm
+      - wasmer-images
       - e2e-flow-wasmer
       - e2e-wasmer-link
       - e2e-wasmer-aio
