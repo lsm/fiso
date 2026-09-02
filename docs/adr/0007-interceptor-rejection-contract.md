@@ -31,6 +31,13 @@ Interceptors gain a first-class **rejection** verdict, distinct from failure:
    a contract violation and follows the ordinary failure path — it is never
    silently rewritten. An absent `reject` field keeps the transformation
    contract unchanged (the ABI is additive; existing modules are unaffected).
+   **Bodyless requests:** outbound interceptors run for requests without a
+   body (GET, HEAD, empty publishes) — the envelope carries an explicit
+   `null` payload — so a policy module can refuse any request, not only
+   ones carrying bodies. Modules must therefore tolerate a null payload.
+   Inbound (response-side) interceptors remain body-gated: response
+   transformation on an empty body has no consumer; extend by a new ADR if
+   a response-policy case emerges.
 
 2. **Rejection is terminal.** No retries, no dead-letter. The DLQ is for
    events that failed delivery, not traffic that was refused admission.

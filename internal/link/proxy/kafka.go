@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -165,8 +166,9 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Run outbound interceptors (before publishing to Kafka)
-	if h.interceptors != nil && len(body) > 0 {
+	// Run outbound interceptors (before publishing to Kafka). Empty bodies
+	// run too, mirroring the HTTP proxy path (ADR 0007).
+	if h.interceptors != nil {
 		icReq := &interceptor.Request{
 			Payload:   body,
 			Headers:   httpHeaders,
@@ -175,6 +177,20 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		icResult, icErr := h.interceptors.ProcessOutbound(r.Context(), targetName, icReq)
 		if icErr != nil {
+			// A rejection answers with the guest-chosen status instead of a
+			// blanket 500 (ADR 0007).
+			if rej, ok := interceptor.AsRejection(icErr); ok {
+				h.logger.Warn("request rejected by outbound interceptor",
+					"target", targetName,
+					"status", rej.Status,
+					"reason", rej.Reason,
+				)
+				if h.metrics != nil {
+					h.metrics.RequestsTotal.WithLabelValues(targetName, "POST", strconv.Itoa(rej.Status), "kafka").Inc()
+				}
+				http.Error(w, rej.Reason, rej.Status)
+				return
+			}
 			h.logger.Error("outbound interceptor error", "target", targetName, "error", icErr)
 			if h.metrics != nil {
 				h.metrics.RequestsTotal.WithLabelValues(targetName, "POST", "500", "kafka").Inc()

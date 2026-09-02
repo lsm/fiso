@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -236,5 +237,28 @@ func TestWASMInterceptor_RejectEmptyReasonAllows(t *testing.T) {
 	}
 	if rej.Status != 403 {
 		t.Fatalf("status = %d, want 403", rej.Status)
+	}
+}
+
+// TestWASMInterceptor_NilPayload_SendsExplicitNull pins the envelope for
+// bodyless requests: the guest receives "payload":null, not a marshal
+// failure (ADR 0007).
+func TestWASMInterceptor_NilPayload_SendsExplicitNull(t *testing.T) {
+	resp, _ := json.Marshal(wasmOutput{
+		Reject: &wasmRejection{Status: 401, Reason: "missing credentials"},
+	})
+	mr := &mockRuntime{response: resp}
+	ic := New(mr, "auth")
+
+	_, err := ic.Process(context.Background(), &interceptor.Request{
+		Payload:   nil,
+		Headers:   map[string]string{},
+		Direction: interceptor.Inbound,
+	})
+	if _, ok := interceptor.AsRejection(err); !ok {
+		t.Fatalf("expected the rejection to round-trip for a bodyless request, got %v", err)
+	}
+	if !bytes.Contains(mr.lastInput, []byte(`"payload":null`)) {
+		t.Fatalf("expected an explicit null payload in the envelope, got %s", mr.lastInput)
 	}
 }

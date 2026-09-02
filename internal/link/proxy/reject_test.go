@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	kafka "github.com/lsm/fiso/internal/kafka"
 	"github.com/lsm/fiso/internal/link"
 	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/prometheus/client_golang/prometheus"
@@ -96,5 +97,105 @@ func TestProxy_OutboundInterceptorRejection_MapsStatus(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected the authorized request to pass, got %d (body %q)", w.Code, w.Body.String())
+	}
+}
+
+// TestProxy_OutboundInterceptorRejection_BodylessRequest pins that outbound
+// interceptors run for bodyless requests too: an authentication module must
+// be able to refuse a GET, not only a POST with a body (ADR 0007).
+func TestProxy_OutboundInterceptorRejection_BodylessRequest(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     host,
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	handler := NewHandler(Config{
+		Targets:      store,
+		Metrics:      link.NewMetrics(prometheus.NewRegistry()),
+		Interceptors: icRegistry,
+	})
+
+	// Bodyless GET: the module must still see (and refuse) the request.
+	req := httptest.NewRequest("GET", "/link/svc/x", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected the bodyless request to be refused with 401, got %d", w.Code)
+	}
+
+	// Authorized bodyless GET passes.
+	req = httptest.NewRequest("GET", "/link/svc/x", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected the authorized bodyless request to pass, got %d", w.Code)
+	}
+}
+
+// TestProxy_KafkaTarget_Rejection_MapsStatus pins the rejection mapping for
+// kafka-protocol Link targets: the publish proxy answers a refusal with the
+// module-chosen status instead of a blanket 500 (ADR 0007).
+func TestProxy_KafkaTarget_Rejection_MapsStatus(t *testing.T) {
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "events",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Cluster: "local", Topic: "events"},
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	handler := NewKafkaHandlerWithInterceptors(
+		kafka.NewPublisherPool(kafka.NewRegistry()),
+		store,
+		nil,
+		nil,
+		link.NewMetrics(prometheus.NewRegistry()),
+		slog.Default(),
+		icRegistry,
+	)
+
+	req := httptest.NewRequest("POST", "/link/events", strings.NewReader(`{"msg":1}`))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 from the rejecting module, got %d (body %q)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "missing credentials") {
+		t.Fatalf("expected the rejection reason in the body, got %q", w.Body.String())
 	}
 }

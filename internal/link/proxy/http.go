@@ -237,8 +237,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = r.Body.Close()
 	}
 
-	// Run outbound interceptors (before upstream request)
-	if h.interceptors != nil && len(requestBody) > 0 {
+	// Run outbound interceptors (before upstream request). Bodyless
+	// requests run too — an authentication module must be able to refuse a
+	// GET, and the envelope carries a null payload for empty bodies
+	// (ADR 0007).
+	if h.interceptors != nil {
 		outboundHeaders := make(map[string]string)
 		for k, vv := range r.Header {
 			if len(vv) > 0 {

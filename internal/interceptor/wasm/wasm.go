@@ -49,8 +49,15 @@ type wasmOutput struct {
 
 // Process invokes the WASM module to process the request.
 func (i *Interceptor) Process(ctx context.Context, req *interceptor.Request) (*interceptor.Request, error) {
+	payload := req.Payload
+	if len(payload) == 0 {
+		// A bodyless request (e.g. a GET through Link) arrives with an
+		// empty payload; an empty json.RawMessage does not marshal, so the
+		// envelope carries an explicit null instead (ADR 0007).
+		payload = json.RawMessage("null")
+	}
 	input := wasmInput{
-		Payload:   req.Payload,
+		Payload:   payload,
 		Headers:   req.Headers,
 		Direction: string(req.Direction),
 	}

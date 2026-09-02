@@ -51,6 +51,10 @@ func main() {
 	if err := json.Unmarshal(req.Payload, &data); err != nil {
 		os.Exit(1)
 	}
+	// A bodyless request arrives as a null payload; tolerate it.
+	if data == nil {
+		data = map[string]interface{}{}
+	}
 	data["wasm_enriched"] = true
 
 	if req.Headers == nil {
