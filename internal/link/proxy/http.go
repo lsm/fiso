@@ -100,7 +100,9 @@ func NewHandler(cfg Config) *Handler {
 			cfg.Interceptors,
 		)
 	} else if cfg.KafkaPublisher != nil {
-		// Backwards compatibility: single publisher
+		// Backwards compatibility: single publisher. Interceptors ride
+		// along here too — the transport choice must not bypass the
+		// interceptor chain (ADR 0007).
 		h.kafkaHandler = NewKafkaHandler(
 			cfg.KafkaPublisher,
 			cfg.Targets,
@@ -108,6 +110,7 @@ func NewHandler(cfg Config) *Handler {
 			cfg.RateLimiter,
 			cfg.Metrics,
 			cfg.Logger,
+			cfg.Interceptors,
 		)
 	}
 

@@ -872,3 +872,42 @@ func TestProxy_HeadResponse_PreservesAdvertisedLength(t *testing.T) {
 		t.Fatalf("HEAD must preserve the advertised Content-Length, got %q", got)
 	}
 }
+
+// TestProxy_KafkaSinglePublisher_Rejection_Wired pins the compatibility
+// path: a Handler configured with Config.KafkaPublisher (no pool) must still
+// route kafka targets through the interceptor registry — an authentication
+// module must not be bypassed by the transport choice (ADR 0007).
+func TestProxy_KafkaSinglePublisher_Rejection_Wired(t *testing.T) {
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "events",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Cluster: "local", Topic: "events"},
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	handler := NewHandler(Config{
+		Targets:        store,
+		Metrics:        link.NewMetrics(prometheus.NewRegistry()),
+		Interceptors:   icRegistry,
+		KafkaPublisher: &mockPublisher{},
+	})
+
+	req := httptest.NewRequest("POST", "/link/events", strings.NewReader(`{"msg":1}`))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 through the single-publisher path, got %d (body %q)", w.Code, w.Body.String())
+	}
+}

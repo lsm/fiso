@@ -38,19 +38,20 @@ type KafkaHandler struct {
 // Deprecated: Use NewKafkaHandlerWithPool for per-cluster publishing.
 func NewKafkaHandler(publisher dlq.Publisher, targets *link.TargetStore,
 	breakers map[string]*circuitbreaker.Breaker, rateLimiter *ratelimit.Limiter,
-	metrics *link.Metrics, logger *slog.Logger) *KafkaHandler {
+	metrics *link.Metrics, logger *slog.Logger, interceptors *linkinterceptor.Registry) *KafkaHandler {
 
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	return &KafkaHandler{
-		publisher:   publisher,
-		targets:     targets,
-		breakers:    breakers,
-		rateLimiter: rateLimiter,
-		metrics:     metrics,
-		logger:      logger,
+		publisher:    publisher,
+		targets:      targets,
+		breakers:     breakers,
+		rateLimiter:  rateLimiter,
+		metrics:      metrics,
+		logger:       logger,
+		interceptors: interceptors,
 	}
 }
 
