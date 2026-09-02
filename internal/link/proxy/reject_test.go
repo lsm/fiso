@@ -846,3 +846,29 @@ func TestProxy_RejectedUpstreamError_EmitsCompletionLog(t *testing.T) {
 		t.Fatalf("the completion record must carry the correlation ID, got:\n%s", logs)
 	}
 }
+
+// TestProxy_HeadResponse_PreservesAdvertisedLength pins HEAD semantics: the
+// empty response body must not clobber the advertised Content-Length that
+// describes the GET representation clients use HEAD to inspect.
+func TestProxy_HeadResponse_PreservesAdvertisedLength(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1234")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	store := link.NewTargetStore([]link.LinkTarget{{Name: "svc", Protocol: "http", Host: host}})
+	handler := NewHandler(Config{Targets: store, Metrics: link.NewMetrics(prometheus.NewRegistry())})
+
+	req := httptest.NewRequest("HEAD", "/link/svc/x", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if got := w.Header().Get("Content-Length"); got != "1234" {
+		t.Fatalf("HEAD must preserve the advertised Content-Length, got %q", got)
+	}
+}

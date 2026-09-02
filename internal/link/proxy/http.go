@@ -538,8 +538,12 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 	// may have changed it — so recompute Content-Length instead of
 	// forwarding the upstream's declaration (a mismatched length makes
 	// net/http reject larger bodies as exceeding the declared length and
-	// delivers smaller ones with an unexpected EOF).
-	resp.Header.Set("Content-Length", strconv.Itoa(len(responseBody)))
+	// delivers smaller ones with an unexpected EOF). HEAD is exempt: its
+	// empty body carries no length of its own, and the advertised length
+	// describes the GET representation clients are inspecting.
+	if resp.Request == nil || resp.Request.Method != http.MethodHead {
+		resp.Header.Set("Content-Length", strconv.Itoa(len(responseBody)))
+	}
 	for k, vv := range resp.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
