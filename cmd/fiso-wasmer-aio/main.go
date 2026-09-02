@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -167,6 +168,10 @@ func run() error {
 	// 2. Start Link (before Flows: HTTP-enabled interceptors
 	// call into it at build/run time via the default linkAddr)
 	var linkServer *http.Server
+	// defaultLinkAddr is the origin of the embedded Link actually bound;
+	// HTTP-enabled interceptors that omit linkAddr call this, not a
+	// hard-coded port that a link.listenAddr override would strand.
+	defaultLinkAddr := ""
 	if cfg.Link.ConfigPath != "" {
 		linkCfg, err := link.LoadConfig(cfg.Link.ConfigPath)
 		if err != nil {
@@ -266,6 +271,7 @@ func run() error {
 			if err != nil {
 				return fmt.Errorf("link listen: %w", err)
 			}
+			defaultLinkAddr = loopbackLinkAddr(ln)
 			go func() {
 				logger.Info("link server starting", "addr", ln.Addr().String())
 				if err := linkServer.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -317,7 +323,7 @@ func run() error {
 
 	if len(flows) > 0 {
 		for name, def := range flows {
-			p, err := buildPipeline(def, logger, httpPool, tracer)
+			p, err := buildPipeline(def, logger, httpPool, tracer, defaultLinkAddr)
 			if err != nil {
 				return fmt.Errorf("build flow %s: %w", name, err)
 			}
@@ -370,7 +376,7 @@ func run() error {
 	return nil
 }
 
-func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool *httpsource.ServerPool, tracer trace.Tracer) (*pipeline.Pipeline, error) {
+func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool *httpsource.ServerPool, tracer trace.Tracer, defaultLinkAddr string) (*pipeline.Pipeline, error) {
 	commitPolicy := delivery.NormalizeCommitPolicy(flowDef.ErrorHandling.CommitPolicy)
 	if commitPolicy == delivery.CommitPolicyKafkaTransaction {
 		if flowDef.Source.Type != "kafka" || flowDef.Sink.Type != "kafka" {
@@ -596,7 +602,7 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 					if runtimeType != "wazero" && runtimeType != "" {
 						return nil, fmt.Errorf("wasm interceptor %s: host HTTP calls require the wazero runtime", modulePath)
 					}
-					cfg := hostHTTPConfig(ic.Config)
+					cfg := hostHTTPConfig(ic.Config, defaultLinkAddr)
 					wasmCfg.HostHTTP = &cfg
 				}
 
@@ -634,9 +640,16 @@ func httpEnabled(cfg map[string]interface{}) bool {
 }
 
 // hostHTTPConfig builds the host-function config from interceptor settings.
-func hostHTTPConfig(cfg map[string]interface{}) wasmruntime.HostHTTPConfig {
+// defaultLinkAddr is the embedded Link's bound origin; it takes precedence
+// over the documented default when the interceptor omits linkAddr, so a
+// link.listenAddr override does not strand guests on a hard-coded port.
+func hostHTTPConfig(cfg map[string]interface{}, defaultLinkAddr string) wasmruntime.HostHTTPConfig {
 	linkAddr := getString(cfg, "linkAddr")
 	if linkAddr == "" {
+		linkAddr = defaultLinkAddr
+	}
+	if linkAddr == "" {
+		// No embedded Link in this process: the documented Link default.
 		linkAddr = "http://127.0.0.1:3500"
 	}
 	var targets []string
@@ -648,6 +661,22 @@ func hostHTTPConfig(cfg map[string]interface{}) wasmruntime.HostHTTPConfig {
 		}
 	}
 	return wasmruntime.HostHTTPConfig{LinkAddr: linkAddr, AllowedTargets: targets}
+}
+
+// loopbackLinkAddr returns the http origin for reaching a Link bound to ln.
+// An unspecified bind host (":3600", "0.0.0.0:3600") is dialed through the
+// loopback — the proxy is in-process — and the actually bound port is used,
+// so even a :0 override yields a dialable address.
+func loopbackLinkAddr(ln net.Listener) string {
+	tcp, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		return ""
+	}
+	host := "127.0.0.1"
+	if tcp.IP != nil && !tcp.IP.IsUnspecified() {
+		host = tcp.IP.String()
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(tcp.Port))
 }
 
 func getString(m map[string]interface{}, key string) string {

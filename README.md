@@ -1307,6 +1307,8 @@ interceptors:
       http: true                          # opt in; default false
       httpTargets: ["fraud-api"]          # deny-by-default allowlist
       linkAddr: http://fiso-link:3500     # optional; default http://127.0.0.1:3500
+                                         # (in fiso-wasmer-aio: the embedded Link's
+                                         #  bound address, honoring link.listenAddr)
 ```
 
 The module imports and calls `fiso.http_call(req_ptr, req_len, resp_ptr,

@@ -110,9 +110,12 @@ sink:
 The Flow binaries honor `module`, `runtime`, and — when the module opts in
 to the host HTTP capability — `http: true` with a `httpTargets` allowlist
 and an optional `linkAddr` (see the README's WASM section and ADR 0006;
-wazero runtime only). Keys present in older documentation (`timeout`,
-`memoryLimit`, `env`, `preopens`) are not applied and should not be relied
-on.
+wazero runtime only). When `linkAddr` is omitted, `fiso-flow` and
+`fiso-flow-wasmer` default to `http://127.0.0.1:3500`; `fiso-wasmer-aio`
+defaults to the address its embedded Link actually bound, so a
+`link.listenAddr` override is followed. Keys present in older documentation
+(`timeout`, `memoryLimit`, `env`, `preopens`) are not applied and should
+not be relied on.
 
 ### App Configuration
 
