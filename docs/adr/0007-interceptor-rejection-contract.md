@@ -51,8 +51,29 @@ Interceptors gain a first-class **rejection** verdict, distinct from failure:
    - kafka: there is no caller to answer; the rejection is logged and the
      offset acknowledged so a refused message is not reprocessed forever.
 
+2a. **Interceptors run before transforms in Flow pipelines.** The
+   interceptor sees the raw, untransformed event, so an authentication
+   module refuses unauthenticated input *before* CEL evaluation can fail on
+   it and dead-letter it. Transforms then operate on the interceptor's
+   output. (Previously transforms ran first; modules that assumed
+   transformed input see raw input instead — a documented, deliberate
+   reordering that makes the chain authenticate-then-enrich.)
+
+2b. **Payload equivalence.** An empty body and a JSON `null` payload are
+   the same thing in both directions: a bodyless request arrives as
+   `"payload": null`, and a module returning null leaves the request
+   bodyless. Non-JSON bodies (e.g. a plain-text upstream error response)
+   travel in the envelope as JSON strings and are restored to the original
+   bytes when a module returns them unchanged.
+
 3. **Fiso-Link.** An outbound or inbound interceptor rejection responds with
-   the guest-chosen status and reason instead of 500.
+   the guest-chosen status and reason instead of 500 — including inbound
+   policy on upstream error responses, which route through the same
+   interception before being forwarded. Request metrics, tracing, and the
+   completion log record the **final caller-visible status** (a guest
+   turning an upstream 200 into a 401 is reported as 401), and a rejection
+   is not counted in the interceptor error metric — a verdict is the module
+   working, not failing.
 
 4. **`failOpen` exempts rejections.** `failOpen` expresses "continue when the
    module *fails*". A rejection is a verdict, not a failure; forwarding what

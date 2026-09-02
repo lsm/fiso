@@ -199,3 +199,95 @@ func TestPipeline_InterceptorRejection_LogsResolvedCorrelationID(t *testing.T) {
 		t.Fatalf("the rejection log must carry the resolved correlation ID, got:\n%s", buf.String())
 	}
 }
+
+// TestPipeline_InterceptorRunsBeforeTransform pins the pipeline order for
+// authentication modules: the interceptor sees the raw untrusted event
+// first, so unauthenticated garbage is refused (401, no DLQ) instead of
+// failing CEL transforms and dead-lettering (ADR 0007).
+func TestPipeline_InterceptorRunsBeforeTransform(t *testing.T) {
+	transformRan := false
+	transformer := &mockTransformer{
+		fn: func(_ context.Context, _ []byte) ([]byte, error) {
+			transformRan = true
+			return nil, errors.New("CEL evaluation failed on malformed input")
+		},
+	}
+	rejecting := &mockInterceptor{
+		process: func(_ context.Context, req *interceptor.Request) (*interceptor.Request, error) {
+			if _, ok := req.Headers["authorization"]; !ok {
+				return nil, &interceptor.RejectedError{Status: 401, Reason: "missing credentials"}
+			}
+			return req, nil
+		},
+	}
+	src := &capturingSource{
+		evt:  source.Event{Value: []byte(`{not json`), Topic: "http"},
+		done: make(chan struct{}),
+	}
+	pub := &mockPublisher{}
+
+	p := New(Config{FlowName: "auth-flow", SourceType: "http"}, src, transformer, &mockSink{}, dlq.NewHandler(pub), interceptor.NewChain(rejecting))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	go func() { _ = p.Run(ctx) }()
+	<-src.done
+	cancel()
+
+	if _, ok := interceptor.AsRejection(src.gotErr); !ok {
+		t.Fatalf("the unauthenticated event must be refused before the transform, got %v", src.gotErr)
+	}
+	if pub.count() != 0 {
+		t.Fatalf("a pre-transform refusal must not reach the DLQ, got %d publications", pub.count())
+	}
+	if transformRan {
+		t.Fatal("the transform must not run on a refused event")
+	}
+}
+
+// TestPipeline_TransformRunsOnInterceptorOutput pins the other half of the
+// ordering: an authenticated event passes the interceptor, and the transform
+// receives the interceptor's output payload.
+func TestPipeline_TransformRunsOnInterceptorOutput(t *testing.T) {
+	var transformInput []byte
+	transformer := &mockTransformer{
+		fn: func(_ context.Context, input []byte) ([]byte, error) {
+			transformInput = input
+			return input, nil
+		},
+	}
+	approving := &mockInterceptor{
+		process: func(_ context.Context, req *interceptor.Request) (*interceptor.Request, error) {
+			return &interceptor.Request{
+				Payload:   []byte(`{"auth":"ok"}`),
+				Headers:   req.Headers,
+				Direction: req.Direction,
+			}, nil
+		},
+	}
+	src := &capturingSource{
+		evt: source.Event{
+			Value:   []byte(`{not json`),
+			Topic:   "http",
+			Headers: map[string]string{"authorization": "Bearer token"},
+		},
+		done: make(chan struct{}),
+	}
+	pub := &mockPublisher{}
+	sk := &mockSink{}
+
+	p := New(Config{FlowName: "auth-flow", SourceType: "http"}, src, transformer, sk, dlq.NewHandler(pub), interceptor.NewChain(approving))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	go func() { _ = p.Run(ctx) }()
+	<-src.done
+	cancel()
+
+	if string(transformInput) != `{"auth":"ok"}` {
+		t.Fatalf("the transform must receive the interceptor's output, got %q", transformInput)
+	}
+	if sk.count() != 1 {
+		t.Fatalf("the authenticated event must be delivered, got %d deliveries", sk.count())
+	}
+}

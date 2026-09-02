@@ -273,7 +273,10 @@ func (w *InterceptorWrapper) Process(ctx context.Context, req *interceptor.Reque
 	result, err := w.Interceptor.Process(ctx, req)
 
 	duration := time.Since(start).Seconds()
-	success := err == nil
+	// A rejection is the module doing its job, not an error: deliberate
+	// 401/403 policy verdicts must not inflate the interceptor error
+	// counter (ADR 0007).
+	success := err == nil || isRejection(err)
 
 	if w.metrics != nil {
 		w.metrics.RecordInterceptorInvocation(

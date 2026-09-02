@@ -50,11 +50,21 @@ type wasmOutput struct {
 // Process invokes the WASM module to process the request.
 func (i *Interceptor) Process(ctx context.Context, req *interceptor.Request) (*interceptor.Request, error) {
 	payload := req.Payload
+	wrappedString := false
 	if len(payload) == 0 {
 		// A bodyless request (e.g. a GET through Link) arrives with an
 		// empty payload; an empty json.RawMessage does not marshal, so the
 		// envelope carries an explicit null instead (ADR 0007).
 		payload = json.RawMessage("null")
+	} else if !json.Valid(payload) {
+		// Non-JSON bodies (e.g. a plain-text upstream error response)
+		// travel as JSON strings so the envelope stays marshalable; a
+		// module that returns the string unchanged gets the original bytes
+		// back (ADR 0007).
+		wrappedString = true
+		if b, err := json.Marshal(string(payload)); err == nil {
+			payload = b
+		}
 	}
 	input := wasmInput{
 		Payload:   payload,
@@ -90,6 +100,21 @@ func (i *Interceptor) Process(ctx context.Context, req *interceptor.Request) (*i
 		return nil, &interceptor.RejectedError{
 			Status: output.Reject.Status,
 			Reason: output.Reject.Reason,
+		}
+	}
+
+	// A null payload round-trips as an empty one: a guest that passes the
+	// (bodyless request's) null payload through unchanged must not turn the
+	// request into a literal four-byte "null" body (ADR 0007).
+	if string(output.Payload) == "null" {
+		output.Payload = nil
+	}
+	// Symmetrically unwrap: a guest returning the wrapped string unchanged
+	// restores the original non-JSON bytes.
+	if wrappedString {
+		var s string
+		if err := json.Unmarshal(output.Payload, &s); err == nil {
+			output.Payload = []byte(s)
 		}
 	}
 

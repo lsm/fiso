@@ -262,3 +262,54 @@ func TestWASMInterceptor_NilPayload_SendsExplicitNull(t *testing.T) {
 		t.Fatalf("expected an explicit null payload in the envelope, got %s", mr.lastInput)
 	}
 }
+
+// TestWASMInterceptor_NullPayloadRoundTrip pins the ABI's empty-body
+// equivalence: a guest that passes the null payload through unchanged
+// produces an empty payload, not a literal four-byte "null" body on the
+// upstream request (ADR 0007).
+func TestWASMInterceptor_NullPayloadRoundTrip(t *testing.T) {
+	resp, _ := json.Marshal(wasmOutput{
+		Payload: json.RawMessage("null"),
+	})
+	mr := &mockRuntime{response: resp}
+	ic := New(mr, "passthrough")
+
+	result, err := ic.Process(context.Background(), &interceptor.Request{
+		Payload:   nil,
+		Headers:   map[string]string{},
+		Direction: interceptor.Outbound,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Payload) != 0 {
+		t.Fatalf("a passed-through null payload must stay empty, got %q", result.Payload)
+	}
+}
+
+// TestWASMInterceptor_NonJSONPayload_WrappedAsString pins the envelope for
+// non-JSON bodies (e.g. plain-text upstream error responses): the payload
+// travels as a JSON string and a module returning it unchanged restores the
+// original bytes (ADR 0007).
+func TestWASMInterceptor_NonJSONPayload_WrappedAsString(t *testing.T) {
+	resp, _ := json.Marshal(wasmOutput{
+		Payload: json.RawMessage(`"boom\n"`),
+	})
+	mr := &mockRuntime{response: resp}
+	ic := New(mr, "policy")
+
+	result, err := ic.Process(context.Background(), &interceptor.Request{
+		Payload:   []byte("boom\n"),
+		Headers:   map[string]string{},
+		Direction: interceptor.Inbound,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(result.Payload) != "boom\n" {
+		t.Fatalf("the passed-through string must restore the original bytes, got %q", result.Payload)
+	}
+	if !bytes.Contains(mr.lastInput, []byte(`"payload":"boom`)) {
+		t.Fatalf("expected the wrapped string in the envelope, got %s", mr.lastInput)
+	}
+}

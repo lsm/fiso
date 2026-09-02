@@ -306,6 +306,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	retryCfg := buildRetryConfig(target)
 
 	retryErr := retry.Do(ctx, retryCfg, func() error {
+		// A retried attempt must not leak its predecessor's body; close it
+		// before issuing the next request. The final attempt's body stays
+		// open so the error response can be forwarded — and seen by the
+		// inbound interceptors (ADR 0007).
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
 		req, reqErr := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(requestBody))
 		if reqErr != nil {
 			return retry.Permanent(reqErr)
@@ -347,8 +354,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
 			return fmt.Errorf("upstream returned %d", resp.StatusCode)
 		}
 		if resp.StatusCode >= 400 {
@@ -373,17 +378,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if retryErr != nil {
 		tracing.SetSpanError(span, retryErr)
-		status := "error"
 		if resp != nil {
-			status = strconv.Itoa(resp.StatusCode)
-			span.SetAttributes(tracing.HTTPStatusAttr(resp.StatusCode))
-		}
-		h.recordSyncRequest(targetName, r.Method, status, duration)
-		if resp != nil {
-			// Forward the error response from upstream
-			h.copyResponse(w, resp)
+			// Forward the error response from upstream — through the
+			// inbound interceptors, so a policy module can also refuse
+			// error bodies (ADR 0007). The final caller-visible status is
+			// what the interceptors left in place.
+			finalStatus := h.copyResponseWithInterceptors(ctx, w, resp, targetName)
+			span.SetAttributes(tracing.HTTPStatusAttr(finalStatus))
+			h.recordSyncRequest(targetName, r.Method, strconv.Itoa(finalStatus), duration)
 			return
 		}
+		span.SetAttributes(tracing.HTTPStatusAttr(http.StatusBadGateway))
+		h.recordSyncRequest(targetName, r.Method, "error", duration)
 		h.logger.Error("proxy error", "target", targetName, "error", retryErr)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
@@ -481,17 +487,6 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(responseBody)
 	return resp.StatusCode
-}
-
-func (h *Handler) copyResponse(w http.ResponseWriter, resp *http.Response) {
-	defer func() { _ = resp.Body.Close() }()
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
 }
 
 func (h *Handler) isPathAllowed(target *link.LinkTarget, reqPath string) bool {

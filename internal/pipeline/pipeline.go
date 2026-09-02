@@ -150,21 +150,10 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 	inputBytes := len(evt.Value)
 	payload := evt.Value
 
-	// Transform
-	if p.transformer != nil {
-		transformed, err := p.transformer.Transform(ctx, payload)
-		if err != nil {
-			return p.handleFailure(ctx, evt, "TRANSFORM_FAILED", err)
-		}
-		payload = transformed
-		p.logger.Debug("transform completed",
-			"correlation_id", corrID.Value,
-			"input_bytes", inputBytes,
-			"output_bytes", len(payload),
-		)
-	}
-
-	// Run interceptors. The interceptor ABI returns headers alongside the
+	// Run interceptors before transforms: the interceptor sees the raw
+	// untrusted event first, so an authentication module can refuse
+	// malformed or unauthenticated input before CEL evaluation fails on it
+	// and dead-letters it (ADR 0007). The ABI returns headers alongside the
 	// payload; they are merged into the sink delivery headers (the
 	// interceptor's Content-Type does not override the envelope's).
 	var interceptorHeaders map[string]string
@@ -200,6 +189,20 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 		}
 		payload = result.Payload
 		interceptorHeaders = result.Headers
+	}
+
+	// Transform
+	if p.transformer != nil {
+		transformed, err := p.transformer.Transform(ctx, payload)
+		if err != nil {
+			return p.handleFailure(ctx, evt, "TRANSFORM_FAILED", err)
+		}
+		payload = transformed
+		p.logger.Debug("transform completed",
+			"correlation_id", corrID.Value,
+			"input_bytes", inputBytes,
+			"output_bytes", len(payload),
+		)
 	}
 
 	// Wrap in CloudEvent (skip if already in CE format)

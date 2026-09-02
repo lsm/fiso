@@ -1220,10 +1220,13 @@ WASM interceptors enable custom data transformations using WebAssembly modules. 
 
 ### How It Works
 
-1. Fiso-flow receives an event and applies unified transforms (fields-based CEL expressions)
-2. Before sending to the sink, the event is piped to the WASM module via stdin
-3. The WASM module reads JSON from stdin, transforms it, and writes JSON to stdout
-4. Fiso-flow receives the transformed event and delivers it to the sink
+1. Fiso-flow receives an event and pipes it to the WASM module first — the
+   interceptor sees the raw, untransformed event so an authentication module
+   can refuse bad input before anything else runs
+2. The WASM module reads JSON from stdin, transforms it, and writes JSON to stdout
+3. Fiso-flow applies unified transforms (fields-based CEL expressions) to the
+   interceptor's output
+4. Fiso-flow delivers the transformed event to the sink
 
 ### Example: Go WASM Interceptor
 
@@ -1284,9 +1287,15 @@ sources with the closest status code, and Fiso-Link targets (http and kafka
 both) respond with it instead of a generic 500. On a kafka source the
 refused message is logged and acknowledged, not reprocessed. A Link
 interceptor's `failOpen` does not downgrade a rejection — a refusal is a
-verdict, not a failure. Outbound interceptors also run for bodyless
-requests (the envelope's `payload` is `null` — write modules to tolerate
-it), so an authentication module guards GETs as well as POSTs. This is the
+verdict, not a failure, and Link's interceptor error counter does not count
+it. Outbound interceptors also run for bodyless requests (the envelope's
+`payload` is `null` — write modules to tolerate it), so an authentication
+module guards GETs as well as POSTs; a module returning a null or empty
+payload unchanged keeps the request bodyless. Non-JSON bodies (a plain-text
+upstream error, say) travel in the envelope as JSON strings and are
+restored on the way out. In Flow pipelines the interceptor runs **before**
+transforms, so unauthenticated input is refused instead of failing CEL
+evaluation and dead-lettering. This is the
 primitive a guest-side authentication module builds on (see
 [ADR 0007](docs/adr/0007-interceptor-rejection-contract.md)).
 

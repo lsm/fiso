@@ -347,3 +347,49 @@ func TestProxy_InboundRejection_ReportsFinalStatus(t *testing.T) {
 		t.Fatalf("expected the final 401 to be recorded once, got %v", got)
 	}
 }
+
+// TestProxy_InboundRejection_OnUpstreamErrorResponse pins that inbound
+// interceptors also see upstream error responses: a policy module can
+// refuse to forward a 5xx body instead of the retry path bypassing it
+// (ADR 0007).
+func TestProxy_InboundRejection_OnUpstreamErrorResponse(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     host,
+			Retry:    link.RetryConfig{MaxAttempts: 1},
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module, "phase": "inbound"}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	metrics := link.NewMetrics(prometheus.NewRegistry())
+	handler := NewHandler(Config{Targets: store, Metrics: metrics, Interceptors: icRegistry})
+
+	req := httptest.NewRequest("POST", "/link/svc/x", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected the inbound module's 401 to win over the upstream 500, got %d", w.Code)
+	}
+	if got := rejectionCount(t, metrics, "svc", "POST", "401"); got != 1 {
+		t.Fatalf("expected the final 401 to be recorded once, got %v", got)
+	}
+}
