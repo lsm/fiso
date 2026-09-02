@@ -1,0 +1,22 @@
+services:
+  # User's backend business logic (header-logging echo service)
+  user-service:
+    build:
+      context: ./user-service
+
+  # Ingress — authenticates HTTP events via the wasm auth interceptor, forwards to user-service
+  fiso-flow:
+    image: fiso-flow:e2e
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.flow
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./fiso/flows:/etc/fiso/flows:ro
+      - ./module:/etc/fiso/modules:ro
+    environment:
+      FISO_CONFIG_DIR: /etc/fiso/flows
+      FISO_METRICS_ADDR: ":9090"
+    depends_on:
+      - user-service

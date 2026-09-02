@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -551,16 +552,22 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 				if err != nil {
 					return nil, fmt.Errorf("read wasm module %s: %w", modulePath, err)
 				}
+				// Env delivery (ADR 0008): configured env reaches the guest
+				// at instantiation — the channel for key material such as
+				// JWT verification keys.
+				env, err := getEnvMap(ic.Config)
+				if err != nil {
+					return nil, fmt.Errorf("wasm interceptor %s: %w", modulePath, err)
+				}
 				// Host HTTP capability (ADR 0006): opt-in per interceptor,
 				// deny-by-default allowlist, routed through Fiso-Link.
-				var runtime wasm.Runtime
+				opts := wasmruntime.WazeroOptions{Env: env}
 				if httpEnabled(ic.Config) {
-					var httpRt *wasmruntime.WazeroRuntime
-					httpRt, err = wasmruntime.NewWazeroRuntimeWithHTTP(context.Background(), wasmBytes, hostHTTPConfig(ic.Config))
-					runtime = httpRt
-				} else {
-					runtime, err = wasm.NewWazeroRuntime(context.Background(), wasmBytes)
+					httpCfg := hostHTTPConfig(ic.Config)
+					opts.HostHTTP = &httpCfg
 				}
+				var runtime wasm.Runtime
+				runtime, err = wasmruntime.NewWazeroRuntimeWithOptions(context.Background(), wasmBytes, opts)
 				if err != nil {
 					return nil, fmt.Errorf("wasm runtime for %s: %w", modulePath, err)
 				}
@@ -613,4 +620,36 @@ func hostHTTPConfig(cfg map[string]interface{}) wasmruntime.HostHTTPConfig {
 func getString(m map[string]interface{}, key string) string {
 	v, _ := m[key].(string)
 	return v
+}
+
+// getEnvMap extracts the env delivered to the guest at instantiation (ADR
+// 0008). Malformed values fail construction instead of being silently
+// dropped — a dropped verification key would silently disable an
+// authentication module's allow path.
+func getEnvMap(cfg map[string]interface{}) (map[string]string, error) {
+	raw, present := cfg["env"]
+	if !present || raw == nil {
+		return nil, nil
+	}
+	envMap, isMap := raw.(map[string]interface{})
+	if !isMap {
+		return nil, fmt.Errorf("config.env must be a map of strings")
+	}
+	env := make(map[string]string, len(envMap))
+	for k, v := range envMap {
+		s, isStr := v.(string)
+		if !isStr {
+			return nil, fmt.Errorf("config.env[%q] must be a string", k)
+		}
+		// WASI entries are KEY=VALUE strings; reject unrepresentable
+		// names and values at construction, not per event.
+		if k == "" || strings.ContainsAny(k, "=\x00") {
+			return nil, fmt.Errorf("config.env[%q] is not a valid environment name", k)
+		}
+		if strings.ContainsRune(s, '\x00') {
+			return nil, fmt.Errorf("config.env[%q] is not a valid environment value", k)
+		}
+		env[k] = s
+	}
+	return env, nil
 }

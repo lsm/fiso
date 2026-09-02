@@ -175,6 +175,35 @@ func (f *FlowDefinition) Validate() error {
 					errs = append(errs, fmt.Errorf("interceptors[%d].config.runtime must be 'wazero' or 'wasmer', got %q", i, runtimeStr))
 				}
 			}
+			// Env delivery (ADR 0008): configured env reaches the guest at
+			// instantiation. Malformed values fail validation instead of
+			// being silently dropped — a dropped verification key would
+			// silently turn an authentication module into a refusal-only
+			// gate. Null is treated as omitted, matching runtime.
+			if envVal, present := ic.Config["env"]; present && envVal != nil {
+				envMap, isMap := envVal.(map[string]interface{})
+				if !isMap {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.env must be a map of strings", i))
+				} else {
+					for k, v := range envMap {
+						value, isStr := v.(string)
+						if !isStr {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.env[%q] must be a string", i, k))
+							continue
+						}
+						// WASI environment entries are KEY=VALUE strings;
+						// '=' or NUL in a key and NUL in a value cannot be
+						// represented. Rejecting them here keeps the failure
+						// at load time instead of on every event.
+						if k == "" || strings.ContainsAny(k, "=\x00") {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.env[%q] is not a valid environment name", i, k))
+						}
+						if strings.ContainsRune(value, '\x00') {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.env[%q] is not a valid environment value", i, k))
+						}
+					}
+				}
+			}
 		}
 	}
 

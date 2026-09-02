@@ -589,6 +589,121 @@ func TestFlowDefinition_Validate(t *testing.T) {
 			wantErr: "interceptors[0].config.runtime must be 'wazero' or 'wasmer'",
 		},
 		{
+			name: "wasm interceptor valid env map",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module": "/path/to/module.wasm",
+					"env":    map[string]interface{}{"AUTH_HS256_SECRET": "secret"},
+				}}},
+			},
+		},
+		{
+			name: "wasm interceptor empty env map",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module": "/path/to/module.wasm",
+					"env":    map[string]interface{}{},
+				}}},
+			},
+		},
+		{
+			name: "wasm interceptor env not a map",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module": "/path/to/module.wasm",
+					"env":    "AUTH_HS256_SECRET=secret",
+				}}},
+			},
+			wantErr: "interceptors[0].config.env must be a map of strings",
+		},
+		{
+			name: "wasm interceptor env non-string value",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module": "/path/to/module.wasm",
+					"env":    map[string]interface{}{"AUTH_HS256_SECRET": 42},
+				}}},
+			},
+			wantErr: `interceptors[0].config.env["AUTH_HS256_SECRET"] must be a string`,
+		},
+		{
+			name: "wasm interceptor env null value",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module": "/path/to/module.wasm",
+					"env":    map[string]interface{}{"AUTH_HS256_SECRET": nil},
+				}}},
+			},
+			wantErr: `interceptors[0].config.env["AUTH_HS256_SECRET"] must be a string`,
+		},
+		{
+			name: "wasm interceptor env name with equals",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module": "/path/to/module.wasm",
+					"env":    map[string]interface{}{"BAD=NAME": "v"},
+				}}},
+			},
+			wantErr: `interceptors[0].config.env["BAD=NAME"] is not a valid environment name`,
+		},
+		{
+			name: "wasm interceptor env name with NUL",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module": "/path/to/module.wasm",
+					"env":    map[string]interface{}{"BAD\x00NAME": "v"},
+				}}},
+			},
+			wantErr: `is not a valid environment name`,
+		},
+		{
+			name: "wasm interceptor env empty name",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module": "/path/to/module.wasm",
+					"env":    map[string]interface{}{"": "v"},
+				}}},
+			},
+			wantErr: `is not a valid environment name`,
+		},
+		{
+			name: "wasm interceptor env value with NUL",
+			flow: FlowDefinition{
+				Name:   "t",
+				Source: SourceConfig{Type: "http"},
+				Sink:   SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+					"module": "/path/to/module.wasm",
+					"env":    map[string]interface{}{"AUTH_HS256_SECRET": "bad\x00value"},
+				}}},
+			},
+			wantErr: `interceptors[0].config.env["AUTH_HS256_SECRET"] is not a valid environment value`,
+		},
+		{
 			name: "wasm interceptor valid wazero runtime",
 			flow: FlowDefinition{
 				Name:   "t",

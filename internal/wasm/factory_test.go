@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -196,6 +197,43 @@ func TestDefaultFactory_Create_WithConfigOptions(t *testing.T) {
 
 	if rt.Type() != RuntimeWazero {
 		t.Errorf("Type() = %q, want %q", rt.Type(), RuntimeWazero)
+	}
+}
+
+// TestDefaultFactory_Create_EnvReachesGuest pins the env-delivery contract:
+// Config.Env must reach the guest as environment variables on the wazero
+// path, not just on wasmer. Guests read key material (verification keys for
+// authentication modules) through this channel.
+func TestDefaultFactory_Create_EnvReachesGuest(t *testing.T) {
+	wasmPath := buildTestWASMModule(t, filepath.Join("../interceptor/wasm/testdata", "env-echo"))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "module.wasm")
+	if err := os.WriteFile(tmpFile, wasmBytes, 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	factory := NewFactory()
+	rt, err := factory.Create(context.Background(), Config{
+		Type:       RuntimeWazero,
+		ModulePath: tmpFile,
+		Env:        map[string]string{"FISO_ECHO_SENTINEL": "guest-env-works"},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	out, err := rt.Call(context.Background(), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Call failed: %v", err)
+	}
+	if !strings.Contains(string(out), "guest-env-works") {
+		t.Fatalf("configured env must reach the guest; guest saw %s", out)
 	}
 }
 

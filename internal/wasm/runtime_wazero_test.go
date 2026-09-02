@@ -5,12 +5,14 @@ package wasm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // buildWASMModule compiles a Go source file to a WASM binary using wasip1/wasm.
@@ -332,5 +334,113 @@ func TestWazeroRuntime_LargeInput(t *testing.T) {
 	}
 	if len(output) == 0 {
 		t.Error("expected non-empty output for large input")
+	}
+}
+
+// TestWazeroRuntime_GuestClockFollowsHost pins the guest-clock contract:
+// wazero's sandbox default is a frozen fake wall clock, which would make a
+// time-dependent guest (JWT exp/nbf verification) silently accept expired
+// credentials. The guest must see the real host time.
+func TestWazeroRuntime_GuestClockFollowsHost(t *testing.T) {
+	wasmPath := buildWASMModule(t, filepath.Join("testdata", "clock"))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	rt, err := NewWazeroRuntime(context.Background(), wasmBytes)
+	if err != nil {
+		t.Fatalf("NewWazeroRuntime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	before := time.Now().Unix()
+	out, err := rt.Call(context.Background(), []byte(`{}`))
+	after := time.Now().Unix()
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	var report struct {
+		Now int64 `json:"now"`
+	}
+	if err := json.Unmarshal(out, &report); err != nil {
+		t.Fatalf("parse guest report %s: %v", out, err)
+	}
+	// The guest ran between the two host readings; anything outside that
+	// window (within tolerance) is a frozen or skewed clock.
+	if report.Now < before-300 || report.Now > after+300 {
+		t.Fatalf("guest clock %d is outside the host window [%d, %d] — sandbox default clock?", report.Now, before-300, after+300)
+	}
+}
+
+// TestWazeroRuntime_StderrSurfacedOnError pins the guest-stderr contract:
+// a failing guest's diagnostic must reach the operator. The auth guest's
+// misconfiguration message ("auth: configuration: ...") is its only
+// diagnostic; discarding stderr leaves a generic exit error that cannot
+// be acted on.
+func TestWazeroRuntime_StderrSurfacedOnError(t *testing.T) {
+	wasmPath := buildWASMModule(t, filepath.Join("testdata", "stderr-fail"))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	rt, err := NewWazeroRuntime(context.Background(), wasmBytes)
+	if err != nil {
+		t.Fatalf("NewWazeroRuntime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	_, err = rt.Call(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatal("expected execution error")
+	}
+	if !strings.Contains(err.Error(), "auth-config-boom") {
+		t.Fatalf("error must surface the guest's stderr diagnostic, got: %v", err)
+	}
+}
+
+// TestLimitWriter_BoundsCapture pins the stderr bound: writes beyond the
+// cap are dropped while being captured, not truncated after the fact, so
+// a guest streaming unbounded diagnostics cannot grow host memory.
+func TestLimitWriter_BoundsCapture(t *testing.T) {
+	w := &limitWriter{limit: 16}
+	big := make([]byte, 1<<20) // 1 MiB
+	for i := range big {
+		big[i] = 'x'
+	}
+	for i := 0; i < 8; i++ {
+		if n, err := w.Write(big); err != nil || n != len(big) {
+			t.Fatalf("write %d: n=%d err=%v (the guest must not be blocked)", i, n, err)
+		}
+	}
+	if w.buf.Len() > 16 {
+		t.Fatalf("retained %d bytes, want at most 16", w.buf.Len())
+	}
+	if !w.truncated {
+		t.Fatal("truncation must be reported")
+	}
+
+	small := &limitWriter{limit: 16}
+	if _, err := small.Write([]byte("short message")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if small.truncated {
+		t.Fatal("under-limit write must not be marked truncated")
+	}
+	if small.buf.String() != "short message" {
+		t.Fatalf("content = %q", small.buf.String())
+	}
+}
+
+// TestWazeroRuntime_StderrTruncatedInError pins that an over-limit guest
+// stderr is capped in the surfaced error.
+func TestWazeroRuntime_StderrTruncatedInError(t *testing.T) {
+	w := &limitWriter{limit: 8}
+	_, _ = w.Write([]byte("0123456789ABCDEF"))
+	err := withGuestStderr(errors.New("boom"), w)
+	if !strings.Contains(err.Error(), "guest stderr: 01234567…") {
+		t.Fatalf("capped stderr missing; got: %v", err)
 	}
 }
