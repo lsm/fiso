@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -76,8 +77,8 @@ func TestHostHTTP_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
-	if gotMethod != "POST" {
-		t.Errorf("method = %q, want POST (normalized)", gotMethod)
+	if gotMethod != "post" {
+		t.Errorf("method = %q, want the guest's casing preserved", gotMethod)
 	}
 	if gotPath != "/link/fraud-api/score" {
 		t.Errorf("path = %q, want Link routing", gotPath)
@@ -408,5 +409,47 @@ func TestValidMethodToken_Boundaries(t *testing.T) {
 		if validMethodToken(m) {
 			t.Errorf("%q accepted", m)
 		}
+	}
+}
+
+// TestHostHTTP_TargetNameWithAllowlistWord pins the typed-error
+// classification: a *target named* "allowlist-service" that is denied must
+// still classify correctly (no string-matching on error text).
+func TestHostHTTP_TargetNameWithAllowlistWord(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"other"}, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := client.call(context.Background(), hostHTTPRequest{Target: "allowlist-service"})
+	if err == nil {
+		t.Fatal("expected denial")
+	}
+	var denied *targetDeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("expected a targetDeniedError, got %T: %v", err, err)
+	}
+	if denied.target != "allowlist-service" {
+		t.Fatalf("denied target = %q", denied.target)
+	}
+}
+
+// TestHostHTTP_RawDelimitersRejected pins that ? and # are rejected.
+func TestHostHTTP_RawDelimitersRejected(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	for _, path := range []string{"/a?b", "/a#b"} {
+		if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Path: path}); err == nil {
+			t.Errorf("path %q must be rejected", path)
+		}
+	}
+}
+
+// TestHostHTTP_LowercaseMethodPreserved pins method-casing preservation.
+func TestHostHTTP_LowercaseMethodPreserved(t *testing.T) {
+	var got string
+	client, _ := newTestHostClient(t, []string{"api"}, func(w http.ResponseWriter, r *http.Request) {
+		got = r.Method
+	})
+	if _, err := client.call(context.Background(), hostHTTPRequest{Target: "api", Method: "custom"}); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if got != "custom" {
+		t.Errorf("method casing not preserved: %q", got)
 	}
 }

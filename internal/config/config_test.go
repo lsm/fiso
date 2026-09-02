@@ -1527,6 +1527,10 @@ func TestFlowDefinition_ValidateWasmHostHTTPConfig(t *testing.T) {
 			wantErr: "must be a single URL path segment",
 		},
 		{
+			name:   "dotted target name allowed",
+			config: map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"crm.v2"}},
+		},
+		{
 			name:   "valid opt-in",
 			config: map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"fraud-api"}},
 		},

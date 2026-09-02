@@ -1318,9 +1318,10 @@ failure). Bodies travel base64-encoded so arbitrary bytes — JSON, text,
 form-encoded, binary — round-trip verbatim. When a successful response
 exceeds the guest's buffer the host returns the negative of the required
 size (not `-3`): the call already happened, so a guest should only retry
-with a larger buffer when the operation is idempotent. The path must be absolute with
-no `..` segments or encoded slashes; the guest cannot escape its target's
-prefix. A module that imports the function without `http: true` fails to
+with a larger buffer when the operation is idempotent; `-3` is reserved for
+buffer-write failures where no call completed. The path must be absolute,
+plain printable ASCII, with no `..` segments, empty segments, or
+percent-encoding of any kind; the guest cannot escape its target's prefix. A module that imports the function without `http: true` fails to
 instantiate — the capability is absent, not merely unchecked. Supported on
 the wazero runtime in every Flow-capable binary (including
 `fiso-flow-wasmer` and `fiso-wasmer-aio` when `runtime` is wazero).

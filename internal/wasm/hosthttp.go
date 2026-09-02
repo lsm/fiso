@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -82,7 +82,9 @@ func newHostHTTPClient(cfg HostHTTPConfig) (*hostHTTPClient, error) {
 	}
 	c := cfg.Client
 	if c == nil {
-		c = &http.Client{Timeout: 10 * time.Second}
+		// No client timeout: Link owns retry/backoff semantics, and a host
+		// deadline shorter than Link's policy would cut allowed slow calls.
+		c = &http.Client{}
 	}
 	return &hostHTTPClient{cfg: cfg, client: c}, nil
 }
@@ -103,8 +105,10 @@ func sanitizePath(path string) (string, error) {
 	// construction. Guests send unencoded segments only.
 	for i := 0; i < len(path); i++ {
 		c := path[i]
-		if c < 0x21 || c > 0x7e || c == '%' {
-			return "", fmt.Errorf("path must contain only printable ASCII without percent-encoding")
+		// ?, # and % are delimiters/encodings the proxy and client would
+		// reinterpret; guests send unencoded path segments only.
+		if c < 0x21 || c > 0x7e || c == '%' || c == '?' || c == '#' {
+			return "", fmt.Errorf("path must contain only printable ASCII without delimiters or percent-encoding")
 		}
 	}
 	candidate := path
@@ -170,26 +174,39 @@ func validHeaderPair(name, value string) bool {
 	return true
 }
 
+// targetDeniedError marks a deny-by-default rejection.
+type targetDeniedError struct{ target string }
+
+func (e *targetDeniedError) Error() string {
+	return fmt.Sprintf("target %q is not in the interceptor's httpTargets allowlist", e.target)
+}
+
+// errInvalidReq marks guest-request errors (mapped to HostErrInvalidRequest).
+var errInvalidReq = fmt.Errorf("invalid request")
+
+// isInvalidReq reports whether err is a guest-request classification error.
+func isInvalidReq(err error) bool { return errors.Is(err, errInvalidReq) }
+
 // call validates the request against the allowlist and performs it.
 func (h *hostHTTPClient) call(ctx context.Context, req hostHTTPRequest) (hostHTTPResponse, error) {
 	if req.Target == "" {
-		return hostHTTPResponse{}, fmt.Errorf("invalid request: target is required")
+		return hostHTTPResponse{}, fmt.Errorf("%w: target is required", errInvalidReq)
 	}
 	if !slices.Contains(h.cfg.AllowedTargets, req.Target) {
 		// Denied before any network activity (deny-by-default, ADR 0006).
-		return hostHTTPResponse{}, fmt.Errorf("target %q is not in the interceptor's httpTargets allowlist", req.Target)
+		return hostHTTPResponse{}, &targetDeniedError{target: req.Target}
 	}
 	path, err := sanitizePath(req.Path)
 	if err != nil {
-		return hostHTTPResponse{}, fmt.Errorf("invalid request: %w", err)
+		return hostHTTPResponse{}, fmt.Errorf("%w: %w", errInvalidReq, err)
 	}
 
-	method := strings.ToUpper(req.Method)
+	method := req.Method
 	if method == "" {
 		method = http.MethodPost
 	}
 	if !validMethodToken(method) {
-		return hostHTTPResponse{}, fmt.Errorf("invalid request: method %q is not a valid HTTP token", req.Method)
+		return hostHTTPResponse{}, fmt.Errorf("%w: method %q is not a valid HTTP token", errInvalidReq, req.Method)
 	}
 	url := fmt.Sprintf("%s/link/%s%s", strings.TrimSuffix(h.cfg.LinkAddr, "/"), req.Target, path)
 
@@ -197,7 +214,7 @@ func (h *hostHTTPClient) call(ctx context.Context, req hostHTTPRequest) (hostHTT
 	if req.BodyB64 != "" {
 		raw, err := base64.StdEncoding.DecodeString(req.BodyB64)
 		if err != nil {
-			return hostHTTPResponse{}, fmt.Errorf("invalid request: bodyB64 is not valid base64: %w", err)
+			return hostHTTPResponse{}, fmt.Errorf("%w: bodyB64 is not valid base64: %w", errInvalidReq, err)
 		}
 		body = bytes.NewReader(raw)
 	}
@@ -207,7 +224,7 @@ func (h *hostHTTPClient) call(ctx context.Context, req hostHTTPRequest) (hostHTT
 	}
 	for k, v := range req.Headers {
 		if !validHeaderPair(k, v) {
-			return hostHTTPResponse{}, fmt.Errorf("invalid request: header %q is not a valid HTTP field", k)
+			return hostHTTPResponse{}, fmt.Errorf("%w: header %q is not a valid HTTP field", errInvalidReq, k)
 		}
 		httpReq.Header.Set(k, v)
 	}
@@ -258,10 +275,13 @@ func hostHTTPExport(b wazero.HostModuleBuilder, client *hostHTTPClient) {
 			}
 			resp, err := client.call(ctx, req)
 			if err != nil {
-				if strings.Contains(err.Error(), "allowlist") {
+				// Deny-by-default target check happens before the network
+				// and is distinguishable from an upstream failure.
+				var denied *targetDeniedError
+				if errors.As(err, &denied) {
 					return HostErrTargetDenied
 				}
-				if strings.Contains(err.Error(), "invalid request") {
+				if isInvalidReq(err) {
 					return HostErrInvalidRequest
 				}
 				return HostErrUpstream
