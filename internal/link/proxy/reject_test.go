@@ -15,6 +15,9 @@ import (
 	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"log/slog"
 )
 
@@ -392,4 +395,59 @@ func TestProxy_InboundRejection_OnUpstreamErrorResponse(t *testing.T) {
 	if got := rejectionCount(t, metrics, "svc", "POST", "401"); got != 1 {
 		t.Fatalf("expected the final 401 to be recorded once, got %v", got)
 	}
+}
+
+// TestProxy_InboundRejection_SpanMarkedError pins the tracing half of the
+// final-status contract: a guest turning an upstream 200 into a 401 must
+// leave the proxy span marked as an error, not Ok (ADR 0007).
+func TestProxy_InboundRejection_SpanMarkedError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"response":true}`))
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     host,
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module, "phase": "inbound"}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	handler := NewHandler(Config{Targets: store, Metrics: link.NewMetrics(prometheus.NewRegistry()), Interceptors: icRegistry})
+	handler.SetTracer(tp.Tracer("test"))
+	defer func() { _ = tp.Shutdown(context.Background()) }()
+
+	req := httptest.NewRequest("POST", "/link/svc/x", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+
+	for _, span := range sr.Ended() {
+		if span.Name() == "fiso.proxy.request" {
+			if span.Status().Code != codes.Error {
+				t.Fatalf("the rewritten-to-401 response must mark the proxy span as an error, got %v", span.Status().Code)
+			}
+			return
+		}
+	}
+	t.Fatal("no proxy span recorded")
 }

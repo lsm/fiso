@@ -401,7 +401,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	finalStatus := h.copyResponseWithInterceptors(ctx, w, resp, targetName)
 	span.SetAttributes(tracing.HTTPStatusAttr(finalStatus))
 	h.recordSyncRequest(targetName, r.Method, strconv.Itoa(finalStatus), duration)
-	tracing.SetSpanOK(span)
+	if finalStatus >= 400 {
+		// A guest-refused or failed-to-forward response is not a successful
+		// hop, even when the upstream call itself succeeded.
+		tracing.SetSpanError(span, fmt.Errorf("final status %d", finalStatus))
+	} else {
+		tracing.SetSpanOK(span)
+	}
 
 	// Log successful proxy request
 	h.logger.Info("proxy request completed",
