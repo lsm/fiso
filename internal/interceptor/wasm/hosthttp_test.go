@@ -120,3 +120,36 @@ func TestNewHostHTTPClient_RequiresLinkAddr(t *testing.T) {
 		t.Fatal("expected linkAddr requirement")
 	}
 }
+
+// TestHostHTTP_UpstreamError pins the upstream-failure path.
+func TestHostHTTP_UpstreamError(t *testing.T) {
+	client, srv := newTestHostClient(t, []string{"api"}, func(w http.ResponseWriter, r *http.Request) {})
+	// Point at a closed address to force a transport error.
+	client.cfg.LinkAddr = "http://" + strings.TrimPrefix(srv.URL, "http://") // keep valid
+	srv.Close()
+	if _, err := client.call(context.Background(), hostHTTPRequest{Target: "api"}); err == nil {
+		t.Fatal("expected upstream error after server shutdown")
+	}
+}
+
+// TestHostHTTP_DefaultClientConstruction pins the default client branch.
+func TestHostHTTP_DefaultClientConstruction(t *testing.T) {
+	if _, err := newHostHTTPClient(HostHTTPConfig{LinkAddr: "http://127.0.0.1:1"}); err != nil {
+		t.Fatalf("default client construction: %v", err)
+	}
+}
+
+// TestHostHTTP_HeaderMultiValueKeepsFirst pins first-value header collapse.
+func TestHostHTTP_HeaderMultiValueKeepsFirst(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"api"}, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("X-Multi", "first")
+		w.Header().Add("X-Multi", "second")
+	})
+	resp, err := client.call(context.Background(), hostHTTPRequest{Target: "api"})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if resp.Headers["X-Multi"] != "first" {
+		t.Errorf("multi-value header: got %q, want first", resp.Headers["X-Multi"])
+	}
+}

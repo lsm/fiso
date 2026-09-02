@@ -61,6 +61,12 @@ func newWazeroRuntime(ctx context.Context, wasmBytes []byte, httpCfg HostHTTPCon
 
 // Call invokes the WASM module with input on stdin and captures stdout as the result.
 func (w *WazeroRuntime) Call(ctx context.Context, input []byte) ([]byte, error) {
+	return w.CallWithEnv(ctx, input, nil)
+}
+
+// CallWithEnv is Call with environment variables set for the invocation
+// (used by tests to select guest code paths).
+func (w *WazeroRuntime) CallWithEnv(ctx context.Context, input []byte, env map[string]string) ([]byte, error) {
 	stdin := bytes.NewReader(input)
 	var stdout bytes.Buffer
 
@@ -69,6 +75,9 @@ func (w *WazeroRuntime) Call(ctx context.Context, input []byte) ([]byte, error) 
 		WithStdout(&stdout).
 		WithStderr(&bytes.Buffer{}). // discard stderr
 		WithName("")                 // anonymous module so multiple calls don't collide
+	for k, v := range env {
+		cfg = cfg.WithEnv(k, v)
+	}
 
 	mod, err := w.rt.InstantiateModule(ctx, w.module, cfg)
 	if err != nil {

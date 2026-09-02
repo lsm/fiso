@@ -49,6 +49,14 @@ func main() {
 	reqBuf := []byte(req)
 	respBuf := make([]byte, 64*1024)
 
+	// Test modes (set via FISO_TEST_MODE) exercise the host error paths.
+	mode := os.Getenv("FISO_TEST_MODE")
+	if mode == "badreq" {
+		reqBuf = []byte("not-json")
+	} else if mode == "smallbuf" {
+		respBuf = respBuf[:8]
+	}
+
 	n := http_call(
 		uint32(uintptr(unsafe.Pointer(&reqBuf[0]))),
 		uint32(len(reqBuf)),

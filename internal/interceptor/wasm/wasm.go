@@ -41,6 +41,32 @@ type wasmOutput struct {
 }
 
 // Process invokes the WASM module to process the request.
+// ProcessWithEnv is Process with environment variables set for the guest
+// invocation (used by tests to select guest code paths).
+func (i *Interceptor) ProcessWithEnv(ctx context.Context, req *interceptor.Request, env map[string]string) (*interceptor.Request, error) {
+	runtime, ok := i.runtime.(interface {
+		CallWithEnv(context.Context, []byte, map[string]string) ([]byte, error)
+	})
+	if !ok {
+		resp, err := i.Process(ctx, req)
+		return resp, err
+	}
+	input := wasmInput{Payload: req.Payload, Headers: req.Headers, Direction: string(req.Direction)}
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("wasm marshal input: %w", err)
+	}
+	result, err := runtime.CallWithEnv(ctx, data, env)
+	if err != nil {
+		return nil, fmt.Errorf("wasm module %s: %w", i.moduleName, err)
+	}
+	var output wasmOutput
+	if err := json.Unmarshal(result, &output); err != nil {
+		return nil, fmt.Errorf("wasm unmarshal output from %s: %w", i.moduleName, err)
+	}
+	return &interceptor.Request{Payload: output.Payload, Headers: output.Headers, Direction: req.Direction}, nil
+}
+
 func (i *Interceptor) Process(ctx context.Context, req *interceptor.Request) (*interceptor.Request, error) {
 	input := wasmInput{
 		Payload:   req.Payload,

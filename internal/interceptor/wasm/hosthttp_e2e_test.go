@@ -150,3 +150,69 @@ func TestWazeroRuntime_NoHostModuleWithoutOptIn(t *testing.T) {
 		t.Fatal("expected instantiation failure for a module importing fiso.http_call without opt-in")
 	}
 }
+
+// TestInterceptor_HTTPCallGuestInvalidRequest pins the -1 error path: the
+// guest sends malformed request JSON to the host function.
+func TestInterceptor_HTTPCallGuestInvalidRequest(t *testing.T) {
+	link := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer link.Close()
+
+	wasmBytes := buildHTTPCallModule(t)
+	rt, err := NewWazeroRuntimeWithHTTP(context.Background(), wasmBytes, HostHTTPConfig{
+		LinkAddr:       link.URL,
+		AllowedTargets: []string{"enrich-api"},
+		Client:         link.Client(),
+	})
+	if err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	ict := New(rt, "httpcall.wasm")
+	resp, err := ict.ProcessWithEnv(context.Background(), &interceptor.Request{
+		Payload:   json.RawMessage(`{}`),
+		Headers:   map[string]string{},
+		Direction: "inbound",
+	}, map[string]string{"FISO_TEST_MODE": "badreq"})
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if got := resp.Headers["X-Host-Error"]; got != "-1" {
+		t.Fatalf("expected invalid-request code -1, got %q", got)
+	}
+}
+
+// TestInterceptor_HTTPCallGuestSmallBuffer pins the -3 error path: the
+// response does not fit the guest-provided buffer.
+func TestInterceptor_HTTPCallGuestSmallBuffer(t *testing.T) {
+	link := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"risk":"low"}`))
+	}))
+	defer link.Close()
+
+	wasmBytes := buildHTTPCallModule(t)
+	rt, err := NewWazeroRuntimeWithHTTP(context.Background(), wasmBytes, HostHTTPConfig{
+		LinkAddr:       link.URL,
+		AllowedTargets: []string{"enrich-api"},
+		Client:         link.Client(),
+	})
+	if err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	ict := New(rt, "httpcall.wasm")
+	resp, err := ict.ProcessWithEnv(context.Background(), &interceptor.Request{
+		Payload:   json.RawMessage(`{}`),
+		Headers:   map[string]string{},
+		Direction: "inbound",
+	}, map[string]string{"FISO_TEST_MODE": "smallbuf"})
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if got := resp.Headers["X-Host-Error"]; got != "-3" {
+		t.Fatalf("expected buffer-size code -3, got %q", got)
+	}
+}
