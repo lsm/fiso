@@ -1340,6 +1340,7 @@ map (see [ADR 0008](docs/adr/0008-interceptor-env-configuration.md)):
 | `AUTH_RS256_PUBLIC_KEY` | PEM-encoded PKIX RSA public key (enables RS256) |
 | `AUTH_ED25519_PUBLIC_KEY` | base64 (std) raw 32-byte public key (enables EdDSA) |
 | `AUTH_EXPECTED_AUDIENCE` | when set, the token's `aud` claim must contain it |
+| `AUTH_EXPECTED_ISSUER` | when set, the token's `iss` claim must equal it exactly |
 | `AUTH_ALLOW_MISSING_EXPIRY` | set to `true` to accept tokens without `exp` |
 
 A token's algorithm is allowed only when its key is configured — `alg:
@@ -1348,7 +1349,9 @@ default and enforced together with `nbf`; a present but non-numeric
 `exp`/`nbf` is refused as malformed, not treated as absent. Set
 `AUTH_EXPECTED_AUDIENCE` when an issuer's signing key is shared across
 services, so tokens minted for a different audience are refused
-("invalid audience"). On success the credential header **and any
+("invalid audience"), and `AUTH_EXPECTED_ISSUER` when one key is trusted
+for multiple issuers ("invalid issuer"). On success the credential
+header **and any
 caller-supplied `X-Authenticated`/`X-Auth-Subject`** are stripped — the
 verdict headers downstream see can only come from verified claims — the
 verdict travels as `X-Authenticated: true` and `X-Auth-Subject` (from

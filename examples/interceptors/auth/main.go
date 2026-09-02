@@ -10,6 +10,8 @@
 //	AUTH_HS256_SECRET        HMAC-SHA256 shared secret (enables HS256)
 //	AUTH_RS256_PUBLIC_KEY    PEM-encoded PKIX RSA public key (enables RS256)
 //	AUTH_ED25519_PUBLIC_KEY  base64 (std) raw 32-byte public key (enables EdDSA)
+//	AUTH_EXPECTED_AUDIENCE   when set, the aud claim must contain it
+//	AUTH_EXPECTED_ISSUER     when set, the iss claim must equal it exactly
 //	AUTH_ALLOW_MISSING_EXPIRY  set to "true" to accept tokens without exp
 //
 // At least one key must be configured. exp is enforced when present and
@@ -64,6 +66,7 @@ type authConfig struct {
 	ed25519PublicKey   ed25519.PublicKey
 	allowMissingExpiry bool
 	expectedAudience   string
+	expectedIssuer     string
 }
 
 func main() {
@@ -153,6 +156,7 @@ func loadConfig(getenv func(string) string) (*authConfig, error) {
 		hs256Secret:        getenv("AUTH_HS256_SECRET"),
 		allowMissingExpiry: getenv("AUTH_ALLOW_MISSING_EXPIRY") == "true",
 		expectedAudience:   getenv("AUTH_EXPECTED_AUDIENCE"),
+		expectedIssuer:     getenv("AUTH_EXPECTED_ISSUER"),
 	}
 
 	if pemKey := getenv("AUTH_RS256_PUBLIC_KEY"); pemKey != "" {
@@ -271,6 +275,14 @@ func authenticate(cfg *authConfig, headers map[string]string, now time.Time) dec
 	// different service is not a credential here.
 	if cfg.expectedAudience != "" && !audienceMatches(claims, cfg.expectedAudience) {
 		return refuse(401, "invalid audience")
+	}
+
+	// An expected issuer prevents cross-issuer token replay in shared-key
+	// deployments: the token must name exactly who issued it.
+	if cfg.expectedIssuer != "" {
+		if iss, isStr := claims["iss"].(string); !isStr || iss != cfg.expectedIssuer {
+			return refuse(401, "invalid issuer")
+		}
 	}
 
 	// Presence is tracked separately from numeric parsing: a present but

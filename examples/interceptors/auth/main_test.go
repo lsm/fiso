@@ -110,6 +110,13 @@ func audClaims(audience string) map[string]any {
 	return claims
 }
 
+// issClaims is validClaims issued by a specific issuer.
+func issClaims(issuer string) map[string]any {
+	claims := validClaims()
+	claims["iss"] = issuer
+	return claims
+}
+
 func hs256Config() *authConfig {
 	return &authConfig{hs256Secret: "secret"}
 }
@@ -361,6 +368,38 @@ func TestAuthenticate(t *testing.T) {
 			headers: bearerHeader(hs256Token(t, map[string]any{"sub": "alice", "exp": float64(testNow.Add(time.Hour).Unix()), "aud": 42}, "secret")),
 			wantRej: "invalid audience",
 		},
+		{
+			name:    "issuer matches expectation",
+			cfg:     &authConfig{hs256Secret: "secret", expectedIssuer: "https://issuer.example"},
+			headers: bearerHeader(hs256Token(t, issClaims("https://issuer.example"), "secret")),
+			wantOK:  true,
+			wantSub: "alice",
+		},
+		{
+			name:    "issuer mismatch",
+			cfg:     &authConfig{hs256Secret: "secret", expectedIssuer: "https://issuer.example"},
+			headers: bearerHeader(hs256Token(t, issClaims("https://attacker.example"), "secret")),
+			wantRej: "invalid issuer",
+		},
+		{
+			name:    "token without issuer when one is expected",
+			cfg:     &authConfig{hs256Secret: "secret", expectedIssuer: "https://issuer.example"},
+			headers: bearerHeader(hs256Token(t, validClaims(), "secret")),
+			wantRej: "invalid issuer",
+		},
+		{
+			name:    "issuer claim of the wrong type",
+			cfg:     &authConfig{hs256Secret: "secret", expectedIssuer: "https://issuer.example"},
+			headers: bearerHeader(hs256Token(t, map[string]any{"sub": "alice", "exp": float64(testNow.Add(time.Hour).Unix()), "iss": 42}, "secret")),
+			wantRej: "invalid issuer",
+		},
+		{
+			name:    "no expected issuer means iss is not enforced",
+			cfg:     hs256Config(),
+			headers: bearerHeader(hs256Token(t, issClaims("anyone"), "secret")),
+			wantOK:  true,
+			wantSub: "alice",
+		},
 	}
 
 	for _, tt := range tests {
@@ -517,6 +556,23 @@ func TestLoadConfig(t *testing.T) {
 		}
 		if cfg.expectedAudience != "orders-api" {
 			t.Fatalf("expectedAudience = %q", cfg.expectedAudience)
+		}
+	})
+	t.Run("expected issuer", func(t *testing.T) {
+		cfg, err := loadConfig(func(k string) string {
+			switch k {
+			case "AUTH_HS256_SECRET":
+				return "s"
+			case "AUTH_EXPECTED_ISSUER":
+				return "https://issuer.example"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.expectedIssuer != "https://issuer.example" {
+			t.Fatalf("expectedIssuer = %q", cfg.expectedIssuer)
 		}
 	})
 }

@@ -18,9 +18,10 @@ unreleased work and will be versioned when a release tag is cut.
   unauthenticated traffic with 401 through the rejection contract,
   stripping the credential and any caller-supplied verdict headers and
   setting `X-Authenticated`/`X-Auth-Subject` from verified claims on the
-  way through; the body passes byte-identically. Optional audience
-  validation (`AUTH_EXPECTED_AUDIENCE`) refuses tokens minted for another
-  service. Verification keys reach the guest through the new
+  way through; the body passes byte-identically. Optional audience and
+  issuer validation (`AUTH_EXPECTED_AUDIENCE`, `AUTH_EXPECTED_ISSUER`)
+  refuses tokens minted for another service or issuer in shared-key
+  deployments. Verification keys reach the guest through the new
   `interceptors[].config.env` map (validated — types and
   WASI-representable names — and delivered on both runtimes and in every
   Flow binary) — see the new "Authenticating Requests" README section and
