@@ -36,6 +36,16 @@ unreleased work and will be versioned when a release tag is cut.
 
 ### Fixed
 
+- **wasmer-link E2E now exercises interception** — the end-to-end test
+  claimed "proxy with WASM interception" but configured no interceptor on
+  the link target and asserted none of the module's effects (its only
+  interception-adjacent check grepped for a request header no component
+  sets). The `api` target now runs the intercept module on the wasmer
+  engine, and the test fails unless the interceptor's header, payload
+  marker, and env reach the backend and the transformed payload still
+  processes. CI also builds the four wasmer CGO images once per run
+  instead of four times.
+
 - **Wasmer manager lifecycle defects** — `StopAll` now terminates every
   app's health-check goroutine (previously they leaked and kept probing the
   shut-down server for the process lifetime in every long-running wasmer
