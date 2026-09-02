@@ -37,6 +37,7 @@ Once accepted, do not substantively rewrite an ADR. Correct trivial errors or ad
 | [0004](0004-report-static-validation-as-validated.md) | Accepted | Report static validation as Validated |
 | [0005](0005-drop-readiness-on-required-pipeline-termination.md) | Accepted | Drop readiness on required pipeline termination |
 | [0006](0006-wasm-http-via-host-function.md) | Accepted | WASM HTTP calls via a host function through Fiso-Link |
+| [0007](0007-interceptor-rejection-contract.md) | Accepted | Interceptor rejection contract |
 
 ## Template
 

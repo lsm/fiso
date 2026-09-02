@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/source"
 )
 
@@ -175,6 +176,13 @@ func (p *ServerPool) PreRegister(listenAddr, path string) (*RouteHandle, error) 
 		}
 
 		if err := handler(r.Context(), evt); err != nil {
+			// A typed rejection answers with the guest-chosen status; every
+			// other error remains a blanket 500 (ADR 0007).
+			if rej, ok := interceptor.AsRejection(err); ok {
+				srv.logger.Warn("event rejected", "path", path, "status", rej.Status, "reason", rej.Reason)
+				http.Error(w, rej.Reason, rej.Status)
+				return
+			}
 			srv.logger.Error("handler error", "path", path, "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -276,6 +284,13 @@ func (p *ServerPool) Register(listenAddr, path string, handler func(context.Cont
 		}
 
 		if err := handler(r.Context(), evt); err != nil {
+			// A typed rejection answers with the guest-chosen status; every
+			// other error remains a blanket 500 (ADR 0007).
+			if rej, ok := interceptor.AsRejection(err); ok {
+				srv.logger.Warn("event rejected", "path", path, "status", rej.Status, "reason", rej.Reason)
+				http.Error(w, rej.Reason, rej.Status)
+				return
+			}
 			srv.logger.Error("handler error", "path", path, "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

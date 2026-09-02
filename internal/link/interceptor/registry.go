@@ -285,8 +285,10 @@ func (w *InterceptorWrapper) Process(ctx context.Context, req *interceptor.Reque
 		)
 	}
 
-	if err != nil && w.failOpen {
-		// Log error but continue with original request
+	if err != nil && w.failOpen && !isRejection(err) {
+		// Log error but continue with original request. A rejection is
+		// exempt: it is a deliberate refusal, not a failure, and failOpen
+		// must not forward what the module refused (ADR 0007).
 		slog.Warn("interceptor failed but failOpen is true, continuing",
 			"module", w.module,
 			"error", err,
@@ -295,4 +297,10 @@ func (w *InterceptorWrapper) Process(ctx context.Context, req *interceptor.Reque
 	}
 
 	return result, err
+}
+
+// isRejection reports whether err is (or wraps) an interceptor rejection.
+func isRejection(err error) bool {
+	_, ok := interceptor.AsRejection(err)
+	return ok
 }

@@ -10,6 +10,21 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Interceptor rejection contract** — a wasm interceptor can refuse an
+  event instead of transforming it by returning
+  `{"reject": {"status": 400-599, "reason": "..."}}`. A rejection is
+  terminal: no retries and no dead-letter (the DLQ no longer absorbs
+  unauthenticated traffic); http sources answer the caller with the
+  module-chosen status and reason, gRPC sources with the closest status
+  code, and Fiso-Link targets respond with it instead of a blanket 500. On
+  kafka sources the refused message is logged and acknowledged so it is not
+  reprocessed forever. Link's `failOpen` exempts rejections — a refusal is a
+  verdict, not a failure. This is the primitive guest-side authentication
+  modules build on. See
+  [ADR 0007](docs/adr/0007-interceptor-rejection-contract.md).
+
 ## [0.21.0] — 2026-09-02
 
 ### Added

@@ -1269,6 +1269,24 @@ Compile to WASM:
 GOOS=wasip1 GOARCH=wasm go build -o transform.wasm .
 ```
 
+### Rejecting a Request (authentication, validation)
+
+A module can refuse an event instead of transforming it: return a `reject`
+object with an HTTP status (400–599) and a short, caller-facing reason.
+
+```json
+{ "reject": { "status": 401, "reason": "missing credentials" } }
+```
+
+A rejection is terminal — no retries, no dead-letter. The caller sees the
+module's choice: http sources answer with that status and reason, gRPC
+sources with the closest status code, and Fiso-Link targets respond with it
+instead of a generic 500. On a kafka source the refused message is logged
+and acknowledged, not reprocessed. A Link interceptor's `failOpen` does not
+downgrade a rejection — a refusal is a verdict, not a failure. This is the
+primitive a guest-side authentication module builds on (see
+[ADR 0007](docs/adr/0007-interceptor-rejection-contract.md)).
+
 ### Flow Configuration
 
 Reference the WASM module in your flow definition:

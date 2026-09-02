@@ -254,6 +254,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		icResult, icErr := h.interceptors.ProcessOutbound(ctx, targetName, icReq)
 		if icErr != nil {
+			// A rejection answers with the guest-chosen status instead of a
+			// blanket 500 (ADR 0007).
+			if rej, ok := interceptor.AsRejection(icErr); ok {
+				h.logger.Warn("request rejected by outbound interceptor",
+					"target", targetName,
+					"status", rej.Status,
+					"reason", rej.Reason,
+				)
+				http.Error(w, rej.Reason, rej.Status)
+				return
+			}
 			h.logger.Error("outbound interceptor error", "target", targetName, "error", icErr)
 			http.Error(w, "interceptor error", http.StatusInternalServerError)
 			return
@@ -420,6 +431,17 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 
 		icResult, icErr := h.interceptors.ProcessInbound(ctx, targetName, icReq)
 		if icErr != nil {
+			// A rejection answers with the guest-chosen status instead of a
+			// blanket 500 (ADR 0007).
+			if rej, ok := interceptor.AsRejection(icErr); ok {
+				h.logger.Warn("response rejected by inbound interceptor",
+					"target", targetName,
+					"status", rej.Status,
+					"reason", rej.Reason,
+				)
+				http.Error(w, rej.Reason, rej.Status)
+				return
+			}
 			h.logger.Error("inbound interceptor error", "target", targetName, "error", icErr)
 			http.Error(w, "interceptor error", http.StatusInternalServerError)
 			return

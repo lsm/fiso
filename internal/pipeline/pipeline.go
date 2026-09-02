@@ -116,6 +116,13 @@ func (p *Pipeline) Run(ctx context.Context) error {
 
 	return p.source.Start(ctx, func(ctx context.Context, evt source.Event) error {
 		if err := p.processEvent(ctx, evt); err != nil {
+			// A rejection was already terminally disposed of (logged, no
+			// DLQ) inside processEvent; deliver the verdict to the caller
+			// instead of dead-lettering it a second time (ADR 0007).
+			// PropagateErrors governs failures, not verdicts.
+			if rej, ok := interceptor.AsRejection(err); ok {
+				return rej
+			}
 			p.logger.Error("event processing failed, sending to DLQ",
 				"flow", p.config.FlowName,
 				"topic", evt.Topic,
@@ -169,6 +176,24 @@ func (p *Pipeline) processEvent(ctx context.Context, evt source.Event) error {
 		}
 		result, err := p.interceptors.Process(ctx, req)
 		if err != nil {
+			// A rejection is a deliberate refusal, not a failure (ADR 0007):
+			// terminally dispose of the event — no retries, no DLQ (a
+			// dead-letter queue must not absorb unauthenticated traffic) —
+			// and let request-response sources answer with the status.
+			if rej, ok := interceptor.AsRejection(err); ok {
+				p.logger.Warn("event rejected by interceptor",
+					"flow", p.config.FlowName,
+					"correlation_id", evt.CorrelationID,
+					"status", rej.Status,
+					"reason", rej.Reason,
+				)
+				if p.config.SourceType == "kafka" {
+					// Kafka has no caller to answer: acknowledge so the
+					// refused message is not reprocessed forever.
+					return nil
+				}
+				return rej
+			}
 			return p.handleFailure(ctx, evt, "INTERCEPTOR_FAILED", err)
 		}
 		payload = result.Payload

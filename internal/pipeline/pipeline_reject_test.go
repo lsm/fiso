@@ -147,10 +147,12 @@ func TestPipeline_InterceptorFailure_StillDLQs(t *testing.T) {
 	if pub.count() != 1 {
 		t.Fatalf("an interceptor failure must still reach the DLQ, got %d publications", pub.count())
 	}
-	if src.gotErr == nil {
-		t.Fatal("an interceptor failure must still propagate to the source")
-	}
-	if _, isRej := interceptor.AsRejection(src.gotErr); isRej {
-		t.Fatal("an interceptor failure must not be classified as a rejection")
+	if src.gotErr != nil {
+		// Without PropagateErrors the failure is DLQ-handled and swallowed;
+		// the rejection branch must not have leaked it to the source.
+		if _, isRej := interceptor.AsRejection(src.gotErr); isRej {
+			t.Fatal("an interceptor failure must not be classified as a rejection")
+		}
+		t.Fatalf("without PropagateErrors a failure must stay swallowed, got %v", src.gotErr)
 	}
 }

@@ -70,6 +70,22 @@ func (i *Interceptor) Process(ctx context.Context, req *interceptor.Request) (*i
 		return nil, fmt.Errorf("wasm unmarshal output from %s: %w", i.moduleName, err)
 	}
 
+	// A rejection is a deliberate refusal (ADR 0007): surface it as the
+	// typed error so the pipeline and proxies answer with the guest-chosen
+	// status instead of treating the event as failed. Only caller-facing
+	// error statuses (400–599) are valid refusals; anything else is a
+	// contract violation and follows the failure path.
+	if output.Reject != nil {
+		if output.Reject.Status < 400 || output.Reject.Status > 599 {
+			return nil, fmt.Errorf("wasm module %s: reject.status %d is outside 400-599",
+				i.moduleName, output.Reject.Status)
+		}
+		return nil, &interceptor.RejectedError{
+			Status: output.Reject.Status,
+			Reason: output.Reject.Reason,
+		}
+	}
+
 	return &interceptor.Request{
 		Payload:   output.Payload,
 		Headers:   output.Headers,

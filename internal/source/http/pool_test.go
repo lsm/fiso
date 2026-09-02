@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/source"
 )
 
@@ -827,4 +829,82 @@ func TestServerPool_StartTwice(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d", resp.StatusCode)
 	}
+}
+
+// TestServerPool_Register_Rejection_MapsStatus pins the rejection mapping on
+// the direct Register path (ADR 0007).
+func TestServerPool_Register_Rejection_MapsStatus(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	_, err := pool.Register("127.0.0.1:0", "/reject", func(_ context.Context, _ source.Event) error {
+		return &interceptor.RejectedError{Status: 403, Reason: "forbidden"}
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- pool.Start(ctx)
+	}()
+
+	pool.WaitReady()
+	addr := pool.ListenAddr("127.0.0.1:0")
+
+	resp, err := http.Post("http://"+addr+"/reject", "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", resp.StatusCode)
+	}
+	if !bytes.Contains(body, []byte("forbidden")) {
+		t.Fatalf("expected the rejection reason in the body, got %q", body)
+	}
+
+	cancel()
+	<-errCh
+}
+
+// TestServerPool_PreRegister_Rejection_MapsStatus pins the rejection mapping
+// on the PreRegister/SetHandler path that Flow-capable binaries use
+// (ADR 0007).
+func TestServerPool_PreRegister_Rejection_MapsStatus(t *testing.T) {
+	pool := NewServerPool(nil)
+
+	handle, err := pool.PreRegister("127.0.0.1:0", "/reject")
+	if err != nil {
+		t.Fatalf("pre-register: %v", err)
+	}
+	if err := pool.SetHandler(handle, func(_ context.Context, _ source.Event) error {
+		return &interceptor.RejectedError{Status: 401, Reason: "missing credentials"}
+	}); err != nil {
+		t.Fatalf("set handler: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- pool.Start(ctx)
+	}()
+
+	pool.WaitReady()
+	addr := pool.ListenAddr("127.0.0.1:0")
+
+	resp, err := http.Post("http://"+addr+"/reject", "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+
+	cancel()
+	<-errCh
 }

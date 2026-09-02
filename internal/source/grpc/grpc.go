@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 
 	"github.com/lsm/fiso/internal/correlation"
+	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/source"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 // Config holds gRPC source configuration.
@@ -125,11 +129,56 @@ func (eh *eventHandler) handle(_ interface{}, stream grpc.ServerStream) error {
 	)
 
 	if err := eh.handler(ctx, evt); err != nil {
+		// A typed rejection maps to the closest gRPC status code so the
+		// caller sees the guest-chosen refusal, not an Unknown error
+		// (ADR 0007).
+		if rej, ok := interceptor.AsRejection(err); ok {
+			eh.logger.Warn("event rejected",
+				"status", rej.Status,
+				"reason", rej.Reason,
+				"correlation_id", evt.CorrelationID,
+			)
+			return grpcStatus(rej)
+		}
 		eh.logger.Error("handler error", "error", err)
 		return err
 	}
 
 	return stream.SendMsg([]byte("ok"))
+}
+
+// grpcStatus translates a rejection's HTTP status to the closest gRPC code.
+// Unmapped statuses surface as PermissionDenied with the reason preserved —
+// a refusal must not degrade to an internal error.
+func grpcStatus(rej *interceptor.RejectedError) error {
+	var code codes.Code
+	switch rej.Status {
+	case http.StatusBadRequest:
+		code = codes.InvalidArgument
+	case http.StatusUnauthorized:
+		code = codes.Unauthenticated
+	case http.StatusForbidden:
+		code = codes.PermissionDenied
+	case http.StatusNotFound:
+		code = codes.NotFound
+	case http.StatusConflict:
+		code = codes.AlreadyExists
+	case http.StatusGone:
+		code = codes.NotFound
+	case http.StatusRequestEntityTooLarge:
+		code = codes.ResourceExhausted
+	case http.StatusTooManyRequests:
+		code = codes.ResourceExhausted
+	case http.StatusNotImplemented:
+		code = codes.Unimplemented
+	case http.StatusServiceUnavailable:
+		code = codes.Unavailable
+	case http.StatusGatewayTimeout:
+		code = codes.DeadlineExceeded
+	default:
+		code = codes.PermissionDenied
+	}
+	return status.Error(code, rej.Reason)
 }
 
 // rawCodec sends/receives raw bytes without protobuf.

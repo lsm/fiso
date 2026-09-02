@@ -285,3 +285,48 @@ func TestCall_PartialOutputOnError(t *testing.T) {
 		t.Errorf("expected partial data in output, got: %s", string(output))
 	}
 }
+
+// TestWazeroRuntime_RejectFixture rounds the rejection ABI through a real
+// guest: the module refuses an unauthenticated envelope with the typed 401
+// rejection, and passes an authorized one through enriched (ADR 0007).
+func TestWazeroRuntime_RejectFixture(t *testing.T) {
+	wasmPath := buildWASMModule(t, filepath.Join("testdata", "reject"))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read wasm: %v", err)
+	}
+
+	ctx := context.Background()
+	rt, err := NewWazeroRuntime(ctx, wasmBytes)
+	if err != nil {
+		t.Fatalf("new runtime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	ic := New(rt, "reject-fixture")
+
+	_, err = ic.Process(ctx, &interceptor.Request{
+		Payload:   []byte(`{"order_id":"abc"}`),
+		Headers:   map[string]string{},
+		Direction: interceptor.Inbound,
+	})
+	rej, ok := interceptor.AsRejection(err)
+	if !ok {
+		t.Fatalf("expected a typed rejection for the unauthenticated request, got %v", err)
+	}
+	if rej.Status != 401 || rej.Reason != "missing credentials" {
+		t.Fatalf("rejection = %+v, want 401 missing credentials", rej)
+	}
+
+	result, err := ic.Process(ctx, &interceptor.Request{
+		Payload:   []byte(`{"order_id":"abc"}`),
+		Headers:   map[string]string{"Authorization": "Bearer token"},
+		Direction: interceptor.Inbound,
+	})
+	if err != nil {
+		t.Fatalf("authorized request must pass: %v", err)
+	}
+	if result.Headers["X-Authenticated"] != "true" {
+		t.Fatalf("authorized request must carry the enrichment header, got %+v", result.Headers)
+	}
+}
