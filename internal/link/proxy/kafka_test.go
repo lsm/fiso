@@ -152,7 +152,7 @@ func TestKafkaHandler_ServeHTTP(t *testing.T) {
 				},
 			}
 
-			handler := NewKafkaHandler(publisher, store, breakers, rateLimiter, nil, nil)
+			handler := NewKafkaHandler(publisher, store, breakers, rateLimiter, nil, nil, nil)
 
 			// Create request
 			var req *http.Request
@@ -234,7 +234,7 @@ func TestGenerateKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			publisher := &mockPublisher{}
 			store := link.NewTargetStore(nil)
-			handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+			handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 
 			key, err := handler.generateKey(tt.strategy, tt.body, tt.headers)
 
@@ -281,7 +281,7 @@ func TestKafkaHandler_RetryLogic(t *testing.T) {
 		},
 	})
 
-	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/retry-test", bytes.NewReader([]byte(`{"test":"data"}`)))
 	w := httptest.NewRecorder()
@@ -323,7 +323,7 @@ func TestKafkaHandler_PublishFailureAfterRetries(t *testing.T) {
 		ResetTimeout:     1000 * time.Millisecond,
 	})
 
-	handler := NewKafkaHandler(publisher, store, breakers, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, breakers, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/fail-test", bytes.NewReader([]byte(`{"test":"data"}`)))
 	w := httptest.NewRecorder()
@@ -361,7 +361,7 @@ func TestKafkaHandler_StaticHeaders(t *testing.T) {
 		},
 	})
 
-	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/headers-test", bytes.NewReader([]byte(`{"test":"data"}`)))
 	req.Header.Set("X-Request-ID", "req-123")
@@ -385,7 +385,7 @@ func TestKafkaHandler_StaticHeaders(t *testing.T) {
 func TestKafkaHandler_EmptyTargetName(t *testing.T) {
 	publisher := &mockPublisher{}
 	store := link.NewTargetStore([]link.LinkTarget{})
-	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/", nil)
 	w := httptest.NewRecorder()
@@ -411,7 +411,7 @@ func TestKafkaHandler_InvalidJSON(t *testing.T) {
 			},
 		},
 	})
-	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/test-kafka", bytes.NewReader([]byte(`invalid json`)))
 	w := httptest.NewRecorder()
@@ -436,7 +436,7 @@ func TestKafkaHandler_UnknownKeyType(t *testing.T) {
 			},
 		},
 	})
-	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/test-kafka", bytes.NewReader([]byte(`{"test":"data"}`)))
 	w := httptest.NewRecorder()
@@ -468,7 +468,7 @@ func TestKafkaHandler_ContextCancellation(t *testing.T) {
 		},
 	})
 
-	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 
 	// Create request with short timeout context
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -500,7 +500,7 @@ func TestKafkaHandler_WithMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := link.NewMetrics(reg)
 
-	handler := NewKafkaHandler(publisher, store, nil, nil, metrics, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, metrics, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/metrics-test", bytes.NewReader([]byte(`{"test":"data"}`)))
 	w := httptest.NewRecorder()
@@ -534,7 +534,7 @@ func TestKafkaHandler_CircuitBreakerWithMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := link.NewMetrics(reg)
 
-	handler := NewKafkaHandler(publisher, store, breakers, nil, metrics, nil)
+	handler := NewKafkaHandler(publisher, store, breakers, nil, metrics, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/cb-test", bytes.NewReader([]byte(`{"test":"data"}`)))
 	w := httptest.NewRecorder()
@@ -563,7 +563,7 @@ func TestKafkaHandler_RateLimitWithMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := link.NewMetrics(reg)
 
-	handler := NewKafkaHandler(publisher, store, nil, rateLimiter, metrics, nil)
+	handler := NewKafkaHandler(publisher, store, nil, rateLimiter, metrics, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/rl-test", bytes.NewReader([]byte(`{"test":"data"}`)))
 	w := httptest.NewRecorder()
@@ -587,7 +587,7 @@ func TestKafkaHandler_ReadBodyError(t *testing.T) {
 
 	reg := prometheus.NewRegistry()
 	metrics := link.NewMetrics(reg)
-	handler := NewKafkaHandler(publisher, store, nil, nil, metrics, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, metrics, nil, nil)
 
 	// Create a reader that errors
 	req := httptest.NewRequest("POST", "/link/body-error-test", &errorReader{})
@@ -647,7 +647,7 @@ func TestKafkaHandler_DefaultTopic(t *testing.T) {
 		},
 	})
 
-	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/no-config", bytes.NewReader([]byte(`{"test":"data"}`)))
 	w := httptest.NewRecorder()
@@ -679,7 +679,7 @@ func TestKafkaHandler_CircuitBreakerRecordsSuccess(t *testing.T) {
 		ResetTimeout:     1000 * time.Millisecond,
 	})
 
-	handler := NewKafkaHandler(publisher, store, breakers, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, breakers, nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/cb-success", bytes.NewReader([]byte(`{"test":"data"}`)))
 	w := httptest.NewRecorder()
@@ -719,7 +719,7 @@ func TestKafkaHandler_PublishFailureWithMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := link.NewMetrics(reg)
 
-	handler := NewKafkaHandler(publisher, store, breakers, nil, metrics, nil)
+	handler := NewKafkaHandler(publisher, store, breakers, nil, metrics, nil, nil)
 
 	req := httptest.NewRequest("POST", "/link/fail-metrics", bytes.NewReader([]byte(`{"test":"data"}`)))
 	w := httptest.NewRecorder()
@@ -812,7 +812,7 @@ func TestKafkaHandler_GetPublisher_WithSinglePublisher(t *testing.T) {
 	})
 
 	publisher := &mockPublisher{}
-	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 
 	target := store.Get("test")
 	pub, err := handler.getPublisher(target)
@@ -848,7 +848,7 @@ func TestKafkaHandler_NewKafkaHandler_NilLogger(t *testing.T) {
 	store := link.NewTargetStore([]link.LinkTarget{})
 	publisher := &mockPublisher{}
 
-	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
 		return
@@ -975,7 +975,7 @@ func newKafkaRetryHandler(t *testing.T, target link.LinkTarget, publish func(att
 		},
 	}
 	store := link.NewTargetStore([]link.LinkTarget{target})
-	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil)
+	handler := NewKafkaHandler(publisher, store, nil, nil, nil, nil, nil)
 	return handler, &attempts, &times
 }
 

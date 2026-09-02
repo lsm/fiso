@@ -463,3 +463,18 @@ func TestHeaderConstants(t *testing.T) {
 		t.Errorf("expected traceparent, got %s", HeaderTraceparent)
 	}
 }
+
+// TestExtractOrGenerate_CanonicalHeaderCasing pins that net/http's
+// canonicalized header names (X-Correlation-Id from r.Header) resolve the
+// same as lowercase ones — rejection logs must carry the caller's ID, not a
+// freshly generated UUID (ADR 0007).
+func TestExtractOrGenerate_CanonicalHeaderCasing(t *testing.T) {
+	id := ExtractOrGenerate(map[string]string{"X-Correlation-Id": "corr-canonical-1"})
+	if id.Value != "corr-canonical-1" {
+		t.Fatalf("canonical-cased header must resolve, got %q (source %q)", id.Value, id.Source)
+	}
+	id = ExtractOrGenerate(map[string]string{"Fiso-Correlation-Id": "corr-canonical-2"})
+	if id.Value != "corr-canonical-2" {
+		t.Fatalf("canonical-cased fiso header must resolve, got %q", id.Value)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,19 +38,20 @@ type KafkaHandler struct {
 // Deprecated: Use NewKafkaHandlerWithPool for per-cluster publishing.
 func NewKafkaHandler(publisher dlq.Publisher, targets *link.TargetStore,
 	breakers map[string]*circuitbreaker.Breaker, rateLimiter *ratelimit.Limiter,
-	metrics *link.Metrics, logger *slog.Logger) *KafkaHandler {
+	metrics *link.Metrics, logger *slog.Logger, interceptors *linkinterceptor.Registry) *KafkaHandler {
 
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	return &KafkaHandler{
-		publisher:   publisher,
-		targets:     targets,
-		breakers:    breakers,
-		rateLimiter: rateLimiter,
-		metrics:     metrics,
-		logger:      logger,
+		publisher:    publisher,
+		targets:      targets,
+		breakers:     breakers,
+		rateLimiter:  rateLimiter,
+		metrics:      metrics,
+		logger:       logger,
+		interceptors: interceptors,
 	}
 }
 
@@ -165,8 +167,13 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Run outbound interceptors (before publishing to Kafka)
-	if h.interceptors != nil && len(body) > 0 {
+	// Resolve the correlation ID before interception so rejection verdicts
+	// — the primary record of a refused request — can be correlated.
+	corrID := correlation.ExtractOrGenerate(httpHeaders)
+
+	// Run outbound interceptors (before publishing to Kafka). Empty bodies
+	// run too, mirroring the HTTP proxy path (ADR 0007).
+	if h.interceptors != nil {
 		icReq := &interceptor.Request{
 			Payload:   body,
 			Headers:   httpHeaders,
@@ -175,6 +182,21 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		icResult, icErr := h.interceptors.ProcessOutbound(r.Context(), targetName, icReq)
 		if icErr != nil {
+			// A rejection answers with the guest-chosen status instead of a
+			// blanket 500 (ADR 0007).
+			if rej, ok := interceptor.AsRejection(icErr); ok {
+				h.logger.Warn("request rejected by outbound interceptor",
+					"target", targetName,
+					"correlation_id", corrID.Value,
+					"status", rej.Status,
+					"reason", rej.Reason,
+				)
+				if h.metrics != nil {
+					h.metrics.RequestsTotal.WithLabelValues(targetName, "POST", strconv.Itoa(rej.Status), "kafka").Inc()
+				}
+				http.Error(w, rej.Reason, rej.Status)
+				return
+			}
 			h.logger.Error("outbound interceptor error", "target", targetName, "error", icErr)
 			if h.metrics != nil {
 				h.metrics.RequestsTotal.WithLabelValues(targetName, "POST", "500", "kafka").Inc()
@@ -207,8 +229,9 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract correlation ID from headers
-	corrID := correlation.ExtractOrGenerate(kafkaHeaders)
+	// Extract correlation ID from headers (resolved before interception
+	// above; recompute against the final Kafka header set)
+	corrID = correlation.ExtractOrGenerate(kafkaHeaders)
 
 	// Generate key
 	keyStrategy := link.KeyStrategy{}

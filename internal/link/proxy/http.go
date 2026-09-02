@@ -100,7 +100,9 @@ func NewHandler(cfg Config) *Handler {
 			cfg.Interceptors,
 		)
 	} else if cfg.KafkaPublisher != nil {
-		// Backwards compatibility: single publisher
+		// Backwards compatibility: single publisher. Interceptors ride
+		// along here too — the transport choice must not bypass the
+		// interceptor chain (ADR 0007).
 		h.kafkaHandler = NewKafkaHandler(
 			cfg.KafkaPublisher,
 			cfg.Targets,
@@ -108,6 +110,7 @@ func NewHandler(cfg Config) *Handler {
 			cfg.RateLimiter,
 			cfg.Metrics,
 			cfg.Logger,
+			cfg.Interceptors,
 		)
 	}
 
@@ -237,8 +240,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = r.Body.Close()
 	}
 
-	// Run outbound interceptors (before upstream request)
-	if h.interceptors != nil && len(requestBody) > 0 {
+	// Run outbound interceptors (before upstream request). Bodyless
+	// requests run too — an authentication module must be able to refuse a
+	// GET, and the envelope carries a null payload for empty bodies
+	// (ADR 0007).
+	if h.interceptors != nil {
 		outboundHeaders := make(map[string]string)
 		for k, vv := range r.Header {
 			if len(vv) > 0 {
@@ -254,6 +260,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		icResult, icErr := h.interceptors.ProcessOutbound(ctx, targetName, icReq)
 		if icErr != nil {
+			// A rejection answers with the guest-chosen status instead of a
+			// blanket 500 (ADR 0007). Record it like any other request so
+			// authentication verdicts appear on the status dashboards.
+			if rej, ok := interceptor.AsRejection(icErr); ok {
+				h.logger.Warn("request rejected by outbound interceptor",
+					"target", targetName,
+					"correlation_id", corrID.Value,
+					"status", rej.Status,
+					"reason", rej.Reason,
+				)
+				span.SetAttributes(tracing.HTTPStatusAttr(rej.Status))
+				tracing.SetSpanError(span, rej)
+				h.recordSyncRequest(targetName, r.Method, strconv.Itoa(rej.Status), time.Since(start).Seconds())
+				// Emit the same completion record as the success path so
+				// rejections join correlation-aware request logs.
+				h.logger.Info("proxy request completed",
+					"correlation_id", corrID.Value,
+					"target", targetName,
+					"method", r.Method,
+					"status", rej.Status,
+					"latency_ms", time.Since(start).Milliseconds(),
+				)
+				http.Error(w, rej.Reason, rej.Status)
+				return
+			}
 			h.logger.Error("outbound interceptor error", "target", targetName, "error", icErr)
 			http.Error(w, "interceptor error", http.StatusInternalServerError)
 			return
@@ -290,6 +321,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	retryCfg := buildRetryConfig(target)
 
 	retryErr := retry.Do(ctx, retryCfg, func() error {
+		// A retried attempt must not leak its predecessor's body; drain it
+		// to EOF before closing so the keep-alive connection stays reusable,
+		// then issue the next request. The final attempt's body stays open
+		// so the error response can be forwarded — and seen by the inbound
+		// interceptors (ADR 0007).
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			resp = nil
+		}
 		req, reqErr := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(requestBody))
 		if reqErr != nil {
 			return retry.Permanent(reqErr)
@@ -331,8 +372,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
 			return fmt.Errorf("upstream returned %d", resp.StatusCode)
 		}
 		if resp.StatusCode >= 400 {
@@ -340,18 +379,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
-
-	// Record metrics
-	duration := time.Since(start).Seconds()
-	status := "error"
-	if resp != nil {
-		status = strconv.Itoa(resp.StatusCode)
-		span.SetAttributes(tracing.HTTPStatusAttr(resp.StatusCode))
-	}
-	if h.metrics != nil {
-		h.metrics.RequestsTotal.WithLabelValues(targetName, r.Method, status, "sync").Inc()
-		h.metrics.RequestDuration.WithLabelValues(targetName, r.Method).Observe(duration)
-	}
 
 	// Record circuit breaker outcome
 	if breaker, ok := h.breakers[targetName]; ok {
@@ -365,34 +392,101 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	duration := time.Since(start).Seconds()
+
 	if retryErr != nil {
 		tracing.SetSpanError(span, retryErr)
 		if resp != nil {
-			// Forward the error response from upstream
-			h.copyResponse(w, resp)
+			// Forward the error response from upstream. When the target has
+			// an inbound chain it routes through interception so a policy
+			// module can also refuse error bodies (ADR 0007); without one,
+			// stream the body through unbuffered rather than reading it all
+			// into memory just to discover there is nothing to process.
+			if h.hasInboundChain(targetName) {
+				finalStatus := h.copyResponseWithInterceptors(ctx, w, resp, targetName)
+				span.SetAttributes(tracing.HTTPStatusAttr(finalStatus))
+				h.recordSyncRequest(targetName, r.Method, strconv.Itoa(finalStatus), duration)
+				// The rejection verdict replaced the proxy-error record;
+				// keep the correlation-aware completion trail.
+				h.logger.Info("proxy request completed",
+					"correlation_id", corrID.Value,
+					"target", targetName,
+					"method", r.Method,
+					"status", finalStatus,
+					"latency_ms", time.Since(start).Milliseconds(),
+				)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			for k, vv := range resp.Header {
+				for _, v := range vv {
+					w.Header().Add(k, v)
+				}
+			}
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			span.SetAttributes(tracing.HTTPStatusAttr(resp.StatusCode))
+			h.recordSyncRequest(targetName, r.Method, strconv.Itoa(resp.StatusCode), duration)
 			return
 		}
-		h.logger.Error("proxy error", "target", targetName, "error", retryErr)
+		span.SetAttributes(tracing.HTTPStatusAttr(http.StatusBadGateway))
+		// Label with the 502 the caller actually receives — the status
+		// dashboards must count transport failures under the response code.
+		h.recordSyncRequest(targetName, r.Method, strconv.Itoa(http.StatusBadGateway), duration)
+		h.logger.Error("proxy error", "target", targetName, "correlation_id", corrID.Value, "error", retryErr)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
 
-	tracing.SetSpanOK(span)
+	// The final caller-visible status is only known after inbound
+	// interception: a guest can turn an upstream 200 into a 401 (ADR 0007),
+	// and metrics/tracing must report what the caller saw.
+	finalStatus := h.copyResponseWithInterceptors(ctx, w, resp, targetName)
+	span.SetAttributes(tracing.HTTPStatusAttr(finalStatus))
+	h.recordSyncRequest(targetName, r.Method, strconv.Itoa(finalStatus), duration)
+	if finalStatus >= 400 {
+		// A guest-refused or failed-to-forward response is not a successful
+		// hop, even when the upstream call itself succeeded.
+		tracing.SetSpanError(span, fmt.Errorf("final status %d", finalStatus))
+	} else {
+		tracing.SetSpanOK(span)
+	}
 
 	// Log successful proxy request
 	h.logger.Info("proxy request completed",
 		"correlation_id", corrID.Value,
 		"target", targetName,
 		"method", r.Method,
-		"status", resp.StatusCode,
+		"status", finalStatus,
 		"latency_ms", time.Since(start).Milliseconds(),
 	)
-
-	h.copyResponseWithInterceptors(ctx, w, resp, targetName)
 }
 
-// copyResponseWithInterceptors copies the response to the writer, optionally running inbound interceptors.
-func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.ResponseWriter, resp *http.Response, targetName string) {
+// recordSyncRequest records the request counter and duration for the
+// synchronous HTTP path. status is the status label; pass "error" when no
+// response exists.
+func (h *Handler) recordSyncRequest(targetName, method, status string, durationSeconds float64) {
+	if h.metrics == nil {
+		return
+	}
+	h.metrics.RequestsTotal.WithLabelValues(targetName, method, status, "sync").Inc()
+	h.metrics.RequestDuration.WithLabelValues(targetName, method).Observe(durationSeconds)
+}
+
+// hasInboundChain reports whether the target has inbound interceptors that
+// response forwarding must route through.
+func (h *Handler) hasInboundChain(targetName string) bool {
+	if h.interceptors == nil {
+		return false
+	}
+	chains := h.interceptors.GetChains(targetName)
+	return chains != nil && chains.Inbound != nil && chains.Inbound.Len() > 0
+}
+
+// copyResponseWithInterceptors copies the response to the writer, optionally
+// running inbound interceptors, and returns the final caller-visible status:
+// the upstream's, or the guest's when an inbound interceptor rewrites it.
+func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.ResponseWriter, resp *http.Response, targetName string) int {
 	defer func() { _ = resp.Body.Close() }()
 
 	// Read response body
@@ -400,7 +494,7 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 	if err != nil {
 		h.logger.Error("read response body error", "target", targetName, "error", err)
 		http.Error(w, "failed to read response", http.StatusInternalServerError)
-		return
+		return http.StatusInternalServerError
 	}
 
 	// Run inbound interceptors (after upstream response)
@@ -420,9 +514,20 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 
 		icResult, icErr := h.interceptors.ProcessInbound(ctx, targetName, icReq)
 		if icErr != nil {
+			// A rejection answers with the guest-chosen status instead of a
+			// blanket 500 (ADR 0007).
+			if rej, ok := interceptor.AsRejection(icErr); ok {
+				h.logger.Warn("response rejected by inbound interceptor",
+					"target", targetName,
+					"status", rej.Status,
+					"reason", rej.Reason,
+				)
+				http.Error(w, rej.Reason, rej.Status)
+				return rej.Status
+			}
 			h.logger.Error("inbound interceptor error", "target", targetName, "error", icErr)
 			http.Error(w, "interceptor error", http.StatusInternalServerError)
-			return
+			return http.StatusInternalServerError
 		}
 
 		responseBody = icResult.Payload
@@ -432,7 +537,16 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 		}
 	}
 
-	// Copy headers
+	// Copy headers. The body's length is what we have now — interception
+	// may have changed it — so recompute Content-Length instead of
+	// forwarding the upstream's declaration (a mismatched length makes
+	// net/http reject larger bodies as exceeding the declared length and
+	// delivers smaller ones with an unexpected EOF). HEAD is exempt: its
+	// empty body carries no length of its own, and the advertised length
+	// describes the GET representation clients are inspecting.
+	if resp.Request == nil || resp.Request.Method != http.MethodHead {
+		resp.Header.Set("Content-Length", strconv.Itoa(len(responseBody)))
+	}
 	for k, vv := range resp.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
@@ -440,17 +554,7 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(responseBody)
-}
-
-func (h *Handler) copyResponse(w http.ResponseWriter, resp *http.Response) {
-	defer func() { _ = resp.Body.Close() }()
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	return resp.StatusCode
 }
 
 func (h *Handler) isPathAllowed(target *link.LinkTarget, reqPath string) bool {

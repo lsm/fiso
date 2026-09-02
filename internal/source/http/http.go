@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/lsm/fiso/internal/correlation"
+	"github.com/lsm/fiso/internal/interceptor"
 	"github.com/lsm/fiso/internal/source"
 )
 
@@ -90,6 +91,17 @@ func (s *Source) Start(ctx context.Context, handler func(context.Context, source
 		)
 
 		if err := handler(ctx, evt); err != nil {
+			// A typed rejection answers with the guest-chosen status; every
+			// other error remains a blanket 500 (ADR 0007).
+			if rej, ok := interceptor.AsRejection(err); ok {
+				s.logger.Warn("event rejected",
+					"status", rej.Status,
+					"reason", rej.Reason,
+					"correlation_id", evt.CorrelationID,
+				)
+				http.Error(w, rej.Reason, rej.Status)
+				return
+			}
 			s.logger.Error("handler error", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

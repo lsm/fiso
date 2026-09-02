@@ -59,6 +59,10 @@ func main() {
 			"raw": string(req.Payload),
 		}
 	}
+	// A bodyless request arrives as a null payload; tolerate it.
+	if data == nil {
+		data = map[string]interface{}{}
+	}
 
 	// Add interception metadata
 	data["intercepted"] = true

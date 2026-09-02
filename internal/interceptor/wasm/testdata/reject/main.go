@@ -6,6 +6,11 @@ import (
 	"os"
 )
 
+// Test module for the rejection ABI (ADR 0007): it refuses any request whose
+// headers carry no Authorization, answering with the reject object; an
+// authorized request passes through enriched. This is the shape of a real
+// guest-side authentication module.
+
 type wasmInput struct {
 	Payload   json.RawMessage   `json:"payload"`
 	Headers   map[string]string `json:"headers"`
@@ -15,6 +20,12 @@ type wasmInput struct {
 type wasmOutput struct {
 	Payload interface{}       `json:"payload"`
 	Headers map[string]string `json:"headers"`
+	Reject  *wasmRejection    `json:"reject,omitempty"`
+}
+
+type wasmRejection struct {
+	Status int    `json:"status"`
+	Reason string `json:"reason"`
 }
 
 func main() {
@@ -47,6 +58,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	auth, authorized := req.Headers["Authorization"]
+	if !authorized || auth == "" {
+		_ = json.NewEncoder(os.Stdout).Encode(wasmOutput{
+			Reject: &wasmRejection{Status: 401, Reason: "missing credentials"},
+		})
+		return
+	}
+
 	var data map[string]interface{}
 	if err := json.Unmarshal(req.Payload, &data); err != nil {
 		os.Exit(1)
@@ -55,19 +74,15 @@ func main() {
 	if data == nil {
 		data = map[string]interface{}{}
 	}
-	data["wasm_enriched"] = true
+	data["authenticated"] = true
 
 	if req.Headers == nil {
 		req.Headers = make(map[string]string)
 	}
-	req.Headers["X-WASM-Processed"] = "true"
+	req.Headers["X-Authenticated"] = "true"
 
-	output := wasmOutput{
+	_ = json.NewEncoder(os.Stdout).Encode(wasmOutput{
 		Payload: data,
 		Headers: req.Headers,
-	}
-
-	if err := json.NewEncoder(os.Stdout).Encode(output); err != nil {
-		os.Exit(1)
-	}
+	})
 }

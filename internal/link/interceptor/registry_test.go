@@ -1047,3 +1047,73 @@ func TestRegistry_CreateInterceptor_Index(t *testing.T) {
 		t.Errorf("expected error to contain index 5, got: %v", err)
 	}
 }
+
+// TestInterceptorWrapper_Rejection_FailOpenStillRejects pins the failOpen
+// exemption: a rejection is a deliberate refusal, not a failure — failOpen
+// must not downgrade it to pass-through (ADR 0007).
+func TestInterceptorWrapper_Rejection_FailOpenStillRejects(t *testing.T) {
+	metrics := &mockMetricsRecorder{}
+
+	wrapper := &InterceptorWrapper{
+		Interceptor: &mockInterceptor{
+			processFunc: func(ctx context.Context, req *interceptor.Request) (*interceptor.Request, error) {
+				return nil, &interceptor.RejectedError{Status: 403, Reason: "forbidden"}
+			},
+		},
+		module:   "auth.wasm",
+		failOpen: true,
+		metrics:  metrics,
+	}
+
+	req := &interceptor.Request{
+		Payload:   []byte(`original`),
+		Headers:   map[string]string{},
+		Direction: interceptor.Outbound,
+	}
+
+	result, err := wrapper.Process(context.Background(), req)
+	rej, ok := interceptor.AsRejection(err)
+	if !ok {
+		t.Fatalf("expected the rejection to survive failOpen, got %v", err)
+	}
+	if rej.Status != 403 {
+		t.Fatalf("status = %d, want 403", rej.Status)
+	}
+	if result != nil {
+		t.Fatalf("a rejected request must not continue to the target, got %+v", result)
+	}
+}
+
+// TestInterceptorWrapper_Rejection_NotAnInterceptorError pins the metric
+// semantics: a deliberate refusal is the module doing its job, not an
+// interceptor error — the errors counter must not grow on normal 401/403
+// policy verdicts (ADR 0007).
+func TestInterceptorWrapper_Rejection_NotAnInterceptorError(t *testing.T) {
+	metrics := &mockMetricsRecorder{}
+
+	wrapper := &InterceptorWrapper{
+		Interceptor: &mockInterceptor{
+			processFunc: func(ctx context.Context, req *interceptor.Request) (*interceptor.Request, error) {
+				return nil, &interceptor.RejectedError{Status: 401, Reason: "missing credentials"}
+			},
+		},
+		module:   "auth.wasm",
+		failOpen: false,
+		metrics:  metrics,
+	}
+
+	_, err := wrapper.Process(context.Background(), &interceptor.Request{
+		Payload:   []byte(`{}`),
+		Headers:   map[string]string{},
+		Direction: interceptor.Outbound,
+	})
+	if _, ok := interceptor.AsRejection(err); !ok {
+		t.Fatalf("expected the rejection, got %v", err)
+	}
+	if len(metrics.invocations) != 1 {
+		t.Fatalf("expected 1 invocation, got %d", len(metrics.invocations))
+	}
+	if !metrics.invocations[0].success {
+		t.Fatal("a rejection verdict must not be recorded as an interceptor error (success=false)")
+	}
+}
