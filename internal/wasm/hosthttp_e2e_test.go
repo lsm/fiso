@@ -265,3 +265,27 @@ func runGuestLenient(t *testing.T, rt *WazeroRuntime, env map[string]string, pay
 	})
 	_, _ = rt.CallWithEnv(context.Background(), input, env)
 }
+
+// TestHTTPCallGuest_BadResponsePointer pins that an invalid response
+// buffer is rejected before the upstream call (no wasted network op).
+func TestHTTPCallGuest_BadResponsePointer(t *testing.T) {
+	requests := 0
+	link := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+	}))
+	defer link.Close()
+	rt, err := NewWazeroRuntimeWithHTTP(context.Background(), buildHTTPCallModule(t), HostHTTPConfig{
+		LinkAddr: link.URL, AllowedTargets: []string{"enrich-api"}, Client: link.Client(),
+	})
+	if err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// badresp mode: pass a wildly out-of-range response pointer.
+	input, _ := json.Marshal(guestEnvelope{Payload: json.RawMessage(`{}`), Headers: map[string]string{}, Direction: "inbound"})
+	_, _ = rt.CallWithEnv(context.Background(), input, map[string]string{"FISO_TEST_MODE": "badresp"})
+	if requests != 0 {
+		t.Fatalf("call with an invalid response buffer reached the network: %d requests", requests)
+	}
+}

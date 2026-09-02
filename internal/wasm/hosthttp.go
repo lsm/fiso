@@ -269,6 +269,15 @@ func hostHTTPExport(b wazero.HostModuleBuilder, client *hostHTTPClient) {
 			if !ok {
 				return HostErrInvalidRequest
 			}
+			// Validate the response range up front: discovering an
+			// unwritable buffer only after the upstream call completed would
+			// return a buffer error for an operation that already happened.
+			if respCap > 0 && !mem.Write(respPtr, nil) {
+				return HostErrBufferSize
+			}
+			if respCap == 0 && respPtr != 0 {
+				return HostErrBufferSize
+			}
 			var req hostHTTPRequest
 			if err := json.Unmarshal(reqBytes, &req); err != nil {
 				return HostErrInvalidRequest

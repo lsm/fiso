@@ -1963,3 +1963,25 @@ interceptors:
 		t.Fatalf("expected parse failure to name its file, got %v", err)
 	}
 }
+
+// TestFlowDefinition_ValidateLinkAddrEmptyDelimiters pins that trailing ?
+// and # with empty values are still rejected (url.Parse reports empty
+// RawQuery/Fragment but sets ForceQuery / keeps the raw character).
+func TestFlowDefinition_ValidateLinkAddrEmptyDelimiters(t *testing.T) {
+	for _, addr := range []string{"http://link:3500?", "http://link:3500#", "http://link:3500/?"} {
+		flow := FlowDefinition{
+			Name:   "t",
+			Source: SourceConfig{Type: "http"},
+			Sink:   SinkConfig{Type: "http"},
+			Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+				"module":      "m.wasm",
+				"http":        true,
+				"httpTargets": []interface{}{"a"},
+				"linkAddr":    addr,
+			}}},
+		}
+		if err := flow.Validate(); err == nil {
+			t.Errorf("linkAddr %q must be rejected", addr)
+		}
+	}
+}

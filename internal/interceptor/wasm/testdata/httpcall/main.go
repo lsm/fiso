@@ -31,6 +31,8 @@ type callResponse struct {
 	BodyB64 string            `json:"bodyB64,omitempty"`
 }
 
+var badPtr bool
+
 func main() {
 	input, _ := readAllStdin()
 	var env envelope
@@ -60,6 +62,11 @@ func main() {
 		cr := callRequest{Target: "enrich-api", Path: "/../secret"}
 		b, _ := json.Marshal(cr)
 		reqBuf = b
+	case "badresp":
+		cr := callRequest{Target: "enrich-api", Path: "/x"}
+		b, _ := json.Marshal(cr)
+		reqBuf = b
+		badPtr = true
 	case "emptytarget":
 		cr := callRequest{}
 		b, _ := json.Marshal(cr)
@@ -71,11 +78,16 @@ func main() {
 		reqBuf = b
 	}
 
+	respPtr := uintptr(unsafe.Pointer(&respBuf[0]))
+	respCap := uint32(len(respBuf))
+	if badPtr {
+		respPtr = 0xFFFF0000 // far out of linear memory
+	}
 	n := http_call(
 		uint32(uintptr(unsafe.Pointer(&reqBuf[0]))),
 		uint32(len(reqBuf)),
-		uint32(uintptr(unsafe.Pointer(&respBuf[0]))),
-		uint32(len(respBuf)),
+		uint32(respPtr),
+		respCap,
 	)
 	if n < 0 {
 		// Surface the host error code through the output headers so the

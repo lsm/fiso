@@ -155,7 +155,7 @@ func (f *FlowDefinition) Validate() error {
 						linkAddr, isStr := la.(string)
 						if !isStr || linkAddr == "" {
 							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr must be an absolute http(s) origin string", i))
-						} else if u, err := url.Parse(linkAddr); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" {
+						} else if u, err := url.Parse(linkAddr); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.ForceQuery || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(linkAddr, "?#") || (u.Path != "" && u.Path != "/") {
 							// A path/query/fragment on linkAddr would be
 							// silently dropped or miscomposed into the
 							// /link/{target}{path} URL.
