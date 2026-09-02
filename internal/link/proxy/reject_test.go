@@ -607,3 +607,129 @@ func TestProxy_ErrorResponse_StreamsWithoutInboundChain(t *testing.T) {
 		t.Fatalf("expected the 502 recorded once, got %v", got)
 	}
 }
+
+// TestProxy_OutboundRejection_EmitsCompletionLog pins that an outbound
+// rejection emits the same correlation-aware "proxy request completed"
+// record as the success path, so verdicts join request logs (ADR 0007).
+func TestProxy_OutboundRejection_EmitsCompletionLog(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     host,
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	handler := NewHandler(Config{
+		Targets:      store,
+		Metrics:      link.NewMetrics(prometheus.NewRegistry()),
+		Interceptors: icRegistry,
+		Logger:       logger,
+	})
+
+	req := httptest.NewRequest("GET", "/link/svc/x", nil)
+	req.Header.Set("x-correlation-id", "corr-outbound-9")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "proxy request completed") {
+		t.Fatalf("the rejection must emit the completion record, got:\n%s", logs)
+	}
+	if !strings.Contains(logs, "corr-outbound-9") {
+		t.Fatalf("the completion record must carry the correlation ID, got:\n%s", logs)
+	}
+}
+
+// TestProxy_KafkaRejection_LogsCorrelationID pins that the kafka publish
+// proxy's rejection verdict carries the resolved correlation ID (ADR 0007).
+func TestProxy_KafkaRejection_LogsCorrelationID(t *testing.T) {
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "events",
+			Protocol: "kafka",
+			Kafka:    &link.KafkaConfig{Cluster: "local", Topic: "events"},
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	handler := NewKafkaHandlerWithInterceptors(
+		kafka.NewPublisherPool(kafka.NewRegistry()),
+		store,
+		nil,
+		nil,
+		link.NewMetrics(prometheus.NewRegistry()),
+		logger,
+		icRegistry,
+	)
+
+	req := httptest.NewRequest("POST", "/link/events", strings.NewReader(`{"msg":1}`))
+	req.Header.Set("x-correlation-id", "corr-kafka-7")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+	if !strings.Contains(buf.String(), "corr-kafka-7") {
+		t.Fatalf("the kafka rejection verdict must carry the correlation ID, got:\n%s", buf.String())
+	}
+}
+
+// TestProxy_TransportFailure_LabeledWithReturnedStatus pins that a total
+// transport failure (connection refused) is counted under the 502 the caller
+// receives, not a generic "error" label (ADR 0007 observability).
+func TestProxy_TransportFailure_LabeledWithReturnedStatus(t *testing.T) {
+	store := link.NewTargetStore([]link.LinkTarget{
+		{Name: "svc", Protocol: "http", Host: "127.0.0.1:1", Retry: link.RetryConfig{MaxAttempts: 1}},
+	})
+	metrics := link.NewMetrics(prometheus.NewRegistry())
+	handler := NewHandler(Config{Targets: store, Metrics: metrics})
+
+	req := httptest.NewRequest("POST", "/link/svc/x", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", w.Code)
+	}
+	if got := rejectionCount(t, metrics, "svc", "POST", "502"); got != 1 {
+		t.Fatalf("expected the 502 recorded once, got %v", got)
+	}
+	if got := rejectionCount(t, metrics, "svc", "POST", "error"); got != 0 {
+		t.Fatalf("the generic error label must not be used, got %v", got)
+	}
+}

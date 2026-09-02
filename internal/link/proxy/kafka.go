@@ -166,6 +166,10 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Resolve the correlation ID before interception so rejection verdicts
+	// — the primary record of a refused request — can be correlated.
+	corrID := correlation.ExtractOrGenerate(httpHeaders)
+
 	// Run outbound interceptors (before publishing to Kafka). Empty bodies
 	// run too, mirroring the HTTP proxy path (ADR 0007).
 	if h.interceptors != nil {
@@ -182,6 +186,7 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if rej, ok := interceptor.AsRejection(icErr); ok {
 				h.logger.Warn("request rejected by outbound interceptor",
 					"target", targetName,
+					"correlation_id", corrID.Value,
 					"status", rej.Status,
 					"reason", rej.Reason,
 				)
@@ -223,8 +228,9 @@ func (h *KafkaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract correlation ID from headers
-	corrID := correlation.ExtractOrGenerate(kafkaHeaders)
+	// Extract correlation ID from headers (resolved before interception
+	// above; recompute against the final Kafka header set)
+	corrID = correlation.ExtractOrGenerate(kafkaHeaders)
 
 	// Generate key
 	keyStrategy := link.KeyStrategy{}

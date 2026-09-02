@@ -263,12 +263,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if rej, ok := interceptor.AsRejection(icErr); ok {
 				h.logger.Warn("request rejected by outbound interceptor",
 					"target", targetName,
+					"correlation_id", corrID.Value,
 					"status", rej.Status,
 					"reason", rej.Reason,
 				)
 				span.SetAttributes(tracing.HTTPStatusAttr(rej.Status))
 				tracing.SetSpanError(span, rej)
 				h.recordSyncRequest(targetName, r.Method, strconv.Itoa(rej.Status), time.Since(start).Seconds())
+				// Emit the same completion record as the success path so
+				// rejections join correlation-aware request logs.
+				h.logger.Info("proxy request completed",
+					"correlation_id", corrID.Value,
+					"target", targetName,
+					"method", r.Method,
+					"status", rej.Status,
+					"latency_ms", time.Since(start).Milliseconds(),
+				)
 				http.Error(w, rej.Reason, rej.Status)
 				return
 			}
@@ -408,7 +418,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		span.SetAttributes(tracing.HTTPStatusAttr(http.StatusBadGateway))
-		h.recordSyncRequest(targetName, r.Method, "error", duration)
+		// Label with the 502 the caller actually receives — the status
+		// dashboards must count transport failures under the response code.
+		h.recordSyncRequest(targetName, r.Method, strconv.Itoa(http.StatusBadGateway), duration)
 		h.logger.Error("proxy error", "target", targetName, "error", retryErr)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return

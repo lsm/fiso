@@ -22,7 +22,7 @@ const (
 
 // wasmB64Payload is the lossless carrier for binary payloads: JSON strings
 // cannot hold invalid UTF-8 without corruption, so arbitrary bytes travel
-// base64-encoded instead.
+// base64-encoded inside a {"fisoB64": "..."} object instead.
 type wasmB64Payload struct {
 	B64 string `json:"fisoB64"`
 }
@@ -146,10 +146,18 @@ func (i *Interceptor) Process(ctx context.Context, req *interceptor.Request) (*i
 			output.Payload = []byte(s)
 		}
 	case wrapBase64:
-		var wrapped wasmB64Payload
-		if err := json.Unmarshal(output.Payload, &wrapped); err == nil && wrapped.B64 != "" {
-			if raw, err := base64.StdEncoding.DecodeString(wrapped.B64); err == nil {
-				output.Payload = raw
+		// Field presence (not non-emptiness) selects the unwrap: a guest
+		// that deliberately empties a binary payload returns
+		// {"fisoB64":""}, which decodes to zero bytes.
+		var probe map[string]json.RawMessage
+		if err := json.Unmarshal(output.Payload, &probe); err == nil {
+			if rawField, present := probe["fisoB64"]; present {
+				var b64 string
+				if err := json.Unmarshal(rawField, &b64); err == nil {
+					if raw, err := base64.StdEncoding.DecodeString(b64); err == nil {
+						output.Payload = raw
+					}
+				}
 			}
 		}
 	}

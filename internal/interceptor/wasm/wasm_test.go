@@ -350,3 +350,26 @@ func (e *echoRuntime) Call(_ context.Context, input []byte) ([]byte, error) {
 }
 
 func (e *echoRuntime) Close() error { return nil }
+
+// TestWASMInterceptor_BinaryPayload_EmptyB64DecodesToEmpty pins that a guest
+// deliberately emptying a binary payload ({"fisoB64":""}) yields an empty
+// body, not the literal wrapper JSON (ADR 0007).
+func TestWASMInterceptor_BinaryPayload_EmptyB64DecodesToEmpty(t *testing.T) {
+	resp, _ := json.Marshal(wasmOutput{
+		Payload: json.RawMessage(`{"fisoB64":""}`),
+	})
+	mr := &mockRuntime{response: resp}
+	ic := New(mr, "policy")
+
+	result, err := ic.Process(context.Background(), &interceptor.Request{
+		Payload:   []byte{0xff, 0x00, 0x80},
+		Headers:   map[string]string{},
+		Direction: interceptor.Inbound,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Payload) != 0 {
+		t.Fatalf("an emptied binary payload must decode to an empty body, got %q", result.Payload)
+	}
+}
