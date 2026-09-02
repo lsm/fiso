@@ -107,9 +107,12 @@ sink:
     url: http://backend:8080
 ```
 
-Only `module` and `runtime` are honored for interceptors today. Other keys
-present in older documentation (`timeout`, `memoryLimit`, `env`, `preopens`)
-are not applied by the Flow binaries and should not be relied on.
+The Flow binaries honor `module`, `runtime`, and — when the module opts in
+to the host HTTP capability — `http: true` with a `httpTargets` allowlist
+and an optional `linkAddr` (see the README's WASM section and ADR 0006;
+wazero runtime only). Keys present in older documentation (`timeout`,
+`memoryLimit`, `env`, `preopens`) are not applied and should not be relied
+on.
 
 ### App Configuration
 

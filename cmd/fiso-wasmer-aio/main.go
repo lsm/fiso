@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -258,9 +259,16 @@ func run() error {
 				Handler: proxyMux,
 			}
 
+			// Bind synchronously: HTTP-enabled interceptors call into this
+			// listener through the default linkAddr, and a goroutine-bound
+			// listener would race the first guest call.
+			ln, err := net.Listen("tcp", linkCfg.ListenAddr)
+			if err != nil {
+				return fmt.Errorf("link listen: %w", err)
+			}
 			go func() {
-				logger.Info("link server starting", "addr", linkCfg.ListenAddr)
-				if err := linkServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Info("link server starting", "addr", ln.Addr().String())
+				if err := linkServer.Serve(ln); err != nil && err != http.ErrServerClosed {
 					logger.Error("link server error", "error", err)
 				}
 			}()
