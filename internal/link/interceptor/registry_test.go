@@ -1047,3 +1047,39 @@ func TestRegistry_CreateInterceptor_Index(t *testing.T) {
 		t.Errorf("expected error to contain index 5, got: %v", err)
 	}
 }
+
+// TestInterceptorWrapper_Rejection_FailOpenStillRejects pins the failOpen
+// exemption: a rejection is a deliberate refusal, not a failure — failOpen
+// must not downgrade it to pass-through (ADR 0007).
+func TestInterceptorWrapper_Rejection_FailOpenStillRejects(t *testing.T) {
+	metrics := &mockMetricsRecorder{}
+
+	wrapper := &InterceptorWrapper{
+		Interceptor: &mockInterceptor{
+			processFunc: func(ctx context.Context, req *interceptor.Request) (*interceptor.Request, error) {
+				return nil, &interceptor.RejectedError{Status: 403, Reason: "forbidden"}
+			},
+		},
+		module:   "auth.wasm",
+		failOpen: true,
+		metrics:  metrics,
+	}
+
+	req := &interceptor.Request{
+		Payload:   []byte(`original`),
+		Headers:   map[string]string{},
+		Direction: interceptor.Outbound,
+	}
+
+	result, err := wrapper.Process(context.Background(), req)
+	rej, ok := interceptor.AsRejection(err)
+	if !ok {
+		t.Fatalf("expected the rejection to survive failOpen, got %v", err)
+	}
+	if rej.Status != 403 {
+		t.Fatalf("status = %d, want 403", rej.Status)
+	}
+	if result != nil {
+		t.Fatalf("a rejected request must not continue to the target, got %+v", result)
+	}
+}

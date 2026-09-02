@@ -35,9 +35,16 @@ type wasmInput struct {
 	Direction string            `json:"direction"`
 }
 
+// wasmRejection is the guest's refusal verdict in the output ABI (ADR 0007).
+type wasmRejection struct {
+	Status int    `json:"status"`
+	Reason string `json:"reason"`
+}
+
 type wasmOutput struct {
 	Payload json.RawMessage   `json:"payload"`
 	Headers map[string]string `json:"headers"`
+	Reject  *wasmRejection    `json:"reject,omitempty"`
 }
 
 // Process invokes the WASM module to process the request.
