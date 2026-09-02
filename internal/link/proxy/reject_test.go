@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -731,5 +732,117 @@ func TestProxy_TransportFailure_LabeledWithReturnedStatus(t *testing.T) {
 	}
 	if got := rejectionCount(t, metrics, "svc", "POST", "error"); got != 0 {
 		t.Fatalf("the generic error label must not be used, got %v", got)
+	}
+}
+
+// TestProxy_InterceptedResponse_ContentLengthMatchesBody pins that an
+// inbound interceptor resizing a response body does not forward the stale
+// upstream Content-Length: a mismatched declaration makes net/http reject
+// larger bodies and delivers smaller ones with an unexpected EOF.
+func TestProxy_InterceptedResponse_ContentLengthMatchesBody(t *testing.T) {
+	// The upstream echoes the request's Authorization onto the response so
+	// the fixture's inbound module takes its authorized (transforming) path.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Authorization", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"e":1}`))
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     host,
+			Retry:    link.RetryConfig{MaxAttempts: 1},
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module, "phase": "inbound"}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	var buf bytes.Buffer
+	handler := NewHandler(Config{
+		Targets:      store,
+		Metrics:      link.NewMetrics(prometheus.NewRegistry()),
+		Interceptors: icRegistry,
+		Logger:       slog.New(slog.NewTextHandler(&buf, nil)),
+	})
+
+	req := httptest.NewRequest("POST", "/link/svc/x", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %q)", w.Code, w.Body.String())
+	}
+	if got, want := w.Header().Get("Content-Length"), strconv.Itoa(w.Body.Len()); got != want {
+		t.Fatalf("Content-Length = %q, want %q (the intercepted body's length)", got, want)
+	}
+}
+
+// TestProxy_RejectedUpstreamError_EmitsCompletionLog pins the error-path
+// rejection trail: a guest refusing an upstream error response still emits
+// the correlation-aware completion record (ADR 0007).
+func TestProxy_RejectedUpstreamError_EmitsCompletionLog(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     host,
+			Retry:    link.RetryConfig{MaxAttempts: 1},
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module, "phase": "inbound"}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	var buf bytes.Buffer
+	handler := NewHandler(Config{
+		Targets:      store,
+		Metrics:      link.NewMetrics(prometheus.NewRegistry()),
+		Interceptors: icRegistry,
+		Logger:       slog.New(slog.NewTextHandler(&buf, nil)),
+	})
+
+	req := httptest.NewRequest("POST", "/link/svc/x", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("x-correlation-id", "corr-errpath-3")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "proxy request completed") {
+		t.Fatalf("the rejected error response must emit the completion record, got:\n%s", logs)
+	}
+	if !strings.Contains(logs, "corr-errpath-3") {
+		t.Fatalf("the completion record must carry the correlation ID, got:\n%s", logs)
 	}
 }

@@ -403,6 +403,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				finalStatus := h.copyResponseWithInterceptors(ctx, w, resp, targetName)
 				span.SetAttributes(tracing.HTTPStatusAttr(finalStatus))
 				h.recordSyncRequest(targetName, r.Method, strconv.Itoa(finalStatus), duration)
+				// The rejection verdict replaced the proxy-error record;
+				// keep the correlation-aware completion trail.
+				h.logger.Info("proxy request completed",
+					"correlation_id", corrID.Value,
+					"target", targetName,
+					"method", r.Method,
+					"status", finalStatus,
+					"latency_ms", time.Since(start).Milliseconds(),
+				)
 				return
 			}
 			defer func() { _ = resp.Body.Close() }()
@@ -421,7 +430,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Label with the 502 the caller actually receives — the status
 		// dashboards must count transport failures under the response code.
 		h.recordSyncRequest(targetName, r.Method, strconv.Itoa(http.StatusBadGateway), duration)
-		h.logger.Error("proxy error", "target", targetName, "error", retryErr)
+		h.logger.Error("proxy error", "target", targetName, "correlation_id", corrID.Value, "error", retryErr)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
@@ -525,7 +534,12 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 		}
 	}
 
-	// Copy headers
+	// Copy headers. The body's length is what we have now — interception
+	// may have changed it — so recompute Content-Length instead of
+	// forwarding the upstream's declaration (a mismatched length makes
+	// net/http reject larger bodies as exceeding the declared length and
+	// delivers smaller ones with an unexpected EOF).
+	resp.Header.Set("Content-Length", strconv.Itoa(len(responseBody)))
 	for k, vv := range resp.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
