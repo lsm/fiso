@@ -96,17 +96,19 @@ func sanitizePath(path string) (string, error) {
 	if !strings.HasPrefix(path, "/") {
 		return "", fmt.Errorf("path must be absolute")
 	}
-	// Check both the raw and the percent-decoded forms: Go's HTTP client
-	// decodes the path before mux routing, so /api/%2e%2e/admin is a
-	// traversal even though no literal ".." segment appears.
-	decoded, err := url.PathUnescape(path)
-	if err != nil {
-		return "", fmt.Errorf("path is not validly percent-encoded")
-	}
-	for _, candidate := range []string{path, decoded} {
-		if strings.Contains(candidate, "%2f") || strings.Contains(candidate, "%2F") || strings.Contains(candidate, "%25") {
-			return "", fmt.Errorf("encoded slashes or percent signs are not allowed in path")
+	// The path must be plain printable ASCII without any percent-encoding:
+	// Go's client decodes before mux routing (so /api/%2e%2e/admin is a
+	// traversal), Link authorizes the decoded path (so %23/%3F become
+	// delimiters it reinterprets), and control characters break request
+	// construction. Guests send unencoded segments only.
+	for i := 0; i < len(path); i++ {
+		c := path[i]
+		if c < 0x21 || c > 0x7e || c == '%' {
+			return "", fmt.Errorf("path must contain only printable ASCII without percent-encoding")
 		}
+	}
+	candidate := path
+	{
 		segs := strings.Split(candidate, "/")
 		for i, seg := range segs {
 			if seg == ".." || seg == "." {

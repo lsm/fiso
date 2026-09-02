@@ -327,3 +327,22 @@ func TestHostHTTP_EmptyPathSegmentsRejected(t *testing.T) {
 		t.Errorf("the structural root path must be accepted: %v", err)
 	}
 }
+
+// TestHostHTTP_ControlCharactersRejected pins the printable-ASCII rule.
+func TestHostHTTP_ControlCharactersRejected(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Path: "/api\nadmin"}); err == nil {
+		t.Error("control character in path must be rejected")
+	}
+}
+
+// TestHostHTTP_AnyPercentEncodingRejected pins that encoded delimiters
+// (%23, %3F) are rejected before Link can reinterpret them decoded.
+func TestHostHTTP_AnyPercentEncodingRejected(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	for _, path := range []string{"/a%23b", "/a%3Fb", "/a%2fb", "/api/%2e%2e/admin"} {
+		if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Path: path}); err == nil {
+			t.Errorf("path %q must be rejected", path)
+		}
+	}
+}

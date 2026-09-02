@@ -145,7 +145,7 @@ func (f *FlowDefinition) Validate() error {
 						// A target is a single URL path segment: route syntax
 						// (slashes, dots, query) would compose into the
 						// /link/{target}{path} URL unsafely.
-						if !isStr || name == "" || strings.ContainsAny(name, "/?#") || strings.Contains(name, "..") || name != url.PathEscape(name) {
+						if !isStr || name == "" || strings.ContainsAny(name, "/?#.%%") || name != url.PathEscape(name) {
 							errs = append(errs, fmt.Errorf("interceptors[%d].config.httpTargets[%d] must be a single URL path segment (the Link target name)", i, j))
 						}
 					}
