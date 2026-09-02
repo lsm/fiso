@@ -547,6 +547,13 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 					Type:       wasmimpl.RuntimeType(runtimeType),
 					ModulePath: modulePath,
 				}
+				if httpEnabled(ic.Config) {
+					if runtimeType != "wazero" {
+						return nil, fmt.Errorf("wasm interceptor %s: host HTTP calls require the wazero runtime", modulePath)
+					}
+					cfg := hostHTTPConfig(ic.Config)
+					rtCfg.HostHTTP = &cfg
+				}
 
 				rt, err := factory.Create(context.Background(), rtCfg)
 				if err != nil {
@@ -575,6 +582,29 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 	}
 
 	return pipeline.New(cfg, src, transformer, sk, dlqHandler, chain), nil
+}
+
+// httpEnabled reports whether a wasm interceptor opted into host HTTP calls.
+func httpEnabled(cfg map[string]interface{}) bool {
+	enabled, _ := cfg["http"].(bool)
+	return enabled
+}
+
+// hostHTTPConfig builds the host-function config from interceptor settings.
+func hostHTTPConfig(cfg map[string]interface{}) wasmimpl.HostHTTPConfig {
+	linkAddr := getString(cfg, "linkAddr")
+	if linkAddr == "" {
+		linkAddr = "http://127.0.0.1:3500"
+	}
+	var targets []string
+	if raw, ok := cfg["httpTargets"].([]interface{}); ok {
+		for _, t := range raw {
+			if name, isStr := t.(string); isStr && name != "" {
+				targets = append(targets, name)
+			}
+		}
+	}
+	return wasmimpl.HostHTTPConfig{LinkAddr: linkAddr, AllowedTargets: targets}
 }
 
 func getString(m map[string]interface{}, key string) string {

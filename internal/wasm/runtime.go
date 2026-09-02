@@ -60,6 +60,10 @@ type Config struct {
 
 	// Preopened directories for filesystem access (Wasmer only).
 	Preopens map[string]string `yaml:"preopens"`
+
+	// HostHTTP enables the fiso.http_call host function on the wazero
+	// runtime (ADR 0006). Nil disables the capability entirely.
+	HostHTTP *HostHTTPConfig `yaml:"-"`
 }
 
 // Runtime abstracts WASM execution across tazero and Wasmer.

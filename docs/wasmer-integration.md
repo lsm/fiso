@@ -107,9 +107,15 @@ sink:
     url: http://backend:8080
 ```
 
-Only `module` and `runtime` are honored for interceptors today. Other keys
-present in older documentation (`timeout`, `memoryLimit`, `env`, `preopens`)
-are not applied by the Flow binaries and should not be relied on.
+The Flow binaries honor `module`, `runtime`, and — when the module opts in
+to the host HTTP capability — `http: true` with a `httpTargets` allowlist
+and an optional `linkAddr` (see the README's WASM section and ADR 0006;
+wazero runtime only). When `linkAddr` is omitted, `fiso-flow` and
+`fiso-flow-wasmer` default to `http://127.0.0.1:3500`; `fiso-wasmer-aio`
+defaults to the address its embedded Link actually bound, so a
+`link.listenAddr` override is followed. Keys present in older documentation
+(`timeout`, `memoryLimit`, `env`, `preopens`) are not applied and should
+not be relied on.
 
 ### App Configuration
 
@@ -210,8 +216,11 @@ cargo build --target wasm32-wasi --release
 ```
 
 Because guests have no network access and no in-memory persistent state,
-modules that need to call external services should do so through Fiso's own
-outbound path (Fiso-Link) rather than inside the module.
+modules that need to call external services do so through Fiso's own
+outbound path: a wazero-runtime module can import the `fiso.http_call` host
+function, which routes through Fiso-Link under a deny-by-default allowlist
+(see the README's WASM section and ADR 0006). Direct network access from
+inside a module is not possible on either engine.
 
 ## Building Fiso with Wasmer
 

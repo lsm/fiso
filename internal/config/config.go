@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -128,6 +130,39 @@ func (f *FlowDefinition) Validate() error {
 		if ic.Type == "wasm" {
 			if _, ok := ic.Config["module"].(string); !ok {
 				errs = append(errs, fmt.Errorf("interceptors[%d].config.module is required for wasm interceptor", i))
+			}
+			// Host HTTP capability (ADR 0006): opt-in, deny-by-default.
+			if httpVal, present := ic.Config["http"]; present && httpVal != nil {
+				if enabled, isBool := httpVal.(bool); !isBool || !enabled {
+					errs = append(errs, fmt.Errorf("interceptors[%d].config.http must be exactly true to enable host HTTP calls", i))
+				} else {
+					targets, _ := ic.Config["httpTargets"].([]interface{})
+					if len(targets) == 0 {
+						errs = append(errs, fmt.Errorf("interceptors[%d].config.httpTargets is required when http is enabled (deny-by-default allowlist)", i))
+					}
+					for j, tv := range targets {
+						name, isStr := tv.(string)
+						// A target is a single URL path segment: route syntax
+						// (slashes, dots, query) would compose into the
+						// /link/{target}{path} URL unsafely.
+						if !isStr || name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/?#%%") || name != url.PathEscape(name) {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.httpTargets[%d] must be a single URL path segment (the Link target name)", i, j))
+						}
+					}
+					// linkAddr is optional but, when present, must be a
+					// usable URL string — no silent fallback to the default.
+					if la, present := ic.Config["linkAddr"]; present && la != nil {
+						linkAddr, isStr := la.(string)
+						if !isStr || linkAddr == "" {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr must be an absolute http(s) origin string", i))
+						} else if u, err := url.Parse(linkAddr); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.ForceQuery || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(linkAddr, "?#") || (u.Path != "" && u.Path != "/") {
+							// A path/query/fragment on linkAddr would be
+							// silently dropped or miscomposed into the
+							// /link/{target}{path} URL.
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr %q must be an absolute http(s) origin (no path, query, or fragment)", i, linkAddr))
+						}
+					}
+				}
 			}
 			// Validate runtime if specified. A present, non-nil value must be
 			// a known runtime string; null is treated as omitted.

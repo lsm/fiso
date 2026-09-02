@@ -36,6 +36,7 @@ import (
 	"github.com/lsm/fiso/internal/tracing"
 	"github.com/lsm/fiso/internal/transform"
 	unifiedxform "github.com/lsm/fiso/internal/transform/unified"
+	wasmruntime "github.com/lsm/fiso/internal/wasm"
 )
 
 var logLevel string
@@ -550,11 +551,20 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 				if err != nil {
 					return nil, fmt.Errorf("read wasm module %s: %w", modulePath, err)
 				}
-				rt, err := wasm.NewWazeroRuntime(context.Background(), wasmBytes)
+				// Host HTTP capability (ADR 0006): opt-in per interceptor,
+				// deny-by-default allowlist, routed through Fiso-Link.
+				var runtime wasm.Runtime
+				if httpEnabled(ic.Config) {
+					var httpRt *wasmruntime.WazeroRuntime
+					httpRt, err = wasmruntime.NewWazeroRuntimeWithHTTP(context.Background(), wasmBytes, hostHTTPConfig(ic.Config))
+					runtime = httpRt
+				} else {
+					runtime, err = wasm.NewWazeroRuntime(context.Background(), wasmBytes)
+				}
 				if err != nil {
 					return nil, fmt.Errorf("wasm runtime for %s: %w", modulePath, err)
 				}
-				interceptors = append(interceptors, wasm.New(rt, modulePath))
+				interceptors = append(interceptors, wasm.New(runtime, modulePath))
 				logger.Info("loaded wasm interceptor", "module", modulePath)
 			case "grpc":
 				client, err := grpcinterceptor.NewConnClient(getString(ic.Config, "address"))
@@ -575,6 +585,29 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 	}
 
 	return pipeline.New(cfg, src, transformer, sk, dlqHandler, chain), nil
+}
+
+// httpEnabled reports whether a wasm interceptor opted into host HTTP calls.
+func httpEnabled(cfg map[string]interface{}) bool {
+	enabled, _ := cfg["http"].(bool)
+	return enabled
+}
+
+// hostHTTPConfig builds the host-function config from interceptor settings.
+func hostHTTPConfig(cfg map[string]interface{}) wasmruntime.HostHTTPConfig {
+	linkAddr := getString(cfg, "linkAddr")
+	if linkAddr == "" {
+		linkAddr = "http://127.0.0.1:3500"
+	}
+	var targets []string
+	if raw, ok := cfg["httpTargets"].([]interface{}); ok {
+		for _, t := range raw {
+			if s, isStr := t.(string); isStr {
+				targets = append(targets, s)
+			}
+		}
+	}
+	return wasmruntime.HostHTTPConfig{LinkAddr: linkAddr, AllowedTargets: targets}
 }
 
 func getString(m map[string]interface{}, key string) string {

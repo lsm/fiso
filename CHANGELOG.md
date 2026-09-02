@@ -12,6 +12,15 @@ unreleased work and will be versioned when a release tag is cut.
 
 ### Added
 
+- **HTTP-calling WASM interceptors** — a WASM module can now make HTTP calls
+  through the `fiso.http_call` host function, routed via Fiso-Link so guest
+  calls inherit Link's auth, retries, circuit breaker, rate limiting, and
+  metrics. Opt-in per interceptor (`http: true`) with a deny-by-default
+  `httpTargets` allowlist: a call to any other target is rejected without a
+  network request, and a module importing the function without opt-in fails
+  to instantiate. wazero runtime only. See
+  [ADR 0006](docs/adr/0006-wasm-http-via-host-function.md).
+
 - **gRPC interceptors are now executable** — the `grpc` interceptor type was
   accepted by validation but constructed by no binary; all Flow-capable
   binaries now wire it. The raw response bytes are copied out of gRPC's

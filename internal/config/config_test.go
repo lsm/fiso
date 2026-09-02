@@ -1471,6 +1471,96 @@ func TestFlowDefinition_ValidateWasmRuntimeValueType(t *testing.T) {
 	}
 }
 
+func TestFlowDefinition_ValidateWasmHostHTTPConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  map[string]interface{}
+		wantErr string
+	}{
+		{
+			name:    "http must be exactly true",
+			config:  map[string]interface{}{"module": "m.wasm", "http": false},
+			wantErr: "interceptors[0].config.http must be exactly true",
+		},
+		{
+			name:    "http true requires targets",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true},
+			wantErr: "interceptors[0].config.httpTargets is required",
+		},
+		{
+			name:    "targets must be non-empty strings",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{42}},
+			wantErr: "interceptors[0].config.httpTargets[0] must be a single URL path segment",
+		},
+		{
+			name:    "empty target name rejected",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{""}},
+			wantErr: "interceptors[0].config.httpTargets[0] must be a single URL path segment",
+		},
+		{
+			name:    "non-string linkAddr rejected",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"a"}, "linkAddr": 123},
+			wantErr: "interceptors[0].config.linkAddr must be an absolute http(s) origin string",
+		},
+		{
+			name:    "unparsable linkAddr rejected",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"a"}, "linkAddr": "http://a b"},
+			wantErr: `interceptors[0].config.linkAddr "http://a b" must be an absolute http(s) origin`,
+		},
+		{
+			name:    "relative linkAddr rejected",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"a"}, "linkAddr": "/proxy"},
+			wantErr: "must be an absolute http(s) origin",
+		},
+		{
+			name:    "non-http scheme rejected",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"a"}, "linkAddr": "ftp://link:3500"},
+			wantErr: "must be an absolute http(s) origin",
+		},
+		{
+			name:   "valid linkAddr",
+			config: map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"a"}, "linkAddr": "http://link:3500"},
+		},
+		{
+			name:    "single-dot target rejected",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"."}},
+			wantErr: "must be a single URL path segment",
+		},
+		{
+			name:   "dotted target name allowed",
+			config: map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"crm.v2"}},
+		},
+		{
+			name:   "valid opt-in",
+			config: map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"fraud-api"}},
+		},
+		{
+			name:   "no opt-in is fine",
+			config: map[string]interface{}{"module": "m.wasm"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := FlowDefinition{
+				Name:         "t",
+				Source:       SourceConfig{Type: "http"},
+				Sink:         SinkConfig{Type: "http"},
+				Interceptors: []InterceptorConfig{{Type: "wasm", Config: tt.config}},
+			}
+			err := flow.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestFlowDefinition_ValidateGRPCInterceptorConfig(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1871,5 +1961,27 @@ interceptors:
 	}
 	if !strings.Contains(err.Error(), "malformed.yaml") {
 		t.Fatalf("expected parse failure to name its file, got %v", err)
+	}
+}
+
+// TestFlowDefinition_ValidateLinkAddrEmptyDelimiters pins that trailing ?
+// and # with empty values are still rejected (url.Parse reports empty
+// RawQuery/Fragment but sets ForceQuery / keeps the raw character).
+func TestFlowDefinition_ValidateLinkAddrEmptyDelimiters(t *testing.T) {
+	for _, addr := range []string{"http://link:3500?", "http://link:3500#", "http://link:3500/?"} {
+		flow := FlowDefinition{
+			Name:   "t",
+			Source: SourceConfig{Type: "http"},
+			Sink:   SinkConfig{Type: "http"},
+			Interceptors: []InterceptorConfig{{Type: "wasm", Config: map[string]interface{}{
+				"module":      "m.wasm",
+				"http":        true,
+				"httpTargets": []interface{}{"a"},
+				"linkAddr":    addr,
+			}}},
+		}
+		if err := flow.Validate(); err == nil {
+			t.Errorf("linkAddr %q must be rejected", addr)
+		}
 	}
 }

@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -163,68 +165,13 @@ func run() error {
 		logger.Info("started wasmer app", "name", appCfg.Name, "addr", app.Addr)
 	}
 
-	// 2. Start Flow
-	// Load Flow definitions
-	if cfg.Flow.ConfigDir == "" {
-		cfg.Flow.ConfigDir = "/etc/fiso/flows"
-	}
-	loader := config.NewLoader(cfg.Flow.ConfigDir, logger)
-	flows := map[string]*config.FlowDefinition{}
-	if _, statErr := os.Stat(cfg.Flow.ConfigDir); os.IsNotExist(statErr) {
-		logger.Warn("flow config dir not present, continuing without flow", "dir", cfg.Flow.ConfigDir)
-	} else if statErr != nil {
-		// A present-but-inaccessible flow directory is a configuration
-		// error, not a missing component.
-		return fmt.Errorf("stat flow config dir: %w", statErr)
-	} else if flows, err = loader.LoadStrict(); err != nil {
-		// Invalid flow definitions fail startup: silently skipping a file
-		// would drop a configured pipeline without notice.
-		return fmt.Errorf("load flows: %w", err)
-	}
-
-	// Start config watcher
-	watchDone := make(chan struct{})
-	go func() {
-		if err := loader.Watch(watchDone); err != nil {
-			logger.Error("config watcher error", "error", err)
-		}
-	}()
-
-	// HTTP Pool for Flow sources
-	httpPool := httpsource.NewServerPool(logger)
-
-	// Required-runner gate: a terminal Flow return drops process readiness
-	// while surviving components keep running (ADR 0005).
-	gate := flowruntime.NewGate(health)
-
-	type flowRunner struct {
-		name     string
-		pipeline *pipeline.Pipeline
-	}
-	runners := make([]*flowRunner, 0, len(flows))
-
-	if len(flows) > 0 {
-		for name, def := range flows {
-			p, err := buildPipeline(def, logger, httpPool, tracer)
-			if err != nil {
-				return fmt.Errorf("build flow %s: %w", name, err)
-			}
-			runners = append(runners, &flowRunner{name: name, pipeline: p})
-		}
-
-		go func() {
-			if err := httpPool.Start(ctx); err != nil && err != context.Canceled {
-				logger.Error("http pool error", "error", err)
-			}
-		}()
-
-		for _, runner := range runners {
-			gate.GoContext(ctx, runner.name, runner.pipeline.Run)
-		}
-	}
-
-	// 3. Start Link
+	// 2. Start Link (before Flows: HTTP-enabled interceptors
+	// call into it at build/run time via the default linkAddr)
 	var linkServer *http.Server
+	// defaultLinkAddr is the origin of the embedded Link actually bound;
+	// HTTP-enabled interceptors that omit linkAddr call this, not a
+	// hard-coded port that a link.listenAddr override would strand.
+	defaultLinkAddr := ""
 	if cfg.Link.ConfigPath != "" {
 		linkCfg, err := link.LoadConfig(cfg.Link.ConfigPath)
 		if err != nil {
@@ -317,12 +264,80 @@ func run() error {
 				Handler: proxyMux,
 			}
 
+			// Bind synchronously: HTTP-enabled interceptors call into this
+			// listener through the default linkAddr, and a goroutine-bound
+			// listener would race the first guest call.
+			ln, err := net.Listen("tcp", linkCfg.ListenAddr)
+			if err != nil {
+				return fmt.Errorf("link listen: %w", err)
+			}
+			defaultLinkAddr = loopbackLinkAddr(ln)
 			go func() {
-				logger.Info("link server starting", "addr", linkCfg.ListenAddr)
-				if err := linkServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Info("link server starting", "addr", ln.Addr().String())
+				if err := linkServer.Serve(ln); err != nil && err != http.ErrServerClosed {
 					logger.Error("link server error", "error", err)
 				}
 			}()
+		}
+	}
+
+	// 3. Start Flow
+	// Load Flow definitions
+	if cfg.Flow.ConfigDir == "" {
+		cfg.Flow.ConfigDir = "/etc/fiso/flows"
+	}
+	loader := config.NewLoader(cfg.Flow.ConfigDir, logger)
+	flows := map[string]*config.FlowDefinition{}
+	if _, statErr := os.Stat(cfg.Flow.ConfigDir); os.IsNotExist(statErr) {
+		logger.Warn("flow config dir not present, continuing without flow", "dir", cfg.Flow.ConfigDir)
+	} else if statErr != nil {
+		// A present-but-inaccessible flow directory is a configuration
+		// error, not a missing component.
+		return fmt.Errorf("stat flow config dir: %w", statErr)
+	} else if flows, err = loader.LoadStrict(); err != nil {
+		// Invalid flow definitions fail startup: silently skipping a file
+		// would drop a configured pipeline without notice.
+		return fmt.Errorf("load flows: %w", err)
+	}
+
+	// Start config watcher
+	watchDone := make(chan struct{})
+	go func() {
+		if err := loader.Watch(watchDone); err != nil {
+			logger.Error("config watcher error", "error", err)
+		}
+	}()
+
+	// HTTP Pool for Flow sources
+	httpPool := httpsource.NewServerPool(logger)
+
+	// Required-runner gate: a terminal Flow return drops process readiness
+	// while surviving components keep running (ADR 0005).
+	gate := flowruntime.NewGate(health)
+
+	type flowRunner struct {
+		name     string
+		pipeline *pipeline.Pipeline
+	}
+	runners := make([]*flowRunner, 0, len(flows))
+
+	if len(flows) > 0 {
+		for name, def := range flows {
+			p, err := buildPipeline(def, logger, httpPool, tracer, defaultLinkAddr)
+			if err != nil {
+				return fmt.Errorf("build flow %s: %w", name, err)
+			}
+			runners = append(runners, &flowRunner{name: name, pipeline: p})
+		}
+
+		go func() {
+			if err := httpPool.Start(ctx); err != nil && err != context.Canceled {
+				logger.Error("http pool error", "error", err)
+			}
+		}()
+
+		for _, runner := range runners {
+			gate.GoContext(ctx, runner.name, runner.pipeline.Run)
 		}
 	}
 
@@ -361,7 +376,7 @@ func run() error {
 	return nil
 }
 
-func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool *httpsource.ServerPool, tracer trace.Tracer) (*pipeline.Pipeline, error) {
+func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool *httpsource.ServerPool, tracer trace.Tracer, defaultLinkAddr string) (*pipeline.Pipeline, error) {
 	commitPolicy := delivery.NormalizeCommitPolicy(flowDef.ErrorHandling.CommitPolicy)
 	if commitPolicy == delivery.CommitPolicyKafkaTransaction {
 		if flowDef.Source.Type != "kafka" || flowDef.Sink.Type != "kafka" {
@@ -583,6 +598,13 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 					Type:       wasmruntime.RuntimeType(runtimeType),
 					ModulePath: modulePath,
 				}
+				if httpEnabled(ic.Config) {
+					if runtimeType != "wazero" && runtimeType != "" {
+						return nil, fmt.Errorf("wasm interceptor %s: host HTTP calls require the wazero runtime", modulePath)
+					}
+					cfg := hostHTTPConfig(ic.Config, defaultLinkAddr)
+					wasmCfg.HostHTTP = &cfg
+				}
 
 				rt, err := factory.Create(context.Background(), wasmCfg)
 				if err != nil {
@@ -609,6 +631,52 @@ func buildPipeline(flowDef *config.FlowDefinition, logger *slog.Logger, httpPool
 	}
 
 	return pipeline.New(cfg, src, transformer, sk, dlqHandler, chain), nil
+}
+
+// httpEnabled reports whether a wasm interceptor opted into host HTTP calls.
+func httpEnabled(cfg map[string]interface{}) bool {
+	enabled, _ := cfg["http"].(bool)
+	return enabled
+}
+
+// hostHTTPConfig builds the host-function config from interceptor settings.
+// defaultLinkAddr is the embedded Link's bound origin; it takes precedence
+// over the documented default when the interceptor omits linkAddr, so a
+// link.listenAddr override does not strand guests on a hard-coded port.
+func hostHTTPConfig(cfg map[string]interface{}, defaultLinkAddr string) wasmruntime.HostHTTPConfig {
+	linkAddr := getString(cfg, "linkAddr")
+	if linkAddr == "" {
+		linkAddr = defaultLinkAddr
+	}
+	if linkAddr == "" {
+		// No embedded Link in this process: the documented Link default.
+		linkAddr = "http://127.0.0.1:3500"
+	}
+	var targets []string
+	if raw, ok := cfg["httpTargets"].([]interface{}); ok {
+		for _, t := range raw {
+			if name, isStr := t.(string); isStr && name != "" {
+				targets = append(targets, name)
+			}
+		}
+	}
+	return wasmruntime.HostHTTPConfig{LinkAddr: linkAddr, AllowedTargets: targets}
+}
+
+// loopbackLinkAddr returns the http origin for reaching a Link bound to ln.
+// An unspecified bind host (":3600", "0.0.0.0:3600") is dialed through the
+// loopback — the proxy is in-process — and the actually bound port is used,
+// so even a :0 override yields a dialable address.
+func loopbackLinkAddr(ln net.Listener) string {
+	tcp, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		return ""
+	}
+	host := "127.0.0.1"
+	if tcp.IP != nil && !tcp.IP.IsUnspecified() {
+		host = tcp.IP.String()
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(tcp.Port))
 }
 
 func getString(m map[string]interface{}, key string) string {
