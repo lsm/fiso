@@ -6,3 +6,10 @@ targets:
     host: backend-service
     port: 8080
     basePath: /api
+    interceptors:
+      - type: wasm
+        config:
+          module: /etc/fiso/modules/intercept.wasm
+          runtime: wasmer
+          env:
+            INTERCEPT_MODE: "request-response"
