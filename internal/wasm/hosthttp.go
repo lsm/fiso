@@ -37,6 +37,12 @@ const (
 	HostErrTargetDenied   int32 = -2
 	HostErrBufferSize     int32 = -3
 	HostErrUpstream       int32 = -4
+
+// When a successful upstream response does not fit the guest's buffer, the
+// host returns the negative of the required size (≤ -5 in practice) instead
+// of HostErrBufferSize: the network call already happened, and a guest that
+// blindly retries could repeat a non-idempotent operation. HostErrBufferSize
+// is reserved for buffer-write failures where no call was repeated.
 )
 
 // maxHostResponseBody bounds a single response body; larger bodies return
@@ -90,15 +96,38 @@ func sanitizePath(path string) (string, error) {
 	if !strings.HasPrefix(path, "/") {
 		return "", fmt.Errorf("path must be absolute")
 	}
-	if strings.Contains(path, "%2f") || strings.Contains(path, "%2F") {
-		return "", fmt.Errorf("encoded slashes are not allowed in path")
+	// Check both the raw and the percent-decoded forms: Go's HTTP client
+	// decodes the path before mux routing, so /api/%2e%2e/admin is a
+	// traversal even though no literal ".." segment appears.
+	decoded, err := url.PathUnescape(path)
+	if err != nil {
+		return "", fmt.Errorf("path is not validly percent-encoded")
 	}
-	for _, seg := range strings.Split(path, "/") {
-		if seg == ".." {
-			return "", fmt.Errorf("path must not contain .. segments")
+	for _, candidate := range []string{path, decoded} {
+		if strings.Contains(candidate, "%2f") || strings.Contains(candidate, "%2F") || strings.Contains(candidate, "%25") {
+			return "", fmt.Errorf("encoded slashes or percent signs are not allowed in path")
+		}
+		for _, seg := range strings.Split(candidate, "/") {
+			if seg == ".." || seg == "." {
+				return "", fmt.Errorf("path must not contain traversal segments")
+			}
 		}
 	}
 	return path, nil
+}
+
+// validMethodToken reports whether the method is a valid RFC 7230 token
+// (no spaces or control characters).
+func validMethodToken(method string) bool {
+	if method == "" {
+		return false
+	}
+	for _, r := range method {
+		if r <= 0x20 || r >= 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // call validates the request against the allowlist and performs it.
@@ -118,6 +147,9 @@ func (h *hostHTTPClient) call(ctx context.Context, req hostHTTPRequest) (hostHTT
 	method := strings.ToUpper(req.Method)
 	if method == "" {
 		method = http.MethodPost
+	}
+	if !validMethodToken(method) {
+		return hostHTTPResponse{}, fmt.Errorf("invalid request: method %q is not a valid HTTP token", req.Method)
 	}
 	url := fmt.Sprintf("%s/link/%s%s", strings.TrimSuffix(h.cfg.LinkAddr, "/"), req.Target, path)
 
@@ -196,7 +228,12 @@ func hostHTTPExport(b wazero.HostModuleBuilder, client *hostHTTPClient) {
 				return HostErrUpstream
 			}
 			if uint32(len(respBytes)) > respCap {
-				return HostErrBufferSize
+				// The upstream call already happened: returning a bare
+				// buffer-error code would invite a retry that repeats a
+				// possibly non-idempotent operation. Embed the needed size
+				// so the guest can retry with a larger buffer only when it
+				// knows the operation is idempotent.
+				return -int32(len(respBytes))
 			}
 			if !mem.Write(respPtr, respBytes) {
 				return HostErrBufferSize

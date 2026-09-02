@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -201,8 +202,15 @@ func TestHTTPCallGuest_SmallBuffer(t *testing.T) {
 	defer func() { _ = rt.Close() }()
 
 	out := runGuest(t, rt, map[string]string{"FISO_TEST_MODE": "smallbuf"}, `{}`)
-	if got := out.Headers["X-Host-Error"]; got != "-3" {
-		t.Fatalf("expected buffer-size -3, got %q", got)
+	// A successful call whose response does not fit returns the negative of
+	// the required size (retry-safe semantics), distinct from -3.
+	got := out.Headers["X-Host-Error"]
+	if got == "" || got == "0" {
+		t.Fatalf("expected a negative size code, got %q", got)
+	}
+	var code int
+	if _, err := fmt.Sscanf(got, "%d", &code); err != nil || code >= 0 || code == -3 {
+		t.Fatalf("expected negative required-size code, got %q", got)
 	}
 }
 

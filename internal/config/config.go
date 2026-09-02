@@ -150,9 +150,9 @@ func (f *FlowDefinition) Validate() error {
 					if la, present := ic.Config["linkAddr"]; present && la != nil {
 						linkAddr, isStr := la.(string)
 						if !isStr || linkAddr == "" {
-							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr must be a URL string", i))
-						} else if _, err := url.Parse(linkAddr); err != nil {
-							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr %q is not a valid URL", i, linkAddr))
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr must be an absolute http(s) URL string", i))
+						} else if u, err := url.Parse(linkAddr); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+							errs = append(errs, fmt.Errorf("interceptors[%d].config.linkAddr %q must be an absolute http(s) URL", i, linkAddr))
 						}
 					}
 				}

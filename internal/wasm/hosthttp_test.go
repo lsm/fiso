@@ -264,3 +264,24 @@ func compilePlainModule(t *testing.T, dir string) string {
 	}
 	return out
 }
+
+// TestHostHTTP_EncodedTraversalRejected pins that percent-encoded dot
+// segments are caught after decoding, matching Go's client behavior.
+func TestHostHTTP_EncodedTraversalRejected(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	for _, path := range []string{"/api/%2e%2e/admin", "/%2e%2e", "/a/./b", "/a/%252e%252e/b"} {
+		if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Path: path}); err == nil {
+			t.Errorf("path %q must be rejected", path)
+		}
+	}
+}
+
+// TestHostHTTP_InvalidMethodRejected pins the method token validation.
+func TestHostHTTP_InvalidMethodRejected(t *testing.T) {
+	client, _ := newTestHostClient(t, []string{"safe"}, func(w http.ResponseWriter, r *http.Request) {})
+	for _, method := range []string{"GET /x", "PUT\t", "\x00POST"} {
+		if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Method: method}); err == nil {
+			t.Errorf("method %q must be rejected", method)
+		}
+	}
+}

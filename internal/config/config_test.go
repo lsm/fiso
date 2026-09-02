@@ -1500,12 +1500,22 @@ func TestFlowDefinition_ValidateWasmHostHTTPConfig(t *testing.T) {
 		{
 			name:    "non-string linkAddr rejected",
 			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"a"}, "linkAddr": 123},
-			wantErr: "interceptors[0].config.linkAddr must be a URL string",
+			wantErr: "interceptors[0].config.linkAddr must be an absolute http(s) URL string",
 		},
 		{
 			name:    "unparsable linkAddr rejected",
 			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"a"}, "linkAddr": "http://a b"},
-			wantErr: `interceptors[0].config.linkAddr "http://a b" is not a valid URL`,
+			wantErr: `interceptors[0].config.linkAddr "http://a b" must be an absolute http(s) URL`,
+		},
+		{
+			name:    "relative linkAddr rejected",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"a"}, "linkAddr": "/proxy"},
+			wantErr: "must be an absolute http(s) URL",
+		},
+		{
+			name:    "non-http scheme rejected",
+			config:  map[string]interface{}{"module": "m.wasm", "http": true, "httpTargets": []interface{}{"a"}, "linkAddr": "ftp://link:3500"},
+			wantErr: "must be an absolute http(s) URL",
 		},
 		{
 			name:   "valid linkAddr",

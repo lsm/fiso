@@ -1315,7 +1315,10 @@ bodyB64}`; the host writes `{status, headers, bodyB64}` into the response
 buffer and returns its length, or a negative error code (`-1` invalid
 request, `-2` target denied, `-3` response buffer too small, `-4` upstream
 failure). Bodies travel base64-encoded so arbitrary bytes — JSON, text,
-form-encoded, binary — round-trip verbatim. The path must be absolute with
+form-encoded, binary — round-trip verbatim. When a successful response
+exceeds the guest's buffer the host returns the negative of the required
+size (not `-3`): the call already happened, so a guest should only retry
+with a larger buffer when the operation is idempotent. The path must be absolute with
 no `..` segments or encoded slashes; the guest cannot escape its target's
 prefix. A module that imports the function without `http: true` fails to
 instantiate — the capability is absent, not merely unchecked. Supported on
