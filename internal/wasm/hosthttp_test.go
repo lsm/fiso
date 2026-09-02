@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -343,6 +344,69 @@ func TestHostHTTP_AnyPercentEncodingRejected(t *testing.T) {
 	for _, path := range []string{"/a%23b", "/a%3Fb", "/a%2fb", "/api/%2e%2e/admin"} {
 		if _, err := client.call(context.Background(), hostHTTPRequest{Target: "safe", Path: path}); err == nil {
 			t.Errorf("path %q must be rejected", path)
+		}
+	}
+}
+
+// TestHostHTTPExport_CoversMemoryFailurePaths drives the exported function
+// against a minimal wazero module so the memory-read, write, and marshal
+// paths execute.
+func TestHostHTTPExport_CoversMemoryFailurePaths(t *testing.T) {
+	link := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer link.Close()
+
+	rt, err := NewWazeroRuntimeWithHTTP(context.Background(), buildHTTPCallModule(t), HostHTTPConfig{
+		LinkAddr: link.URL, AllowedTargets: []string{"enrich-api"}, Client: link.Client(),
+	})
+	if err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// A zero-length request read at offset 0: valid memory range, invalid
+	// JSON → -1 from the export itself.
+	input, _ := json.Marshal(guestEnvelope{Payload: json.RawMessage(`{}`), Headers: map[string]string{}, Direction: "inbound"})
+	if _, err := rt.CallWithEnv(context.Background(), input, map[string]string{"FISO_TEST_MODE": "badreq"}); err != nil {
+		t.Fatalf("guest: %v", err)
+	}
+}
+
+// TestNewWazeroRuntimeWithHTTP_Errors pins construction failure paths.
+func TestNewWazeroRuntimeWithHTTP_Errors(t *testing.T) {
+	if _, err := NewWazeroRuntimeWithHTTP(context.Background(), []byte("bad"), HostHTTPConfig{LinkAddr: "http://x"}); err == nil {
+		t.Fatal("expected compile failure for invalid wasm bytes")
+	}
+	if _, err := NewWazeroRuntimeWithHTTP(context.Background(), []byte("bad"), HostHTTPConfig{}); err == nil {
+		t.Fatal("expected missing linkAddr failure before compilation")
+	}
+}
+
+// TestValidHeaderPair_Boundaries pins the validator directly.
+func TestValidHeaderPair_Boundaries(t *testing.T) {
+	if !validHeaderPair("X-Trace-Id", "abc-123") {
+		t.Error("valid pair rejected")
+	}
+	if validHeaderPair("", "v") {
+		t.Error("empty name accepted")
+	}
+	if validHeaderPair("X:A", "v") {
+		t.Error("separator in name accepted")
+	}
+	if validHeaderPair("X", "v\x7f") {
+		t.Error("DEL in value accepted")
+	}
+}
+
+// TestValidMethodToken_Boundaries pins the validator directly.
+func TestValidMethodToken_Boundaries(t *testing.T) {
+	for _, m := range []string{"GET", "A", "custom-method_1"} {
+		if !validMethodToken(m) {
+			t.Errorf("%q rejected", m)
+		}
+	}
+	for _, m := range []string{"", "A B", "A(B", "\x01"} {
+		if validMethodToken(m) {
+			t.Errorf("%q accepted", m)
 		}
 	}
 }
