@@ -258,13 +258,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		icResult, icErr := h.interceptors.ProcessOutbound(ctx, targetName, icReq)
 		if icErr != nil {
 			// A rejection answers with the guest-chosen status instead of a
-			// blanket 500 (ADR 0007).
+			// blanket 500 (ADR 0007). Record it like any other request so
+			// authentication verdicts appear on the status dashboards.
 			if rej, ok := interceptor.AsRejection(icErr); ok {
 				h.logger.Warn("request rejected by outbound interceptor",
 					"target", targetName,
 					"status", rej.Status,
 					"reason", rej.Reason,
 				)
+				h.recordSyncRequest(targetName, r.Method, strconv.Itoa(rej.Status), time.Since(start).Seconds())
 				http.Error(w, rej.Reason, rej.Status)
 				return
 			}
@@ -355,18 +357,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
-	// Record metrics
-	duration := time.Since(start).Seconds()
-	status := "error"
-	if resp != nil {
-		status = strconv.Itoa(resp.StatusCode)
-		span.SetAttributes(tracing.HTTPStatusAttr(resp.StatusCode))
-	}
-	if h.metrics != nil {
-		h.metrics.RequestsTotal.WithLabelValues(targetName, r.Method, status, "sync").Inc()
-		h.metrics.RequestDuration.WithLabelValues(targetName, r.Method).Observe(duration)
-	}
-
 	// Record circuit breaker outcome
 	if breaker, ok := h.breakers[targetName]; ok {
 		if retryErr != nil {
@@ -379,8 +369,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	duration := time.Since(start).Seconds()
+
 	if retryErr != nil {
 		tracing.SetSpanError(span, retryErr)
+		status := "error"
+		if resp != nil {
+			status = strconv.Itoa(resp.StatusCode)
+			span.SetAttributes(tracing.HTTPStatusAttr(resp.StatusCode))
+		}
+		h.recordSyncRequest(targetName, r.Method, status, duration)
 		if resp != nil {
 			// Forward the error response from upstream
 			h.copyResponse(w, resp)
@@ -391,6 +389,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The final caller-visible status is only known after inbound
+	// interception: a guest can turn an upstream 200 into a 401 (ADR 0007),
+	// and metrics/tracing must report what the caller saw.
+	finalStatus := h.copyResponseWithInterceptors(ctx, w, resp, targetName)
+	span.SetAttributes(tracing.HTTPStatusAttr(finalStatus))
+	h.recordSyncRequest(targetName, r.Method, strconv.Itoa(finalStatus), duration)
 	tracing.SetSpanOK(span)
 
 	// Log successful proxy request
@@ -398,15 +402,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"correlation_id", corrID.Value,
 		"target", targetName,
 		"method", r.Method,
-		"status", resp.StatusCode,
+		"status", finalStatus,
 		"latency_ms", time.Since(start).Milliseconds(),
 	)
-
-	h.copyResponseWithInterceptors(ctx, w, resp, targetName)
 }
 
-// copyResponseWithInterceptors copies the response to the writer, optionally running inbound interceptors.
-func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.ResponseWriter, resp *http.Response, targetName string) {
+// recordSyncRequest records the request counter and duration for the
+// synchronous HTTP path. status is the status label; pass "error" when no
+// response exists.
+func (h *Handler) recordSyncRequest(targetName, method, status string, durationSeconds float64) {
+	if h.metrics == nil {
+		return
+	}
+	h.metrics.RequestsTotal.WithLabelValues(targetName, method, status, "sync").Inc()
+	h.metrics.RequestDuration.WithLabelValues(targetName, method).Observe(durationSeconds)
+}
+
+// copyResponseWithInterceptors copies the response to the writer, optionally
+// running inbound interceptors, and returns the final caller-visible status:
+// the upstream's, or the guest's when an inbound interceptor rewrites it.
+func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.ResponseWriter, resp *http.Response, targetName string) int {
 	defer func() { _ = resp.Body.Close() }()
 
 	// Read response body
@@ -414,7 +429,7 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 	if err != nil {
 		h.logger.Error("read response body error", "target", targetName, "error", err)
 		http.Error(w, "failed to read response", http.StatusInternalServerError)
-		return
+		return http.StatusInternalServerError
 	}
 
 	// Run inbound interceptors (after upstream response)
@@ -443,11 +458,11 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 					"reason", rej.Reason,
 				)
 				http.Error(w, rej.Reason, rej.Status)
-				return
+				return rej.Status
 			}
 			h.logger.Error("inbound interceptor error", "target", targetName, "error", icErr)
 			http.Error(w, "interceptor error", http.StatusInternalServerError)
-			return
+			return http.StatusInternalServerError
 		}
 
 		responseBody = icResult.Payload
@@ -465,6 +480,7 @@ func (h *Handler) copyResponseWithInterceptors(ctx context.Context, w http.Respo
 	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(responseBody)
+	return resp.StatusCode
 }
 
 func (h *Handler) copyResponse(w http.ResponseWriter, resp *http.Response) {

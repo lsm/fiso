@@ -14,6 +14,7 @@ import (
 	"github.com/lsm/fiso/internal/link"
 	linkinterceptor "github.com/lsm/fiso/internal/link/interceptor"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"log/slog"
 )
 
@@ -245,5 +246,104 @@ func TestProxy_InboundInterceptorRejection_MapsStatus(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected the refused response to surface as 401, got %d (body %q)", w.Code, w.Body.String())
+	}
+}
+
+// countingRegistry wraps a prometheus registry the tests can read counters
+// from for rejection-metric assertions.
+func rejectionCount(t *testing.T, metrics *link.Metrics, target, method, status string) float64 {
+	t.Helper()
+	return testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues(target, method, status, "sync"))
+}
+
+// TestProxy_OutboundRejection_RecordedInMetrics pins that an outbound
+// rejection is counted with the guest-chosen status — authentication
+// verdicts must appear on the request-rate and status dashboards, matching
+// the kafka path (ADR 0007).
+func TestProxy_OutboundRejection_RecordedInMetrics(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     host,
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	metrics := link.NewMetrics(prometheus.NewRegistry())
+	handler := NewHandler(Config{Targets: store, Metrics: metrics, Interceptors: icRegistry})
+
+	req := httptest.NewRequest("GET", "/link/svc/x", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+	if got := rejectionCount(t, metrics, "svc", "GET", "401"); got != 1 {
+		t.Fatalf("expected the 401 rejection to be recorded once, got %v", got)
+	}
+}
+
+// TestProxy_InboundRejection_ReportsFinalStatus pins that a guest turning an
+// upstream 200 into a caller-visible 401 is reported as 401 in request
+// metrics — not as a successful 200 (ADR 0007).
+func TestProxy_InboundRejection_ReportsFinalStatus(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"response":true}`))
+	}))
+	defer upstream.Close()
+
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	module := buildRejectFixture(t)
+
+	targets := []link.LinkTarget{
+		{
+			Name:     "svc",
+			Protocol: "http",
+			Host:     host,
+			Interceptors: []link.InterceptorConfig{
+				{Type: "wasm", Config: map[string]interface{}{"module": module, "phase": "inbound"}},
+			},
+		},
+	}
+	store := link.NewTargetStore(targets)
+	icRegistry := linkinterceptor.NewRegistry(nil, slog.Default())
+	defer func() { _ = icRegistry.Close() }()
+	if err := icRegistry.Load(context.Background(), targets); err != nil {
+		t.Fatalf("load interceptor chains: %v", err)
+	}
+
+	metrics := link.NewMetrics(prometheus.NewRegistry())
+	handler := NewHandler(Config{Targets: store, Metrics: metrics, Interceptors: icRegistry})
+
+	req := httptest.NewRequest("POST", "/link/svc/x", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+	if got := rejectionCount(t, metrics, "svc", "POST", "200"); got != 0 {
+		t.Fatalf("the rewritten response must not be counted as 200, got %v", got)
+	}
+	if got := rejectionCount(t, metrics, "svc", "POST", "401"); got != 1 {
+		t.Fatalf("expected the final 401 to be recorded once, got %v", got)
 	}
 }
