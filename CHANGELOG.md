@@ -10,6 +10,14 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Security
+
+- **google.golang.org/grpc 1.82.1 → 1.83.2** — closes GO-2026-6443 (server
+  panic on a missing `:authority`/`Host` header, reachable through the gRPC
+  source) and GO-2026-6348 (heap exhaustion via HTTP/2 DATA frame
+  fragmentation, reachable through the gRPC sink). No Fiso behavior changes;
+  the bump carries grpc's own minimum `golang.org/x/*` versions.
+
 ## [0.22.0] — 2026-09-02
 
 ### Added
