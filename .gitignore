@@ -6,6 +6,6 @@ tmp/
 coverage.html
 
 # Build artifacts
-fiso-flow
-fiso-link
-fiso-operator
+/fiso-flow
+/fiso-link
+/fiso-operator
