@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
@@ -22,10 +25,38 @@ var wasmModulePath = filepath.Join("..", "..", "internal", "interceptor", "wasm"
 
 // build runs the default builder with throwaway dependencies. Each call gets
 // its own HTTP server pool so path reservations cannot collide across cases.
+//
+// A constructed pipeline owns real resources — a Temporal connection, gRPC
+// client connections, Kafka clients, a wazero runtime — that only Shutdown
+// releases, so every successful build is closed during cleanup. Without it a
+// -count=N run would accumulate connections, goroutines and runtime memory.
 func build(t *testing.T, flowDef *config.FlowDefinition) (*pipeline.Pipeline, error) {
 	t.Helper()
 	logger := slog.Default()
-	return buildPipeline(flowDef, logger, httpsource.NewServerPool(logger), noop.NewTracerProvider().Tracer("test"))
+	p, err := buildPipeline(flowDef, logger, httpsource.NewServerPool(logger), noop.NewTracerProvider().Tracer("test"))
+	if p != nil {
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := p.Shutdown(ctx); err != nil {
+				t.Errorf("pipeline shutdown: %v", err)
+			}
+		})
+	}
+	return p, err
+}
+
+// assertCoversSupportedTypes fails when the cases under test are not exactly
+// the set validation accepts. Hard-coded tables would not notice a type added
+// to the validator later: every existing case would still pass while the new
+// value went unbuilt, which is the validator/runtime drift ADR 0003 exists to
+// prevent. Enumerating the validator's own set makes that addition fail here.
+func assertCoversSupportedTypes(t *testing.T, kind string, tested []string, supported []string) {
+	t.Helper()
+	slices.Sort(tested)
+	if !slices.Equal(tested, supported) {
+		t.Fatalf("%s cases %v do not match the types validation accepts %v: every supported value needs construction evidence (ADR 0003)", kind, tested, supported)
+	}
 }
 
 // testKafkaClusters returns the named cluster the kafka source and sink cases
@@ -83,6 +114,12 @@ func TestBuildPipeline_SupportedSourceTypes(t *testing.T) {
 		},
 	}
 
+	tested := make([]string, 0, len(tests))
+	for _, tt := range tests {
+		tested = append(tested, tt.source.Type)
+	}
+	assertCoversSupportedTypes(t, "source", tested, config.SupportedSourceTypes())
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			flowDef := &config.FlowDefinition{
@@ -139,6 +176,12 @@ func TestBuildPipeline_SupportedSinkTypes(t *testing.T) {
 			}},
 		},
 	}
+
+	tested := make([]string, 0, len(tests))
+	for _, tt := range tests {
+		tested = append(tested, tt.sink.Type)
+	}
+	assertCoversSupportedTypes(t, "sink", tested, config.SupportedSinkTypes())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -270,6 +313,12 @@ func TestBuildPipeline_SupportedInterceptorTypes(t *testing.T) {
 			interceptor: config.InterceptorConfig{Type: "grpc", Config: map[string]interface{}{"address": "127.0.0.1:19091"}},
 		},
 	}
+
+	tested := make([]string, 0, len(tests))
+	for _, tt := range tests {
+		tested = append(tested, tt.interceptor.Type)
+	}
+	assertCoversSupportedTypes(t, "interceptor", tested, config.SupportedInterceptorTypes())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

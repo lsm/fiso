@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2098,5 +2099,44 @@ func TestFlowDefinition_ValidateLinkAddrEmptyDelimiters(t *testing.T) {
 		if err := flow.Validate(); err == nil {
 			t.Errorf("linkAddr %q must be rejected", addr)
 		}
+	}
+}
+
+// TestSupportedTypeAccessors pins that the exported sets stay in step with
+// the maps Validate consults. The builder conformance tests enumerate these
+// accessors to prove validation and the shipped runtime path agree (ADR
+// 0003), so an accessor that under-reports would silently narrow that proof.
+func TestSupportedTypeAccessors(t *testing.T) {
+	tests := []struct {
+		name string
+		got  []string
+		set  map[string]bool
+	}{
+		{"source", SupportedSourceTypes(), validSourceTypes},
+		{"sink", SupportedSinkTypes(), validSinkTypes},
+		{"interceptor", SupportedInterceptorTypes(), validInterceptorTypes},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.got) != len(tt.set) {
+				t.Fatalf("accessor returned %d types, validator accepts %d: %v", len(tt.got), len(tt.set), tt.got)
+			}
+			for i, name := range tt.got {
+				if !tt.set[name] {
+					t.Errorf("accessor reports %q, which the validator does not accept", name)
+				}
+				if i > 0 && tt.got[i-1] >= name {
+					t.Errorf("accessor must return sorted types, got %v", tt.got)
+				}
+			}
+			// Every accepted type must round-trip through the validator, so a
+			// type added to the map cannot be omitted from the accessor.
+			for name := range tt.set {
+				if !slices.Contains(tt.got, name) {
+					t.Errorf("validator accepts %q but the accessor omits it", name)
+				}
+			}
+		})
 	}
 }
