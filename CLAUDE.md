@@ -26,11 +26,13 @@ Test:
 ```bash
 make test                                              # -race + coverage, excludes ./cmd/ and ./test/e2e/
 go test -race ./internal/pipeline/... -run TestName     # one test
-go test -count=1 ./cmd/fiso-flow/...                   # builder conformance tests (cmd/ is not in make test)
+go test -count=1 ./cmd/fiso-flow/...                   # cmd/ is excluded from make test; today this is only the Temporal credential test
 go test -tags wasmer -count=1 ./cmd/fiso-flow-wasmer/... ./cmd/fiso-wasmer-aio/... ./cmd/fiso-wasmer/... ./cmd/fiso-wasmer-link/... ./internal/wasmer/... ./internal/wasm/...
 make test-integration                                  # -tags integration; needs Kafka at $KAFKA_BROKERS (default localhost:9092)
 make coverage-check                                    # 95% locally (CI gates at 94.5%)
 ```
+
+Only the Wasmer-tagged binaries have `buildPipeline` construction tests (`cmd/fiso-flow-wasmer/main_test.go`, `cmd/fiso-wasmer-aio/main_test.go`). `cmd/fiso-flow` has no test that calls its builder, so a supported type missing from the default builder still compiles and passes every unit job; only E2E catches it. Add a test alongside the change rather than assuming that command covers you.
 
 Lint and hygiene (CI uses golangci-lint v2.8.0; there is no `.golangci.yml`):
 
@@ -57,8 +59,9 @@ Per CONTRIBUTING.md there is no single local command equivalent to the CI gate; 
 
 **Flow builders are duplicated on purpose.** `buildPipeline` in `cmd/fiso-flow/main.go`, `cmd/fiso-flow-wasmer/main.go`, and `cmd/fiso-wasmer-aio/main.go` each contain the full source/sink/interceptor type switch. ADR 0003 says an integration value is supported only when validation, the shipped runtime paths that share that validator, the applicable public schema, the docs, and a CI test all agree; changing one in isolation is a defect. The surfaces differ per value:
 
-- Flow source or sink type: `internal/config.(*FlowDefinition).Validate`, all three builders, the operator's flow validation in `internal/operator/reconciler.go`, the `FlowDefinition` CRD enum in `deploy/crds/`, README, and the `main_test.go` conformance tests.
-- Flow interceptor type: the validator, all three builders, and README. The v1alpha1 `FlowDefinition` has no interceptor field, and `internal/cli/export.go` deliberately rejects flows with interceptors or an HTTP source as unrepresentable.
+- Flow sink type: `internal/config.(*FlowDefinition).Validate`, all three builders, `ValidateFlowSpec` in `internal/operator/reconciler.go`, the `FlowDefinition` CRD sink enum in `deploy/crds/`, README, and the Wasmer `main_test.go` construction tests. All four sink surfaces currently agree on `http`, `grpc`, `temporal`, `kafka`.
+- Flow source type: the same surfaces, but only `kafka` and `grpc` are CRD-representable. The HTTP source is deliberately local-only: the CRD source enum omits it and `validateExportableFlow` in `internal/cli/export.go` rejects it as unrepresentable, so a change to the HTTP source must not touch the CRD enum. Note `ValidateFlowSpec` still accepts `http` even though the CRD enum rejects it; reconciling that mismatch in either direction changes the public Kubernetes contract and needs its own ADR.
+- Flow interceptor type: the validator, all three builders, and README. The v1alpha1 `FlowDefinition` has no interceptor field, and `internal/cli/export.go` deliberately rejects flows with interceptors as unrepresentable.
 - Link protocol: `internal/link/config.go` validation, the Link proxy, the operator's LinkTarget validation, the `LinkTarget` CRD enum, and README. Link protocols never pass through the Flow validator or builders.
 
 **Interceptor contract.** `internal/interceptor.Interceptor` processes a `Request` (payload + headers + direction) and may return `*RejectedError` (ADR 0007). A rejection is terminal: no retry, no DLQ. The HTTP source answers with the exact status and reason; the gRPC source translates the status to the nearest gRPC code (for example 401 to `Unauthenticated`) and keeps the reason. Implementations live in `internal/interceptor/wasm` and `internal/interceptor/grpc`; Link has its own registry in `internal/link/interceptor`. Guest env vars arrive through `interceptors[].config.env` (ADR 0008) and must be delivered on both runtimes and in every Flow binary.
