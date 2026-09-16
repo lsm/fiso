@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,30 @@ var (
 	validSinkTypes        = map[string]bool{"http": true, "grpc": true, "temporal": true, "kafka": true}
 	validInterceptorTypes = map[string]bool{"wasm": true, "grpc": true}
 )
+
+// SupportedSourceTypes returns every source type validation accepts, sorted.
+//
+// ADR 0003 makes a value supported only when validation and the shipped
+// runtime path agree, so the builder conformance tests enumerate these sets
+// rather than restating them: a type added here without a matching builder
+// case fails those tests instead of reaching users unexecutable.
+func SupportedSourceTypes() []string { return sortedTypes(validSourceTypes) }
+
+// SupportedSinkTypes returns every sink type validation accepts, sorted.
+func SupportedSinkTypes() []string { return sortedTypes(validSinkTypes) }
+
+// SupportedInterceptorTypes returns every interceptor type validation
+// accepts, sorted.
+func SupportedInterceptorTypes() []string { return sortedTypes(validInterceptorTypes) }
+
+func sortedTypes(set map[string]bool) []string {
+	types := make([]string, 0, len(set))
+	for name := range set {
+		types = append(types, name)
+	}
+	sort.Strings(types)
+	return types
+}
 
 // Validate checks the FlowDefinition for configuration errors.
 // Returns all errors found, not just the first.
