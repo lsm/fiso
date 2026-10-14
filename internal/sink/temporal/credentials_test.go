@@ -305,7 +305,7 @@ func extractCallbackFromCredentials(t *testing.T, creds client.Credentials) func
 	v := reflect.ValueOf(creds)
 
 	// Dereference pointer if needed
-	for v.Kind() == reflect.Ptr {
+	for v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 

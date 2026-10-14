@@ -90,14 +90,14 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.8.0
+          version: v2.14.0
 
       - name: golangci-lint (wasmer-tagged code)
         # Default tags hide every //go:build wasmer file from lint; run a
         # second pass so that surface is linted too.
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.8.0
+          version: v2.14.0
           args: --build-tags=wasmer ./cmd/... ./internal/wasmer/... ./internal/wasm/...
 
   checks:

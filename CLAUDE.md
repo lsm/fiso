@@ -32,9 +32,9 @@ make test-integration                                  # -tags integration; need
 make coverage-check                                    # 95% locally (CI gates at 94.5%)
 ```
 
-All three Flow binaries now have `buildPipeline` construction tests (`cmd/fiso-flow/main_test.go`, `cmd/fiso-flow-wasmer/main_test.go`, `cmd/fiso-wasmer-aio/main_test.go`), which pin each supported source, sink and interceptor value per ADR 0003. `make test` excludes `./cmd/`, so run those packages explicitly when you touch a builder.
+All three Flow binaries have `buildPipeline` construction tests (`cmd/fiso-flow/main_test.go`, `cmd/fiso-flow-wasmer/main_test.go`, `cmd/fiso-wasmer-aio/main_test.go`), but only the default binary's are exhaustive: they enumerate every value against `config.SupportedSourceTypes` / `SupportedSinkTypes` / `SupportedInterceptorTypes` per ADR 0003, so a type added to the validator without a builder case fails there. The Wasmer ones cover gRPC sink variants, a gRPC interceptor and the unsupported-interceptor case only. `make test` excludes `./cmd/`, so run those packages explicitly when you touch a builder.
 
-Lint and hygiene (CI uses golangci-lint v2.8.0; there is no `.golangci.yml`):
+Lint and hygiene (CI uses golangci-lint v2.14.0; there is no `.golangci.yml`):
 
 ```bash
 make lint                          # two passes: default tags, then --build-tags=wasmer on cmd/, internal/wasm, internal/wasmer
