@@ -1,6 +1,6 @@
 module github.com/lsm/fiso/test/e2e/kafka-link
 
-go 1.23
+go 1.26
 
 require (
 	github.com/twmb/franz-go v1.16.0

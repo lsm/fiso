@@ -25,6 +25,9 @@ unreleased work and will be versioned when a release tag is cut.
   scaffold templates and the E2E fixture modules move to the 1.26 base
   image and language version too, so a newly scaffolded project no
   longer builds on a Go line with these advisories.
+  [ADR 0009](docs/adr/0009-track-supported-go-lines.md) records when a
+  security fix may raise the minimum Go version and what must move with
+  it.
 
 - **google.golang.org/grpc 1.82.1 → 1.83.2** — closes GO-2026-6443 (server
   panic on a missing `:authority`/`Host` header, reachable through the gRPC

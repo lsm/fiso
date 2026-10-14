@@ -72,7 +72,7 @@ services:
 
   # Test runner
   test-runner:
-    image: golang:1.23-alpine
+    image: golang:1.26-alpine
     hostname: test-runner
     container_name: test-runner
     volumes:
