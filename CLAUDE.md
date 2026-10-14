@@ -26,13 +26,13 @@ Test:
 ```bash
 make test                                              # -race + coverage, excludes ./cmd/ and ./test/e2e/
 go test -race ./internal/pipeline/... -run TestName     # one test
-go test -count=1 ./cmd/fiso-flow/...                   # cmd/ is excluded from make test; today this is only the Temporal credential test
+go test -count=1 ./cmd/fiso-flow/...                   # builder construction tests; cmd/ is excluded from make test
 go test -tags wasmer -count=1 ./cmd/fiso-flow-wasmer/... ./cmd/fiso-wasmer-aio/... ./cmd/fiso-wasmer/... ./cmd/fiso-wasmer-link/... ./internal/wasmer/... ./internal/wasm/...
 make test-integration                                  # -tags integration; needs Kafka at $KAFKA_BROKERS (default localhost:9092)
 make coverage-check                                    # 95% locally (CI gates at 94.5%)
 ```
 
-Only the Wasmer-tagged binaries have `buildPipeline` construction tests (`cmd/fiso-flow-wasmer/main_test.go`, `cmd/fiso-wasmer-aio/main_test.go`). `cmd/fiso-flow` has no test that calls its builder, so a supported type missing from the default builder still compiles and passes every unit job; only E2E catches it. Add a test alongside the change rather than assuming that command covers you.
+All three Flow binaries now have `buildPipeline` construction tests (`cmd/fiso-flow/main_test.go`, `cmd/fiso-flow-wasmer/main_test.go`, `cmd/fiso-wasmer-aio/main_test.go`), which pin each supported source, sink and interceptor value per ADR 0003. `make test` excludes `./cmd/`, so run those packages explicitly when you touch a builder.
 
 Lint and hygiene (CI uses golangci-lint v2.8.0; there is no `.golangci.yml`):
 
