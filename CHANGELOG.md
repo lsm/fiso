@@ -10,6 +10,8 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-10-14
+
 ### Security
 
 - **Go 1.26.9 and dependency bumps** — the pinned Go toolchain moves from
@@ -345,7 +347,8 @@ unreleased work and will be versioned when a release tag is cut.
 
 ---
 
-[Unreleased]: https://github.com/lsm/fiso/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/lsm/fiso/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/lsm/fiso/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/lsm/fiso/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/lsm/fiso/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/lsm/fiso/compare/v0.19.0...v0.20.0
