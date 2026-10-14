@@ -1,5 +1,5 @@
 # Flow + Wasmer-enabled build (requires CGO/glibc)
-FROM golang:1.25-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 # Install build dependencies for CGO/llvm (Wasmer requires CGO + glibc)
 RUN apt-get update && apt-get install -y --no-install-recommends \

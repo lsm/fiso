@@ -1,6 +1,6 @@
 module temporal-worker
 
-go 1.25
+go 1.26
 
 require go.temporal.io/sdk v1.39.0
 

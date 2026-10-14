@@ -1,6 +1,6 @@
 module user-service
 
-go 1.23
+go 1.26
 
 require github.com/twmb/franz-go v1.18.0
 

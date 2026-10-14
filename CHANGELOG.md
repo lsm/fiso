@@ -12,6 +12,23 @@ unreleased work and will be versioned when a release tag is cut.
 
 ### Security
 
+- **Go 1.26.9 and dependency bumps** — the pinned Go toolchain moves from
+  1.25.14 to 1.26.9, clearing nine standard-library advisories reachable
+  from the gRPC source, the HTTP sink, and Link's proxy (HTTP/2 crashes and
+  resource exhaustion in `net/http`, a MIME header memory-limit bypass in
+  `net/textproto`, an ECH parsing defect in `crypto/tls`, and two
+  `html/template` context-tracking defects). `golang.org/x/net` goes to
+  v0.60.0 for the same HTTP/2 family, and the OpenTelemetry modules to
+  v1.45.0 for GO-2026-6505, where exporter config logging could leak
+  endpoint URLs. `govulncheck` now reports no affected code on either tag
+  set. Building Fiso now requires Go 1.26.9 or newer. The `fiso init`
+  scaffold templates and the E2E fixture modules move to the 1.26 base
+  image and language version too, so a newly scaffolded project no
+  longer builds on a Go line with these advisories.
+  [ADR 0009](docs/adr/0009-track-supported-go-lines.md) records when a
+  security fix may raise the minimum Go version and what must move with
+  it.
+
 - **google.golang.org/grpc 1.82.1 → 1.83.2** — closes GO-2026-6443 (server
   panic on a missing `:authority`/`Host` header, reachable through the gRPC
   source) and GO-2026-6348 (heap exhaustion via HTTP/2 DATA frame

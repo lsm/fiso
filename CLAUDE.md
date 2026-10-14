@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Fiso is
 
-Go module `github.com/lsm/fiso` (Go 1.25, no CGO by default). Fiso is an application-boundary sidecar made of three runtime components plus a CLI:
+Go module `github.com/lsm/fiso` (Go 1.26, no CGO by default). Fiso is an application-boundary sidecar made of three runtime components plus a CLI:
 
 - **Fiso-Flow** (`cmd/fiso-flow`) — inbound pipeline: HTTP / Kafka / gRPC source → interceptor chain (runs on the raw event, before any parsing) → transform (CEL-compiled `fields`) → CloudEvent envelope → HTTP / gRPC / Temporal / Kafka sink. Only Kafka-source flows get a real dead-letter topic; every builder gives HTTP and gRPC sources `dlq.NoopPublisher`, which discards the failed event and reports success.
 - **Fiso-Link** (`cmd/fiso-link`) — outbound proxy the app calls at `localhost:3500/link/<target>`. Kafka targets branch to the Kafka handler before any credential lookup, so they have no auth-provider step. HTTP targets run circuit-breaker check → fetch provider credentials → outbound interceptors → retry loop, and the credential headers are injected inside each retry attempt after the interceptor has run, so interceptors never see injected credentials. Rate limiting is per target.
@@ -26,15 +26,15 @@ Test:
 ```bash
 make test                                              # -race + coverage, excludes ./cmd/ and ./test/e2e/
 go test -race ./internal/pipeline/... -run TestName     # one test
-go test -count=1 ./cmd/fiso-flow/...                   # cmd/ is excluded from make test; today this is only the Temporal credential test
+go test -count=1 ./cmd/fiso-flow/...                   # builder construction tests; cmd/ is excluded from make test
 go test -tags wasmer -count=1 ./cmd/fiso-flow-wasmer/... ./cmd/fiso-wasmer-aio/... ./cmd/fiso-wasmer/... ./cmd/fiso-wasmer-link/... ./internal/wasmer/... ./internal/wasm/...
 make test-integration                                  # -tags integration; needs Kafka at $KAFKA_BROKERS (default localhost:9092)
 make coverage-check                                    # 95% locally (CI gates at 94.5%)
 ```
 
-Only the Wasmer-tagged binaries have `buildPipeline` construction tests (`cmd/fiso-flow-wasmer/main_test.go`, `cmd/fiso-wasmer-aio/main_test.go`). `cmd/fiso-flow` has no test that calls its builder, so a supported type missing from the default builder still compiles and passes every unit job; only E2E catches it. Add a test alongside the change rather than assuming that command covers you.
+All three Flow binaries have `buildPipeline` construction tests (`cmd/fiso-flow/main_test.go`, `cmd/fiso-flow-wasmer/main_test.go`, `cmd/fiso-wasmer-aio/main_test.go`), but only the default binary's are exhaustive: they enumerate every value against `config.SupportedSourceTypes` / `SupportedSinkTypes` / `SupportedInterceptorTypes` per ADR 0003, so a type added to the validator without a builder case fails there. The Wasmer ones cover gRPC sink variants, a gRPC interceptor and the unsupported-interceptor case only. `make test` excludes `./cmd/`, so run those packages explicitly when you touch a builder.
 
-Lint and hygiene (CI uses golangci-lint v2.8.0; there is no `.golangci.yml`):
+Lint and hygiene (CI uses golangci-lint v2.14.0; there is no `.golangci.yml`):
 
 ```bash
 make lint                          # two passes: default tags, then --build-tags=wasmer on cmd/, internal/wasm, internal/wasmer
