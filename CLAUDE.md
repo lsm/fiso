@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Fiso is
 
-Go module `github.com/lsm/fiso` (Go 1.25, no CGO by default). Fiso is an application-boundary sidecar made of three runtime components plus a CLI:
+Go module `github.com/lsm/fiso` (Go 1.26, no CGO by default). Fiso is an application-boundary sidecar made of three runtime components plus a CLI:
 
 - **Fiso-Flow** (`cmd/fiso-flow`) — inbound pipeline: HTTP / Kafka / gRPC source → interceptor chain (runs on the raw event, before any parsing) → transform (CEL-compiled `fields`) → CloudEvent envelope → HTTP / gRPC / Temporal / Kafka sink. Only Kafka-source flows get a real dead-letter topic; every builder gives HTTP and gRPC sources `dlq.NoopPublisher`, which discards the failed event and reports success.
 - **Fiso-Link** (`cmd/fiso-link`) — outbound proxy the app calls at `localhost:3500/link/<target>`. Kafka targets branch to the Kafka handler before any credential lookup, so they have no auth-provider step. HTTP targets run circuit-breaker check → fetch provider credentials → outbound interceptors → retry loop, and the credential headers are injected inside each retry attempt after the interceptor has run, so interceptors never see injected credentials. Rate limiting is per target.

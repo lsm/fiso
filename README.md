@@ -1857,7 +1857,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the proposal, decision, verification,
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - Docker
 
 ### Build

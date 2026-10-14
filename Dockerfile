@@ -1,5 +1,5 @@
 # Builds fiso-flow only. See Dockerfile.{flow,link,operator} for per-component builds.
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 
