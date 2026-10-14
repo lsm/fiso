@@ -23,8 +23,6 @@ unreleased work and will be versioned when a release tag is cut.
   endpoint URLs. `govulncheck` now reports no affected code on either tag
   set. Building Fiso now requires Go 1.26.9 or newer.
 
-### Security
-
 - **google.golang.org/grpc 1.82.1 → 1.83.2** — closes GO-2026-6443 (server
   panic on a missing `:authority`/`Host` header, reachable through the gRPC
   source) and GO-2026-6348 (heap exhaustion via HTTP/2 DATA frame
