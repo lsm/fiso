@@ -1,6 +1,23 @@
 # Fiso
 
-Cloud-native event mediation runtime that helps decouple application business logic from external infrastructure dependencies. Fiso standardizes supported inbound event paths via **Fiso-Flow** and mediates configured outbound dependencies via **Fiso-Link**, managed at scale by the **Fiso-Operator**.
+Fiso is an isolation layer between your application and the systems around it: a cloud-native event mediation runtime where supported enterprise systems can change underneath while business applications keep stable local interfaces. **Fiso-Flow** standardizes supported inbound event paths, **Fiso-Link** mediates configured outbound dependencies, and the **Fiso-Operator** manages both at scale on Kubernetes.
+
+![Fiso isolation layer: Fiso-Flow mediates inbound events, Fiso-Link mediates outbound calls](docs/isolation-layer.svg)
+
+**Who it's for.** Teams building event-driven services that consume Kafka, HTTP, or gRPC traffic and call external HTTP APIs or Kafka. The application-facing surface is plain HTTP — CloudEvents delivery on one side, `localhost:3500/link/{target}` on the other — so applications can be written in any language; the scaffolded service template and WASM interceptors (Go, Rust, TinyGo, C) make Go the most direct path.
+
+**Try it** (Docker required):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lsm/fiso/main/install.sh | sh
+mkdir my-project && cd my-project
+fiso init --defaults
+fiso dev --docker
+curl -X POST http://localhost:8081/ingest -H "Content-Type: application/json" \
+  -d '{"order_id": "12345", "amount": 99.99}'
+```
+
+`fiso init --defaults` scaffolds an HTTP → HTTP project and `fiso dev --docker` runs the whole stack in containers; the event travels `curl → fiso-flow(:8081) → user-service → fiso-link(:3500) → external-api`. The [Quick Start](#quick-start) below covers hybrid mode, Kafka sources, Temporal sinks, validation, and diagnostics.
 
 ## Why Fiso
 

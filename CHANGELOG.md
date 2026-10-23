@@ -10,6 +10,12 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Docs
+
+- **README** — the README now opens with what Fiso is, who it is for,
+  and a minimal try-it path (build, run, health check), with a new
+  overview diagram (`docs/isolation-layer.svg`).
+
 ### Security
 
 - **Go 1.26.10** — raises the minimum Go version from 1.26.9 to 1.26.10
