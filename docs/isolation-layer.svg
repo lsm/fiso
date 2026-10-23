@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 440" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1040" height="440" fill="#ffffff"/>
+
+  <!-- External systems -->
+  <rect x="16" y="100" width="170" height="190" rx="12" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1.5"/>
+  <text x="101" y="126" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">Enterprise systems</text>
+  <text x="101" y="152" text-anchor="middle" font-size="11" fill="#57606a">Kafka</text>
+  <text x="101" y="172" text-anchor="middle" font-size="11" fill="#57606a">HTTP / gRPC services</text>
+  <text x="101" y="192" text-anchor="middle" font-size="11" fill="#57606a">Temporal</text>
+  <text x="101" y="212" text-anchor="middle" font-size="11" fill="#57606a">external HTTP APIs</text>
+
+  <!-- Fiso container -->
+  <rect x="310" y="48" width="420" height="352" rx="12" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="520" y="74" text-anchor="middle" font-size="15" font-weight="700" fill="#0969da">Fiso runtime</text>
+
+  <!-- Fiso-Flow -->
+  <rect x="330" y="92" width="380" height="104" rx="8" fill="#ffffff" stroke="#54aeff" stroke-width="1.2"/>
+  <text x="520" y="116" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">Fiso-Flow &#183; inbound</text>
+  <text x="520" y="138" text-anchor="middle" font-size="12" fill="#1f2328">source &#8594; transform &#8594; CloudEvents &#8594; sink</text>
+  <text x="520" y="158" text-anchor="middle" font-size="11" fill="#57606a">fields/CEL transforms &#183; WASM interceptors &#183; DLQ</text>
+
+  <!-- Fiso-Link -->
+  <rect x="330" y="232" width="380" height="104" rx="8" fill="#ffffff" stroke="#54aeff" stroke-width="1.2"/>
+  <text x="520" y="256" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">Fiso-Link &#183; outbound</text>
+  <text x="520" y="278" text-anchor="middle" font-size="12" fill="#1f2328">circuit breaker &#8594; auth (HTTP) &#8594; retry &#8594; proxy</text>
+  <text x="520" y="298" text-anchor="middle" font-size="11" fill="#57606a">HTTP and Kafka targets &#183; localhost:3500/link/{target}</text>
+
+  <!-- Fiso-Operator -->
+  <rect x="330" y="352" width="380" height="32" rx="8" fill="#ffffff" stroke="#54aeff" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="520" y="372" text-anchor="middle" font-size="11" fill="#1f2328">Fiso-Operator &#183; FlowDefinition / LinkTarget CRDs &#183; sidecar injection</text>
+
+  <!-- Application -->
+  <rect x="854" y="100" width="170" height="190" rx="12" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1.5"/>
+  <text x="939" y="126" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">Your application</text>
+  <text x="939" y="152" text-anchor="middle" font-size="11" fill="#57606a">business logic only</text>
+  <text x="939" y="172" text-anchor="middle" font-size="11" fill="#57606a">no broker clients</text>
+  <text x="939" y="192" text-anchor="middle" font-size="11" fill="#57606a">no vendor SDKs</text>
+  <line x1="874" y1="206" x2="1004" y2="206" stroke="#d0d7de" stroke-width="1"/>
+  <text x="939" y="228" text-anchor="middle" font-size="11" fill="#57606a">receives CloudEvents</text>
+  <text x="939" y="248" text-anchor="middle" font-size="11" fill="#57606a">calls localhost:3500</text>
+  <text x="939" y="264" text-anchor="middle" font-size="11" fill="#57606a">/link/{target}</text>
+
+  <!-- Inbound arrows -->
+  <line x1="190" y1="140" x2="304" y2="140" stroke="#57606a" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="247" y="160" text-anchor="middle" font-size="11" fill="#57606a">HTTP &#183; Kafka &#183; gRPC</text>
+  <line x1="736" y1="140" x2="850" y2="140" stroke="#57606a" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="793" y="160" text-anchor="middle" font-size="11" fill="#57606a">CloudEvents</text>
+
+  <!-- Outbound arrows -->
+  <line x1="850" y1="280" x2="736" y2="280" stroke="#57606a" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="793" y="302" text-anchor="middle" font-size="11" fill="#57606a">localhost:3500</text>
+  <text x="793" y="318" text-anchor="middle" font-size="11" fill="#57606a">/link/{target}</text>
+  <line x1="334" y1="280" x2="200" y2="280" stroke="#57606a" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="266" y="302" text-anchor="middle" font-size="11" fill="#57606a">HTTP &#183; Kafka</text>
+
+  <!-- Footnote -->
+  <text x="520" y="428" text-anchor="middle" font-size="11" font-style="italic" fill="#57606a">Enterprise systems change underneath &#8212; the application-facing interfaces stay stable.</text>
+</svg>
