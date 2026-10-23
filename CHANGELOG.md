@@ -10,6 +10,12 @@ unreleased work and will be versioned when a release tag is cut.
 
 ## [Unreleased]
 
+### Security
+
+- **Go 1.26.10** — raises the minimum Go version from 1.26.9 to 1.26.10
+  to fix [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809) in
+  the standard library’s `crypto/x509` package.
+
 ## [0.23.0] — 2026-10-14
 
 ### Security
